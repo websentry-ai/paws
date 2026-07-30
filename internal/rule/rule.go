@@ -4,7 +4,9 @@ package rule
 import (
 	"bytes"
 	"fmt"
+	"path/filepath"
 	"regexp"
+	"strings"
 
 	"gopkg.in/yaml.v3"
 )
@@ -78,8 +80,17 @@ func Parse(data []byte, path string) (*Rule, error) {
 	if r.Action.Type == "require-skill" && r.Action.Skill == "" {
 		return nil, fmt.Errorf("require-skill needs a skill")
 	}
-	if r.Action.Type == "exec-script" && r.Action.Script == "" {
-		return nil, fmt.Errorf("exec-script needs a script path")
+	if r.Action.Type == "exec-script" {
+		if r.Action.Script == "" {
+			return nil, fmt.Errorf("exec-script needs a script path")
+		}
+		// Scripts run with full shell trust, same as the rule file itself — but the
+		// path must stay inside the rule's own directory tree, not point anywhere
+		// on disk, so `paws explain`/review of a .paws/ dir sees everything it runs.
+		clean := filepath.Clean(r.Action.Script)
+		if filepath.IsAbs(clean) || clean == ".." || strings.HasPrefix(clean, ".."+string(filepath.Separator)) {
+			return nil, fmt.Errorf("exec-script script must be a relative path inside the rule's directory, got %q", r.Action.Script)
+		}
 	}
 	if r.Action.Type == "prompt-inject" {
 		if Kind(r.Event) != KindPrompt {

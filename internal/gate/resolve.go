@@ -84,8 +84,9 @@ func evaluate(r *rule.Rule, ev Event) outcome {
 	case "block":
 		return outcome{verdict: Deny, reason: msgOr(a.DenyMessage, fmt.Sprintf("Blocked by paws rule %q.", r.Name)), fired: true}
 	case "require-skill":
+		// No compliance tracking yet: this denies every retry unconditionally, even after the skill is loaded.
 		return outcome{verdict: DenyRetry, reason: msgOr(a.DenyMessage,
-			fmt.Sprintf("This action requires the %q skill. Load it (read its SKILL.md), then retry the exact same command.", a.Skill)), fired: true}
+			fmt.Sprintf("This action requires the %q skill. Load it (read its SKILL.md) for context — paws still denies an automated retry of this exact command; a human needs to run it directly.", a.Skill)), fired: true}
 	case "require-approval":
 		return outcome{verdict: Ask, reason: msgOr(a.DenyMessage, fmt.Sprintf("paws rule %q requires approval before this runs.", r.Name)), fired: true}
 	case "warn":

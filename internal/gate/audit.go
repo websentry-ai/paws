@@ -41,10 +41,11 @@ func logAudit(ev Event, r *rule.Rule, oc outcome) {
 		"source":  r.SourcePath,
 		"session": ev.Session,
 	})
-	if err != nil || os.MkdirAll(filepath.Dir(path), 0o755) != nil {
+	// 0600/0700: the log holds raw matched command/prompt text, which can carry secrets.
+	if err != nil || os.MkdirAll(filepath.Dir(path), 0o700) != nil {
 		return
 	}
-	f, err := os.OpenFile(path, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o644)
+	f, err := os.OpenFile(path, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o600)
 	if err != nil {
 		return
 	}

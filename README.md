@@ -31,11 +31,11 @@ name: aws-tagging
 event: pre-tool
 matcher:
   tool: Bash
-  command_regex: ^(aws (ec2 run-instances|s3 mb)|terraform apply)
+  command_regex: (^|[;&|])\s*(aws (ec2 run-instances|s3 mb)|terraform apply)
 action:
   type: require-skill
   skill: aws-tagging-standards
-  deny_message: Load aws-tagging-standards, read its SKILL.md, then retry.
+  deny_message: Load aws-tagging-standards and read its SKILL.md for context.
 ---
 # AWS Tagging Hook
 Ensures every AWS resource carries Owner/Environment/ManagedBy tags.
@@ -48,7 +48,10 @@ Bash-only, matches `git commit` / `git push`), `user-prompt` (prompt submit).
 `Glob`, `WebFetch`, `WebSearch`, `mcp__<server>__<tool>`, ...), a `A|B` pipe
 list, or omitted/`"*"` (must be quoted in YAML) for any tool. `command_regex`
 matches against the Bash command, file path, URL, or prompt text, depending
-on the event.
+on the event. It's a regex against literal text, not a shell parser — it
+won't see through chaining, quoting, or substitution. Anchor with
+`(^|[;&|])\s*` (as the built-in git rules do) if a command must be caught
+whether or not it's chained after `cd x &&`, `;`, or `|`.
 
 **Actions:**
 
@@ -64,6 +67,9 @@ on the event.
 
 When several rules match, the most restrictive wins: deny > ask > allow.
 `exec-script` scripts get paws-shaped JSON on stdin and run under a 5s timeout.
+They carry the same trust as any other checked-in repo hook — no sandboxing —
+so `script:` must be a relative path inside the rule's own directory tree;
+absolute paths and `..` are rejected at parse time.
 
 ## Usage
 

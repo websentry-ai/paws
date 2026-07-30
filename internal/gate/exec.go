@@ -21,10 +21,8 @@ func runScript(r *rule.Rule, ev Event) outcome {
 	if DryRun {
 		return outcome{}
 	}
-	script := r.Action.Script
-	if !filepath.IsAbs(script) {
-		script = filepath.Join(filepath.Dir(r.SourcePath), script)
-	}
+	// rule.Parse already rejects absolute paths and ".." escapes, so this stays inside the rule's own directory tree.
+	script := filepath.Join(filepath.Dir(r.SourcePath), r.Action.Script)
 	if _, err := os.Stat(script); err != nil {
 		return outcome{}
 	}

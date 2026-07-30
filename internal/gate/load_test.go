@@ -78,6 +78,22 @@ func TestLoadDirSkipsBadRules(t *testing.T) {
 	}
 }
 
+func TestLoadDirFollowsSymlinkedRoot(t *testing.T) {
+	real := t.TempDir()
+	mustWrite(t, filepath.Join(real, "rule.md"), "---\nname: shared\nevent: pre-tool\naction:\n  type: block\n---\n")
+
+	link := filepath.Join(t.TempDir(), ".paws")
+	if err := os.Symlink(real, link); err != nil {
+		t.Fatal(err)
+	}
+
+	var res Result
+	loadDir(link, &res)
+	if len(res.Rules) != 1 || res.Rules[0].Name != "shared" {
+		t.Fatalf("expected the symlinked dir's rule to load, got %+v (errs: %+v)", res.Rules, res.Errs)
+	}
+}
+
 func TestCollectMergesAllScopes(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("HOME", home)

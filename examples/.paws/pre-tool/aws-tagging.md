@@ -3,11 +3,11 @@ name: aws-tagging
 event: pre-tool
 matcher:
   tool: Bash
-  command_regex: ^(aws (ec2 run-instances|s3 mb)|terraform apply)
+  command_regex: (^|[;&|])\s*(aws (ec2 run-instances|s3 mb)|terraform apply)
 action:
   type: require-skill
   skill: aws-tagging-standards
-  deny_message: Load the aws-tagging-standards skill (read its SKILL.md), then retry the exact same command. Every AWS resource must carry Owner/Environment/ManagedBy tags.
+  deny_message: Load the aws-tagging-standards skill (read its SKILL.md) for the required Owner/Environment/ManagedBy tags — paws still denies an automated retry of this exact command; a human needs to run it directly.
 ---
 # AWS Tagging Hook
 

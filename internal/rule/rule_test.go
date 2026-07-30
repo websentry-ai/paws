@@ -54,6 +54,8 @@ func TestParseValidation(t *testing.T) {
 		{"missing action type", "---\nname: x\nevent: pre-tool\n---\n"},
 		{"unknown action", "---\nname: x\nevent: pre-tool\naction:\n  type: nope\n---\n"},
 		{"require-skill no skill", "---\nname: x\nevent: pre-tool\naction:\n  type: require-skill\n---\n"},
+		{"exec-script absolute path", "---\nname: x\nevent: pre-tool\naction:\n  type: exec-script\n  script: /etc/passwd\n---\n"},
+		{"exec-script traversal", "---\nname: x\nevent: pre-tool\naction:\n  type: exec-script\n  script: ../../etc/passwd\n---\n"},
 		{"bad regex", "---\nname: x\nevent: pre-tool\nmatcher:\n  command_regex: \"([\"\naction:\n  type: block\n---\n"},
 		{"prompt-inject no message", "---\nname: x\nevent: user-prompt\naction:\n  type: prompt-inject\n---\n"},
 		{"prompt-inject on pre-tool", "---\nname: x\nevent: pre-tool\naction:\n  type: prompt-inject\n  message: hi\n---\n"},
@@ -66,6 +68,13 @@ func TestParseValidation(t *testing.T) {
 				t.Fatalf("expected error for %s", c.name)
 			}
 		})
+	}
+}
+
+func TestExecScriptSubdirAllowed(t *testing.T) {
+	r := mustRule(t, "---\nname: x\nevent: pre-tool\naction:\n  type: exec-script\n  script: scripts/foo.sh\n---\n")
+	if r.Action.Script != "scripts/foo.sh" {
+		t.Errorf("expected subdir script path to be accepted, got %q", r.Action.Script)
 	}
 }
 

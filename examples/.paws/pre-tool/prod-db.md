@@ -3,7 +3,7 @@ name: prod-db-approval
 event: pre-tool
 matcher:
   tool: Bash
-  command_regex: psql.*(prod|production)
+  command_regex: (?s)psql.*(prod|production)
 action:
   type: require-approval
   deny_message: "Touching the prod DB needs approval. paws will ask the user to confirm."

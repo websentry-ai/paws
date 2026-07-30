@@ -84,7 +84,13 @@ func hasGit(dir string) bool {
 }
 
 func loadDir(dir string, res *Result) {
-	_ = filepath.WalkDir(dir, func(path string, d fs.DirEntry, err error) error {
+	// WalkDir doesn't follow a symlinked root — resolve it first so a team-shared
+	// .paws directory (a common pattern) doesn't silently load zero rules.
+	root := dir
+	if resolved, err := filepath.EvalSymlinks(dir); err == nil {
+		root = resolved
+	}
+	_ = filepath.WalkDir(root, func(path string, d fs.DirEntry, err error) error {
 		if err != nil || d.IsDir() || filepath.Ext(path) != ".md" {
 			return nil
 		}

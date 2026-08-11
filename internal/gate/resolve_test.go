@@ -22,11 +22,11 @@ func TestResolveSeverity(t *testing.T) {
 
 	block := mustRule(t, "---\nname: b\nevent: pre-tool\naction:\n  type: block\n---\n")
 	skill := mustRule(t, "---\nname: s\nevent: pre-tool\naction:\n  type: require-skill\n  skill: foo\n---\n")
-	approval := mustRule(t, "---\nname: a\nevent: pre-tool\naction:\n  type: require-approval\n---\n")
-	warn := mustRule(t, "---\nname: w\nevent: pre-tool\naction:\n  type: warn\n  message: careful\n---\n")
+	pause := mustRule(t, "---\nname: a\nevent: pre-tool\naction:\n  type: warn\n---\n")
+	audit := mustRule(t, "---\nname: w\nevent: pre-tool\naction:\n  type: audit\n---\n")
 	ev := Event{Kind: rule.KindTool, Tool: "Bash", Target: "x"}
 
-	d := resolve(ev, []*rule.Rule{warn, approval, skill, block})
+	d := resolve(ev, []*rule.Rule{audit, pause, skill, block})
 	if d.Verdict != Deny {
 		t.Fatalf("expected Deny, got %+v", d)
 	}
@@ -34,20 +34,14 @@ func TestResolveSeverity(t *testing.T) {
 		t.Errorf("block message should win, got %q", d.Reason)
 	}
 
-	d = resolve(ev, []*rule.Rule{warn, approval})
+	d = resolve(ev, []*rule.Rule{audit, pause})
 	if d.Verdict != Ask {
 		t.Fatalf("expected Ask, got %+v", d)
 	}
-	if !strings.Contains(d.Context, "careful") {
-		t.Errorf("warn context should ride with ask, got %q", d.Context)
-	}
 
-	d = resolve(ev, []*rule.Rule{warn})
-	if d.Verdict != Allow {
-		t.Fatalf("warn must allow + context, got %+v", d)
-	}
-	if !strings.Contains(d.Context, "careful") {
-		t.Errorf("warn context missing: %q", d.Context)
+	d = resolve(ev, []*rule.Rule{audit})
+	if d.Verdict != Allow || d.Context != "" {
+		t.Fatalf("audit alone must allow silently, got %+v", d)
 	}
 
 	if d = resolve(ev, nil); d.Verdict != Allow || d.Context != "" {
@@ -96,5 +90,42 @@ func TestUserPromptDeny(t *testing.T) {
 	d := Decide(ev, []*rule.Rule{block})
 	if d.Verdict != Deny || d.Reason == "" {
 		t.Fatalf("expected Deny with a reason, got %+v", d)
+	}
+}
+
+func TestRequireSkillUnlocksOnSkillLoad(t *testing.T) {
+	DryRun = true
+	defer func() { DryRun = false }()
+
+	rules := []*rule.Rule{mustRule(t, "---\nname: s\nevent: pre-tool\nmatcher:\n  tool: Bash\n  command_regex: ^echo release-\naction:\n  type: require-skill\n  skill: release-checklist\n---\n")}
+	ev := Event{Kind: rule.KindTool, Tool: "Bash", Target: "echo release-1.2.0"}
+
+	loaded := ev
+	loaded.Transcript = write(t, lnSkillOK, lnAssistant)
+	if d := Decide(loaded, rules); d.Verdict != Allow {
+		t.Errorf("skill loaded in window should clear the gate, got %+v", d)
+	}
+
+	notLoaded := ev
+	notLoaded.Transcript = write(t, lnDenyStr, lnAssistant)
+	if d := Decide(notLoaded, rules); d.Verdict != DenyRetry {
+		t.Errorf("no skill load should deny, got %+v", d)
+	}
+
+	// No transcript at all: fail closed rather than opening the gate.
+	if d := Decide(ev, rules); d.Verdict != DenyRetry {
+		t.Errorf("missing transcript should deny, got %+v", d)
+	}
+}
+
+func TestRequireSkillReasonTellsAgentToRetry(t *testing.T) {
+	DryRun = true
+	defer func() { DryRun = false }()
+
+	ev := Event{Kind: rule.KindTool, Tool: "Bash", Target: "x"}
+	rules := []*rule.Rule{mustRule(t, "---\nname: s\nevent: pre-tool\naction:\n  type: require-skill\n  skill: foo\n---\n")}
+
+	if got := Decide(ev, rules).Reason; !strings.Contains(got, "then retry this exact command") {
+		t.Errorf("require-skill should tell the agent to retry after invoking the skill: %q", got)
 	}
 }

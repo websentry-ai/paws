@@ -15,7 +15,16 @@ var RegisteredEvents = []string{"PreToolUse", "UserPromptSubmit"}
 
 // ToEvent normalizes a Claude Code hook event into the engine's terms; raw passes through untouched for exec-scripts.
 func ToEvent(in *Input, raw []byte) gate.Event {
-	ev := gate.Event{Agent: Agent, Tool: in.ToolName, Target: in.MatchTarget(), Session: in.SessionID, Raw: raw}
+	ev := gate.Event{
+		Agent:      Agent,
+		Tool:       in.ToolName,
+		Target:     in.MatchTarget(),
+		Session:    in.SessionID,
+		Transcript: in.TranscriptPath,
+		AgentID:    in.AgentID,
+		AgentType:  in.AgentType,
+		Raw:        raw,
+	}
 	switch in.HookEventName {
 	case "PreToolUse":
 		ev.Kind = rule.KindTool

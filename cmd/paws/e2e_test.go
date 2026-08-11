@@ -62,6 +62,54 @@ func TestGateDeniesAMatchingBlockRule(t *testing.T) {
 	}
 }
 
+// The full wire path for the skill unlock: a real transcript file on disk, its path
+// arriving only as transcript_path in the hook payload.
+func TestGateSkillUnlockOverTheWire(t *testing.T) {
+	bin := buildPaws(t)
+	home := t.TempDir()
+	repo := t.TempDir()
+	mustMkdirAll(t, filepath.Join(repo, ".git"))
+	mustMkdirAll(t, filepath.Join(repo, ".paws"))
+	mustWriteFile(t, filepath.Join(repo, ".paws", "release.md"),
+		"---\nname: release-gate\nevent: pre-tool\nmatcher:\n  tool: Bash\n  command_regex: ^echo release-\naction:\n  type: require-skill\n  skill: release-checklist\n---\n")
+
+	loaded := filepath.Join(repo, "loaded.jsonl")
+	mustWriteFile(t, loaded,
+		`{"type":"user","isSidechain":false,"toolUseResult":{"success":true,"commandName":"release-checklist"}}`+"\n"+
+			`{"type":"assistant","isSidechain":false,"message":{"role":"assistant","content":[]}}`+"\n")
+	never := filepath.Join(repo, "never.jsonl")
+	mustWriteFile(t, never, `{"type":"assistant","isSidechain":false,"message":{"role":"assistant","content":[]}}`+"\n")
+
+	cases := []struct {
+		name       string
+		transcript string
+		wantDeny   bool
+	}{
+		{"skill loaded in window", loaded, false},
+		{"skill never loaded", never, true},
+		{"transcript path missing from payload", "", true},
+		{"transcript file does not exist", filepath.Join(repo, "gone.jsonl"), true},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			in := `{"cwd":"` + repo + `","transcript_path":"` + c.transcript +
+				`","hook_event_name":"PreToolUse","tool_name":"Bash","tool_input":{"command":"echo release-1.2.0"}}`
+			cmd := exec.Command(bin, "gate")
+			cmd.Env = append(os.Environ(), "HOME="+home)
+			cmd.Stdin = bytes.NewReader([]byte(in))
+			var stdout bytes.Buffer
+			cmd.Stdout = &stdout
+			if err := cmd.Run(); err != nil {
+				t.Fatalf("gate exited non-zero: %v", err)
+			}
+			denied := bytes.Contains(stdout.Bytes(), []byte(`"permissionDecision":"deny"`))
+			if denied != c.wantDeny {
+				t.Errorf("denied = %v, want %v (output %q)", denied, c.wantDeny, stdout.String())
+			}
+		})
+	}
+}
+
 func buildPaws(t *testing.T) string {
 	t.Helper()
 	bin := filepath.Join(t.TempDir(), "paws")

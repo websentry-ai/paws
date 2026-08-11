@@ -19,8 +19,8 @@ const (
 )
 
 var validActions = map[string]bool{
-	"block": true, "require-skill": true, "require-approval": true,
-	"warn": true, "audit": true, "prompt-inject": true, "exec-script": true,
+	"block": true, "require-skill": true, "warn": true, "audit": true,
+	"prompt-inject": true, "exec-script": true,
 }
 
 // Matcher decides whether a rule applies to a pending call.
@@ -92,6 +92,12 @@ func Parse(data []byte, path string) (*Rule, error) {
 			return nil, fmt.Errorf("exec-script script must be a relative path inside the rule's directory, got %q", r.Action.Script)
 		}
 	}
+	if r.Action.Type == "warn" && Kind(r.Event) == KindPrompt {
+		return nil, fmt.Errorf("warn is not supported on user-prompt (use block, audit, or prompt-inject)")
+	}
+	if r.Action.Type == "audit" && r.Action.Message != "" {
+		return nil, fmt.Errorf("audit is silent by design and does not support message: (use prompt-inject to surface text to the agent)")
+	}
 	if r.Action.Type == "prompt-inject" {
 		if Kind(r.Event) != KindPrompt {
 			return nil, fmt.Errorf("prompt-inject requires event: user-prompt")
@@ -99,9 +105,6 @@ func Parse(data []byte, path string) (*Rule, error) {
 		if r.Action.Message == "" {
 			return nil, fmt.Errorf("prompt-inject needs a message")
 		}
-	}
-	if r.Action.Type == "require-approval" && Kind(r.Event) == KindPrompt {
-		return nil, fmt.Errorf("require-approval is not supported on user-prompt (use block or warn)")
 	}
 	if (r.Event == "pre-commit" || r.Event == "pre-push") && !matchTool(r.Matcher.Tool, "Bash") {
 		return nil, fmt.Errorf("%s rules only fire on Bash; matcher.tool %q can never match", r.Event, r.Matcher.Tool)

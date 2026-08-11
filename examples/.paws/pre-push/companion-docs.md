@@ -2,10 +2,7 @@
 name: companion-docs
 event: pre-push
 action:
-  type: warn
-  message: "paws: pushing to remote — remember the docs-companion. If you changed public APIs, update the docs before this lands."
+  type: audit
 ---
-# Companion Docs (pre-push)
-
-Husky-flavored synthetic event: matches a Bash `git push` at runtime.
-Warns (does not block) so the agent is reminded to update docs on push.
+# companion-docs
+Logs every git push to `~/.paws/audit.log` — does not block, agent sees nothing.

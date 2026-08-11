@@ -7,9 +7,7 @@ matcher:
 action:
   type: require-skill
   skill: aws-tagging-standards
-  deny_message: Load the aws-tagging-standards skill (read its SKILL.md) for the required Owner/Environment/ManagedBy tags — paws still denies an automated retry of this exact command; a human needs to run it directly.
+  deny_message: Invoke the aws-tagging-standards skill for the required Owner/Environment/ManagedBy tags, then retry this exact command.
 ---
-# AWS Tagging Hook
-
-Ensures every AWS resource created through the agent carries the standard
-Owner / Environment / ManagedBy tags before it is provisioned.
+# aws-tagging
+Requires the tagging skill before terraform apply / aws ec2|s3 create calls.

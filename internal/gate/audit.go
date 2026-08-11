@@ -29,7 +29,7 @@ func logAudit(ev Event, r *rule.Rule, oc outcome) {
 	if path == "" {
 		return
 	}
-	line, err := json.Marshal(map[string]any{
+	rec := map[string]any{
 		"ts":      time.Now().UTC().Format(time.RFC3339),
 		"agent":   ev.Agent,
 		"event":   r.Event,
@@ -40,7 +40,17 @@ func logAudit(ev Event, r *rule.Rule, oc outcome) {
 		"verdict": verdictName(oc.verdict),
 		"source":  r.SourcePath,
 		"session": ev.Session,
-	})
+	}
+	if oc.satisfiedBy != "" {
+		rec["satisfied_by"] = oc.satisfiedBy
+	}
+	if ev.AgentID != "" {
+		rec["agent_id"] = ev.AgentID
+	}
+	if ev.AgentType != "" {
+		rec["agent_type"] = ev.AgentType
+	}
+	line, err := json.Marshal(rec)
 	// 0600/0700: the log holds raw matched command/prompt text, which can carry secrets.
 	if err != nil || os.MkdirAll(filepath.Dir(path), 0o700) != nil {
 		return

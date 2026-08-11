@@ -8,12 +8,15 @@ import (
 
 // Input is the event JSON Claude Code pipes to a hook on stdin; unknown fields are ignored.
 type Input struct {
-	SessionID     string         `json:"session_id"`
-	CWD           string         `json:"cwd"`
-	HookEventName string         `json:"hook_event_name"`
-	ToolName      string         `json:"tool_name"`
-	ToolInput     map[string]any `json:"tool_input"`
-	Prompt        string         `json:"prompt,omitempty"` // UserPromptSubmit only
+	SessionID      string         `json:"session_id"`
+	TranscriptPath string         `json:"transcript_path"`
+	CWD            string         `json:"cwd"`
+	HookEventName  string         `json:"hook_event_name"`
+	ToolName       string         `json:"tool_name"`
+	ToolInput      map[string]any `json:"tool_input"`
+	Prompt         string         `json:"prompt,omitempty"` // UserPromptSubmit only
+	AgentID        string         `json:"agent_id,omitempty"`
+	AgentType      string         `json:"agent_type,omitempty"`
 }
 
 // Output is the decision a hook prints on stdout; the zero value marshals to "{}" (allow).

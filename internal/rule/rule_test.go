@@ -57,9 +57,10 @@ func TestParseValidation(t *testing.T) {
 		{"exec-script absolute path", "---\nname: x\nevent: pre-tool\naction:\n  type: exec-script\n  script: /etc/passwd\n---\n"},
 		{"exec-script traversal", "---\nname: x\nevent: pre-tool\naction:\n  type: exec-script\n  script: ../../etc/passwd\n---\n"},
 		{"bad regex", "---\nname: x\nevent: pre-tool\nmatcher:\n  command_regex: \"([\"\naction:\n  type: block\n---\n"},
+		{"warn on user-prompt", "---\nname: x\nevent: user-prompt\naction:\n  type: warn\n---\n"},
+		{"audit with message", "---\nname: x\nevent: pre-tool\naction:\n  type: audit\n  message: hi\n---\n"},
 		{"prompt-inject no message", "---\nname: x\nevent: user-prompt\naction:\n  type: prompt-inject\n---\n"},
 		{"prompt-inject on pre-tool", "---\nname: x\nevent: pre-tool\naction:\n  type: prompt-inject\n  message: hi\n---\n"},
-		{"require-approval on user-prompt", "---\nname: x\nevent: user-prompt\naction:\n  type: require-approval\n---\n"},
 		{"pre-push non-bash tool", "---\nname: x\nevent: pre-push\nmatcher:\n  tool: Edit\naction:\n  type: warn\n---\n"},
 	}
 	for _, c := range cases {

@@ -1,29 +1,26 @@
 # paws
 
 **P**re-tool **A**gent **W**orkflow **S**ystem — Husky for AI coding agents.
-
-Declare workflow gates on agent behavior as checked-in markdown files. Drop a
-`.paws/` folder in your repo; paws registers itself once as a Claude Code hook
-and gates each tool call against your rules.
+Drop a `.paws/` folder of markdown rules in your repo; paws registers itself
+as a Claude Code hook and gates every tool call against them. No daemon, no
+compile step, no network. Fails open — any internal error allows the call.
 
 Apache-2.0 · v0.1 targets Claude Code.
 
-## How it works
+## Install
 
-`paws` is a single static binary registered as a Claude Code hook. On every tool
-call Claude Code runs `paws gate` and pipes it the event JSON. paws walks from
-the current directory up to the git repo root (or `$HOME` if there is none),
-reads every `.paws/**/*.md` rule in scope (plus `~/.paws`), matches the pending
-call, and returns Claude Code's native allow/deny decision. No daemon, no
-compile step, no network.
+```
+go build -o paws ./cmd/paws
+./paws init                        # registers paws in ./.claude/settings.json
+```
 
-It **fails open** — any error returns "allow", so it can never wedge your agent.
-It also never touches other hooks: Claude Code runs every registered hook and
-takes the most restrictive result, so paws runs happily alongside them.
+`--global` registers in `~/.claude/settings.json` instead (every repo on the
+machine); `--settings <path>` targets an explicit file. `paws uninstall`
+takes the same flags and removes the entry.
 
-## A rule
+## Write a rule
 
-One markdown file per gate. Frontmatter drives execution; the body is for humans.
+`.paws/pre-tool/aws-tagging.md`:
 
 ```markdown
 ---
@@ -35,63 +32,57 @@ matcher:
 action:
   type: require-skill
   skill: aws-tagging-standards
-  deny_message: Load aws-tagging-standards and read its SKILL.md for context.
+  deny_message: Invoke the aws-tagging-standards skill, then retry this exact command.
 ---
-# AWS Tagging Hook
 Ensures every AWS resource carries Owner/Environment/ManagedBy tags.
 ```
 
-**Events:** `pre-tool` (any tool call), `pre-commit` / `pre-push` (git sugar —
-Bash-only, matches `git commit` / `git push`), `user-prompt` (prompt submit).
+Rules take effect immediately — no restart, no re-init. paws reads
+`.paws/**/*.md` from cwd up to the repo root (or `$HOME`), plus `~/.paws`,
+fresh on every tool call.
 
-**Matcher:** `tool` is a tool name (`Bash`, `Read`, `Write`, `Edit`, `Grep`,
-`Glob`, `WebFetch`, `WebSearch`, `mcp__<server>__<tool>`, ...), a `A|B` pipe
-list, or omitted/`"*"` (must be quoted in YAML) for any tool. `command_regex`
-matches against the Bash command, file path, URL, or prompt text, depending
-on the event. It's a regex against literal text, not a shell parser — it
-won't see through chaining, quoting, or substitution. Anchor with
-`(^|[;&|])\s*` (as the built-in git rules do) if a command must be caught
-whether or not it's chained after `cd x &&`, `;`, or `|`.
+## Events
 
-**Actions:**
+| `event:` | fires on |
+|---|---|
+| `pre-tool` | any tool call |
+| `pre-push` | `pre-tool`, plus the Bash command must match `git push` |
+| `pre-commit` | `pre-tool`, plus the Bash command must match `git commit` |
+| `user-prompt` | the submitted prompt text, not a tool call |
 
-| action             | effect                                                 |
-|--------------------|--------------------------------------------------------|
-| `block`            | hard deny                                              |
-| `require-skill`    | deny with a "load this skill, then retry" message      |
-| `require-approval` | ask the user to approve (Claude Code `ask`)            |
-| `warn`             | allow, but surface an advisory to the agent            |
-| `audit`            | allow silently, record to `~/.paws/audit.log`          |
-| `prompt-inject`    | append text to the prompt (`user-prompt` rules only)   |
-| `exec-script`      | run a script; it denies via exit code 2 (escape hatch) |
+## Matcher
 
-When several rules match, the most restrictive wins: deny > ask > allow.
-`exec-script` scripts get paws-shaped JSON on stdin and run under a 5s timeout.
-They carry the same trust as any other checked-in repo hook — no sandboxing —
-so `script:` must be a relative path inside the rule's own directory tree;
-absolute paths and `..` are rejected at parse time.
+`tool:` — a tool name (`Bash`, `Read`, `Write`, `Edit`, `Grep`, `Glob`,
+`WebFetch`, `WebSearch`, `mcp__<server>__<tool>`), an `A|B` list, or
+omitted/`"*"` (quoted) for any.
 
-## Usage
+`command_regex:` — matched against the Bash command, file path, URL, or
+prompt text, depending on the event. It's a regex over literal text, not a
+shell parser — anchor with `(^|[;&|])\s*` if the match must hold whether the
+command is chained after `cd x &&`, `;`, or `|`.
+
+## Actions
+
+| action | effect |
+|---|---|
+| `block` | hard deny, no retry path |
+| `require-skill` | deny; clears once the agent invokes `skill:` (checked against its session transcript, last 20 turns) and retries the exact same command |
+| `warn` | Claude Code shows an interactive approval prompt; proceeds only if the human says yes. Not supported on `user-prompt` |
+| `audit` | allowed silently; recorded to `~/.paws/audit.log`. Agent sees nothing — pure observation |
+| `prompt-inject` | `user-prompt` rules only — appends `message:` to the prompt. Not recorded to `~/.paws/audit.log` |
+| `exec-script` | delegates to `script:` (relative path inside the rule's own directory); exit 2 denies, stderr is the reason, anything else allows |
+
+When multiple rules match, the most restrictive wins: `block`/`require-skill`
+(unresolved) > `warn` > `audit`/`prompt-inject`/allow.
+
+## Commands
 
 ```
-paws init                                 # register paws in ./.claude/settings.json
-paws init --global                        # register in ~/.claude/settings.json instead
-paws init --settings <path>                # register in an explicit settings.json
-paws uninstall [--global | --settings ..]  # remove paws from a settings.json
-paws explain 'terraform apply'             # dry-run: show matches + decision, no session
+paws explain 'terraform apply'             # dry-run: matching rules + decision, no session
 paws explain --tool Edit config/prod.env   # dry-run a non-Bash tool call
+paws explain --event user-prompt 'ship it' # dry-run a prompt
 echo '<event json>' | paws explain -       # dry-run a full event JSON
 paws gate                                  # the hook entrypoint (reads event JSON on stdin)
-```
-
-`paws init` writes the settings.json at your repo root by default (walking up
-from cwd to find it); `--global` targets `~/.claude` instead. Re-running `init`
-after moving the binary repoints the existing entry rather than duplicating it.
-
-## Build
-
-```
-go build -o paws ./cmd/paws
 go test ./...
 ```
 
@@ -101,11 +92,7 @@ go test ./...
 cmd/paws      CLI entrypoint (dispatch)
 internal/hook Claude Code adapter: I/O contract + translation to/from the gate engine
 internal/rule rule model: parse + match (pure, agent-agnostic)
-internal/gate decision engine: load, resolve, exec-script, audit (agent-agnostic)
+internal/gate decision engine: load, resolve, exec-script, audit, transcript scan (agent-agnostic)
 internal/cli  the gate / init / uninstall / explain commands
 examples      sample .paws rules
 ```
-
-Dependency flow is one-way: `hook` (the adapter) depends on `gate`, which
-depends on `rule`. Neither `gate` nor `rule` knows Claude Code exists — a
-future adapter for another agent is a sibling package next to `hook`.

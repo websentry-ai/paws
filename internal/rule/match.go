@@ -5,8 +5,8 @@ import (
 	"strings"
 )
 
-// gitAnchor requires git to start a command (or follow ;/&/|) so echoed text or commit messages can't trip it.
-const gitAnchor = `(^|[;&|])\s*`
+// gitAnchor requires git to start a command (or follow ;/&/|/newline) so echoed text or commit messages can't trip it.
+const gitAnchor = `(^|[;&|\n])\s*`
 const gitFlags = `(\s+-C\s+\S+|\s+--?[\w-]+(=\S+)?)*`
 
 var (

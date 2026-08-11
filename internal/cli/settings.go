@@ -56,7 +56,7 @@ func writeSettings(path string, doc settingsDoc) error {
 		os.Remove(tmp)
 		return err
 	}
-	mode := os.FileMode(0o644)
+	mode := os.FileMode(0o600)
 	if st, err := os.Stat(path); err == nil {
 		mode = st.Mode().Perm()
 	}
@@ -190,11 +190,21 @@ func isPawsEntry(entry json.RawMessage) bool {
 		return false
 	}
 	for _, h := range e.Hooks {
-		if strings.HasSuffix(h.Command, " gate") && strings.Contains(h.Command, "paws") {
+		if isPawsCommand(h.Command) {
 			return true
 		}
 	}
 	return false
+}
+
+// Exact match, not substring — "paws" anywhere in an unrelated command shouldn't count as ours.
+func isPawsCommand(command string) bool {
+	const suffix = " gate"
+	if !strings.HasSuffix(command, suffix) {
+		return false
+	}
+	bin := strings.Trim(strings.TrimSuffix(command, suffix), `'"`)
+	return filepath.Base(bin) == "paws"
 }
 
 func jsonEqual(a, b json.RawMessage) bool {

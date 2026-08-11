@@ -60,6 +60,7 @@ func logAudit(ev Event, r *rule.Rule, oc outcome) {
 		return
 	}
 	defer f.Close()
+	f.Chmod(0o600) // O_CREATE only sets mode on first creation, not on an existing looser file.
 	f.Write(append(line, '\n'))
 }
 

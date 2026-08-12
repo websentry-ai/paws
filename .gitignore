@@ -1,0 +1,7 @@
+# built binary
+/paws
+
+# local live-test scaffold
+/testproject/
+
+.DS_Store

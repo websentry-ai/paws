@@ -7,7 +7,7 @@ import (
 	"testing"
 )
 
-const pawsCmd = `'/opt/paws' gate`
+const pawsCmd = pawsMarker + `'/opt/paws' gate`
 
 func TestEnsureHooksMergesAndIsIdempotent(t *testing.T) {
 	doc := settingsDoc{
@@ -59,10 +59,10 @@ func TestEnsureHooksFromEmpty(t *testing.T) {
 
 func TestEnsureHooksRepointsMovedBinary(t *testing.T) {
 	doc := settingsDoc{}
-	if _, err := ensureHooks(doc, `'/old/path/paws' gate`); err != nil {
+	if _, err := ensureHooks(doc, pawsMarker+`'/old/path/paws' gate`); err != nil {
 		t.Fatal(err)
 	}
-	changed, err := ensureHooks(doc, `'/new/path/paws' gate`)
+	changed, err := ensureHooks(doc, pawsMarker+`'/new/path/paws' gate`)
 	if err != nil || !changed {
 		t.Fatalf("repointing to a new path should report a change: %v %v", changed, err)
 	}
@@ -72,8 +72,24 @@ func TestEnsureHooksRepointsMovedBinary(t *testing.T) {
 	if len(pre) != 1 {
 		t.Fatalf("moved binary should repoint the existing entry, not duplicate it; got %d entries", len(pre))
 	}
-	if !containsCommand(pre, `'/new/path/paws' gate`) {
+	if !containsCommand(pre, pawsMarker+`'/new/path/paws' gate`) {
 		t.Error("entry was not repointed to the new path")
+	}
+}
+
+func TestIsPawsCommandRejectsLookalikes(t *testing.T) {
+	lookalikes := []string{
+		`'/opt/paws' gate`,                  // right shape, no marker — pre-fix this matched via basename
+		`'/opt/other/paws-utils/check' gate`, // "paws" only as a path component
+		`echo paws && something gate`,
+	}
+	for _, c := range lookalikes {
+		if isPawsCommand(c) {
+			t.Errorf("isPawsCommand(%q) = true, want false", c)
+		}
+	}
+	if !isPawsCommand(pawsCmd) {
+		t.Errorf("isPawsCommand(%q) = false, want true", pawsCmd)
 	}
 }
 

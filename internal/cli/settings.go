@@ -197,14 +197,11 @@ func isPawsEntry(entry json.RawMessage) bool {
 	return false
 }
 
-// Exact match, not substring — "paws" anywhere in an unrelated command shouldn't count as ours.
+// pawsMarker makes ownership an exact match — a basename/substring guess can misfire on an unrelated tool.
+const pawsMarker = "PAWS_MANAGED=1 "
+
 func isPawsCommand(command string) bool {
-	const suffix = " gate"
-	if !strings.HasSuffix(command, suffix) {
-		return false
-	}
-	bin := strings.Trim(strings.TrimSuffix(command, suffix), `'"`)
-	return filepath.Base(bin) == "paws"
+	return strings.HasPrefix(command, pawsMarker)
 }
 
 func jsonEqual(a, b json.RawMessage) bool {

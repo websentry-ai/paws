@@ -20,7 +20,7 @@ func Init(args []string) int {
 		return 1
 	}
 	self, _ = filepath.Abs(self)
-	command := shellQuote(self) + " gate"
+	command := pawsMarker + shellQuote(self) + " gate"
 
 	doc, err := readSettings(settingsPath)
 	if err != nil {

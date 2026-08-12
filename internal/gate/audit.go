@@ -34,7 +34,7 @@ func logAudit(ev Event, r *rule.Rule, oc outcome) {
 		"agent":   ev.Agent,
 		"event":   r.Event,
 		"tool":    ev.Tool,
-		"target":  ev.Target,
+		"target":  redact(ev.Target),
 		"rule":    r.Name,
 		"action":  r.Action.Type,
 		"verdict": verdictName(oc.verdict),

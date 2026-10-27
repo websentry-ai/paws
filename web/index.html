@@ -1,0 +1,169 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>paws</title>
+<style>
+:root {
+  --bg: #f7f6f3; --panel: #ffffff; --ink: #1d1c1a; --muted: #6b6862; --line: #e4e1da;
+  --accent: #b4532a; --accent-soft: #f6e6dc; --ok: #2f7d4f; --warn: #a3471f; --bar: #e9e5dd;
+  --mono: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+}
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg: #161514; --panel: #1f1e1c; --ink: #ecebe7; --muted: #9d9a93; --line: #2f2d2a;
+    --accent: #e07a4a; --accent-soft: #3a261c; --ok: #6cc08f; --warn: #f09a6e; --bar: #2c2a27;
+  }
+}
+* { box-sizing: border-box; }
+body { margin: 0; background: var(--bg); color: var(--ink); font: 15px/1.5 -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; }
+header { max-width: 980px; margin: 0 auto; padding: 32px 20px 8px; display: flex; align-items: baseline; gap: 14px; flex-wrap: wrap; }
+header h1 { margin: 0; font-size: 26px; letter-spacing: -0.02em; }
+header p { margin: 0; color: var(--muted); }
+nav { max-width: 980px; margin: 0 auto; padding: 0 20px; display: flex; gap: 4px; border-bottom: 1px solid var(--line); }
+nav button { background: none; border: 0; padding: 12px 14px; font: inherit; color: var(--muted); cursor: pointer; border-bottom: 2px solid transparent; margin-bottom: -1px; }
+nav button[aria-selected="true"] { color: var(--ink); border-bottom-color: var(--accent); font-weight: 600; }
+main { max-width: 980px; margin: 0 auto; padding: 20px; }
+section[hidden] { display: none; }
+.card { background: var(--panel); border: 1px solid var(--line); border-radius: 10px; padding: 16px 18px; margin-bottom: 14px; }
+.row { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+.grow { flex: 1; min-width: 0; }
+h2 { font-size: 17px; margin: 0; }
+h3 { font-size: 13px; text-transform: uppercase; letter-spacing: .06em; color: var(--muted); margin: 26px 0 10px; font-weight: 600; }
+.desc { color: var(--muted); margin: 4px 0 10px; }
+.tag { display: inline-block; font-size: 12px; padding: 1px 8px; border-radius: 999px; background: var(--accent-soft); color: var(--accent); margin-right: 4px; }
+.badge { font-size: 12px; padding: 1px 8px; border-radius: 6px; border: 1px solid var(--line); color: var(--muted); }
+code, .cmd { font-family: var(--mono); font-size: 13px; }
+.cmd { display: inline-flex; align-items: center; gap: 8px; background: var(--bg); border: 1px solid var(--line); border-radius: 6px; padding: 4px 6px 4px 10px; }
+.cmd button { font: 12px inherit; border: 1px solid var(--line); background: var(--panel); color: var(--ink); border-radius: 5px; padding: 2px 8px; cursor: pointer; }
+table { width: 100%; border-collapse: collapse; font-size: 14px; }
+th, td { text-align: left; padding: 7px 8px; border-bottom: 1px solid var(--line); vertical-align: top; }
+th { color: var(--muted); font-weight: 600; font-size: 12px; text-transform: uppercase; letter-spacing: .05em; }
+td.num, th.num { text-align: right; font-variant-numeric: tabular-nums; }
+.bar { height: 6px; background: var(--bar); border-radius: 3px; overflow: hidden; min-width: 60px; }
+.bar > span { display: block; height: 100%; background: var(--accent); }
+.tiles { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 12px; }
+.tile { background: var(--panel); border: 1px solid var(--line); border-radius: 10px; padding: 14px 16px; }
+.tile b { display: block; font-size: 26px; font-variant-numeric: tabular-nums; letter-spacing: -0.02em; }
+.tile span { color: var(--muted); font-size: 13px; }
+.empty { color: var(--muted); padding: 28px 0; text-align: center; }
+input[type=search] { width: 100%; font: inherit; padding: 10px 12px; border-radius: 8px; border: 1px solid var(--line); background: var(--panel); color: var(--ink); margin-bottom: 14px; }
+.scroll { overflow-x: auto; }
+.ok { color: var(--ok); } .warn { color: var(--warn); }
+footer { max-width: 980px; margin: 0 auto; padding: 8px 20px 40px; color: var(--muted); font-size: 13px; overflow-wrap: anywhere; }
+.desc, td code { overflow-wrap: anywhere; }
+@media (max-width: 600px) { header, nav, main, footer { padding-left: 16px; padding-right: 16px; } .tiles { grid-template-columns: 1fr 1fr; } }
+</style>
+</head>
+<body>
+<header>
+  <h1>paws</h1>
+  <p>Skills that actually fire. Everything here is read from this machine.</p>
+</header>
+<nav role="tablist">
+  <button role="tab" data-tab="installed" aria-selected="true">Installed</button>
+  <button role="tab" data-tab="catalog" aria-selected="false">Catalog</button>
+  <button role="tab" data-tab="activity" aria-selected="false">Activity</button>
+</nav>
+<main>
+  <section id="installed"><div class="empty">Loading…</div></section>
+  <section id="catalog" hidden>
+    <input type="search" id="q" placeholder="Search packs, skills, tags…" aria-label="Search the catalog">
+    <div id="catalog-body"><div class="empty">Loading…</div></div>
+  </section>
+  <section id="activity" hidden><div class="empty">Loading…</div></section>
+</main>
+<footer id="footer"></footer>
+<script>
+const $ = (s) => document.querySelector(s);
+const esc = (s) => String(s ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
+const get = (p) => fetch(p, { cache: "no-store" }).then((r) => (r.ok ? r.json() : Promise.reject(new Error(p + " " + r.status))));
+
+function cmd(text) {
+  return `<span class="cmd"><code>${esc(text)}</code><button data-copy="${esc(text)}">Copy</button></span>`;
+}
+document.addEventListener("click", (e) => {
+  const b = e.target.closest("[data-copy]");
+  if (b) {
+    navigator.clipboard.writeText(b.dataset.copy).then(() => { b.textContent = "Copied"; setTimeout(() => (b.textContent = "Copy"), 1200); });
+  }
+  const t = e.target.closest("[data-tab]");
+  if (t) {
+    document.querySelectorAll("[data-tab]").forEach((x) => x.setAttribute("aria-selected", x === t));
+    document.querySelectorAll("main > section").forEach((s) => (s.hidden = s.id !== t.dataset.tab));
+    try { localStorage.setItem("paws-tab", t.dataset.tab); } catch (_) {}
+    history.replaceState(null, "", "#" + t.dataset.tab);
+  }
+});
+
+function renderInstalled(packs) {
+  if (!packs.length) {
+    $("#installed").innerHTML = `<div class="empty">No packs installed yet. Open <b>Catalog</b>, or run ${cmd("paws add writing")}</div>`;
+    return;
+  }
+  const max = Math.max(1, ...packs.flatMap((p) => p.bindings.map((b) => b.fires)));
+  $("#installed").innerHTML = packs.map((p) => `
+    <div class="card">
+      <div class="row"><h2 class="grow">${esc(p.name)}</h2><span class="badge">${esc(p.scope)}</span></div>
+      <p class="desc">Installed ${esc(new Date(p.at).toLocaleString())}${p.skills?.length ? ` · skills ${p.skills.map(esc).join(", ")}` : ""}${p.picks ? ` · ${Object.entries(p.picks).map(([g, o]) => `${esc(g)}: ${esc(o)}`).join(", ")}` : ""}</p>
+      <table><thead><tr><th>Binding</th><th class="num">Fired</th><th></th></tr></thead><tbody>
+      ${p.bindings.map((b) => `<tr><td><code>${esc(b.name)}</code></td><td class="num">${b.fires}</td><td style="width:35%"><div class="bar"><span style="width:${(100 * b.fires) / max}%"></span></div></td></tr>`).join("")}
+      </tbody></table>
+      <p class="desc" style="margin-top:10px">${cmd(`paws remove ${p.scope === "project" ? "--project " : ""}${p.name}`)}</p>
+    </div>`).join("");
+}
+
+let catalog = { packs: [], bindings: [] };
+function renderCatalog() {
+  const q = $("#q").value.trim().toLowerCase();
+  const hit = (...xs) => !q || xs.join(" ").toLowerCase().includes(q);
+  const byPath = Object.fromEntries(catalog.bindings.map((b) => [b.path, b]));
+  const packs = catalog.packs.filter((p) => hit(p.name, p.description, (p.tags || []).join(" "), (p.bindings || []).join(" ")));
+  const bindings = catalog.bindings.filter((b) => hit(b.name, b.description, b.skill, (b.tags || []).join(" "), b.path));
+  let html = "<h3>Packs</h3>";
+  html += packs.length ? packs.map((p) => `
+    <div class="card">
+      <div class="row"><h2 class="grow">${esc(p.name)}</h2>${(p.tags || []).map((t) => `<span class="tag">${esc(t)}</span>`).join("")}</div>
+      <p class="desc">${esc(p.description)}</p>
+      <p class="desc">${[...(p.bindings || []), ...(p.pick_one || []).flatMap((g) => Object.values(g.options).flat())].map((rel) => `<code>${esc(byPath[rel]?.name || rel)}</code>`).join(" · ")}</p>
+      ${(p.pick_one || []).map((g) => `<p class="desc">Pick one (${esc(g.name)}): ${Object.keys(g.options).map((o) => o === g.default ? `<b>${esc(o)}</b>` : esc(o)).join(" / ")}</p>`).join("")}
+      ${cmd(p.add)}
+    </div>`).join("") : `<div class="empty">No pack matches.</div>`;
+  html += "<h3>Bindings</h3>";
+  html += bindings.length ? `<div class="card scroll"><table><thead><tr><th>Binding</th><th>Fires on</th><th>Does</th><th>Source</th><th></th></tr></thead><tbody>${bindings.map((b) => `
+    <tr><td><code>${esc(b.name)}</code><div class="desc" style="margin:2px 0 0">${esc(b.description)}</div></td>
+    <td>${esc(b.event)}</td>
+    <td>${esc(b.action)}${b.skill ? ` <code>${esc(b.skill)}</code>` : ""}</td>
+    <td>${b.upstream ? `${esc(b.upstream.repo)}<div class="desc" style="margin:0">${b.provenance?.stars ? `★ ${b.provenance.stars.toLocaleString()} · ` : ""}${esc(b.provenance?.license || "")}</div>` : "paws"}</td>
+    <td>${cmd(b.add)}</td></tr>`).join("")}</tbody></table></div>` : `<div class="empty">No binding matches.</div>`;
+  $("#catalog-body").innerHTML = html;
+}
+$("#q").addEventListener("input", renderCatalog);
+
+function renderActivity({ stats: s, log }) {
+  const tiles = [["Rules fired", s.rules.reduce((n, r) => n + r.fires, 0)], ["Sessions", s.sessions], ["Turns", s.turns], ["Tool calls", s.tool_calls]];
+  let html = `<div class="tiles">${tiles.map(([k, v]) => `<div class="tile"><b>${v}</b><span>${k}</span></div>`).join("")}</div>`;
+  html += "<h3>By rule</h3>";
+  html += s.rules.length ? `<div class="card scroll"><table><thead><tr><th>Rule</th><th class="num">Fires</th><th class="num">Denied</th><th class="num">Already loaded</th><th class="num">Loaded after deny</th><th class="num">Delivered</th></tr></thead><tbody>${s.rules.map((r) => `
+    <tr><td><code>${esc(r.rule)}</code></td><td class="num">${r.fires}</td><td class="num warn">${r.denied}</td><td class="num ok">${r.already_loaded}</td><td class="num">${r.loaded_after_deny}</td><td class="num">${r.delivered}</td></tr>`).join("")}</tbody></table></div>`
+    : `<div class="empty">Nothing has fired yet. Gates fire when the agent tries a matching action.</div>`;
+  const skills = Object.entries(s.skills_invoked || {}).sort((a, b) => b[1] - a[1]);
+  if (skills.length) html += `<h3>Skills invoked</h3><div class="card">${skills.map(([k, v]) => `<div class="row"><code class="grow">${esc(k)}</code><span>${v}</span></div>`).join("")}</div>`;
+  if (s.dormant?.length) html += `<h3>Never fired here</h3><div class="card desc">${s.dormant.map((d) => `<code>${esc(d)}</code>`).join(" · ")}</div>`;
+  $("#activity").innerHTML = html;
+  $("#footer").textContent = `Audit log: ${log}. Nothing leaves this machine.`;
+}
+
+Promise.allSettled([get("/api/installed"), get("/api/catalog"), get("/api/stats")]).then(([inst, cat, st]) => {
+  inst.status === "fulfilled" ? renderInstalled(inst.value) : ($("#installed").innerHTML = `<div class="empty">${esc(inst.reason)}</div>`);
+  if (cat.status === "fulfilled") { catalog = cat.value; renderCatalog(); } else $("#catalog-body").innerHTML = `<div class="empty">${esc(cat.reason)}</div>`;
+  st.status === "fulfilled" ? renderActivity(st.value) : ($("#activity").innerHTML = `<div class="empty">${esc(st.reason)}</div>`);
+});
+// #catalog / #activity deep-link a tab; otherwise reopen the last one.
+let start = location.hash.slice(1);
+try { start = start || localStorage.getItem("paws-tab"); } catch (_) {}
+if (start) document.querySelector(`[data-tab="${CSS.escape(start)}"]`)?.click();
+</script>
+</body>
+</html>

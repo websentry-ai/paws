@@ -52,6 +52,7 @@ paws add --pick prose=stop-slop writing   # choose a pick_one option
 paws search aws                    # browse the catalog
 paws list                          # installed packs and how often each binding fired
 paws stats                         # what fired, what was already loaded (docs/telemetry.md)
+paws ui                            # the same, plus the catalog, as a local page
 paws remove writing
 ```
 
@@ -157,7 +158,8 @@ internal/rule rule model: parse + match (pure, agent-agnostic)
 internal/gate decision engine: load, resolve, exec-script, audit, transcript scan (agent-agnostic)
 internal/catalog catalog bindings + pack manifests: load and validate (disk or embedded)
 internal/pack add/remove packs: bindings, skill install, state file
-embed.go      embeds catalog/ and packs/ into the binary
+embed.go      embeds catalog/, packs/, skills/paws and web/ into the binary
+web           the local page `paws ui` serves (one file, no build step)
 internal/cli  the gate / init / uninstall / explain / validate commands
 catalog       shipped bindings (see docs/catalog.md)
 packs         pack manifests: the unit `paws add` installs

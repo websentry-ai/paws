@@ -129,18 +129,7 @@ func StatsCmd(args []string) int {
 		}
 		asJSON = true
 	}
-	log := gate.AuditPath()
-	cwd, _ := os.Getwd()
-	var names []string
-	seen := map[string]bool{}
-	for _, r := range gate.Collect(cwd).Rules {
-		// prompt-inject writes no audit record by design, so it would always look dormant.
-		if !seen[r.Name] && r.Action.Type != "prompt-inject" {
-			seen[r.Name] = true
-			names = append(names, r.Name)
-		}
-	}
-	st := summarize([]string{log + ".1", log}, names)
+	st, log := localStats()
 	if asJSON {
 		b, _ := json.MarshalIndent(st, "", "  ")
 		fmt.Println(string(b))
@@ -169,4 +158,20 @@ func StatsCmd(args []string) int {
 	}
 	fmt.Printf("\nsessions %d · turns %d · tool calls %d · log %s\n", st.Sessions, st.Turns, st.ToolResults, log)
 	return 0
+}
+
+// localStats summarises this user's audit log against the rules in scope for the cwd.
+func localStats() (Stats, string) {
+	log := gate.AuditPath()
+	cwd, _ := os.Getwd()
+	var names []string
+	seen := map[string]bool{}
+	for _, r := range gate.Collect(cwd).Rules {
+		// prompt-inject writes no audit record by design, so it would always look dormant.
+		if !seen[r.Name] && r.Action.Type != "prompt-inject" {
+			seen[r.Name] = true
+			names = append(names, r.Name)
+		}
+	}
+	return summarize([]string{log + ".1", log}, names), log
 }

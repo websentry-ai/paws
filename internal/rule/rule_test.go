@@ -180,3 +180,10 @@ Removes the AI tells from PR bodies.
 		t.Error("binding should match like a plain rule")
 	}
 }
+
+func TestParseKeepsBody(t *testing.T) {
+	r := mustRule(t, "---\nname: x\nevent: pre-tool\naction:\n  type: audit\n---\n\nFirst line.\nSecond.\n")
+	if r.Body != "First line.\nSecond." {
+		t.Errorf("body = %q", r.Body)
+	}
+}

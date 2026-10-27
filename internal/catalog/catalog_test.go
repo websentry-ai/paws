@@ -30,7 +30,8 @@ action:
 upstream:
   repo: github.com/example/%[1]s
   path: SKILL.md
-  ref: main
+  ref: 0123456789abcdef0123456789abcdef01234567
+  content_hash: sha256:0000000000000000000000000000000000000000000000000000000000000000
 tags: [writing]
 ---
 `
@@ -104,11 +105,26 @@ func TestValidateProblems(t *testing.T) {
 			write(t, filepath.Join(root, "catalog/writing/untagged.md"), "---\nname: untagged\nevent: pre-tool\naction:\n  type: block\n---\n")
 		}, "at least one tag"},
 		{"partial upstream", func(t *testing.T, root string) {
-			write(t, filepath.Join(root, "catalog/writing/partial.md"), strings.Replace(binding("partial", "x"), "  ref: main\n", "", 1))
+			write(t, filepath.Join(root, "catalog/writing/partial.md"), strings.Replace(binding("partial", "x"), "  ref: 0123456789abcdef0123456789abcdef01234567\n", "", 1))
 		}, "repo, path and ref together"},
 		{"bad content hash", func(t *testing.T, root string) {
-			write(t, filepath.Join(root, "catalog/writing/hash.md"), strings.Replace(binding("hash", "x"), "  ref: main\n", "  ref: main\n  content_hash: md5:1\n", 1))
+			write(t, filepath.Join(root, "catalog/writing/hash.md"), strings.Replace(binding("hash", "x"), "sha256:0000000000000000000000000000000000000000000000000000000000000000", "md5:1", 1))
 		}, "sha256:<64 hex>"},
+		{"branch ref", func(t *testing.T, root string) {
+			write(t, filepath.Join(root, "catalog/writing/branch.md"), strings.Replace(binding("branch", "x"), "0123456789abcdef0123456789abcdef01234567", "main", 1))
+		}, "full 40-character commit SHA"},
+		{"option-like ref", func(t *testing.T, root string) {
+			write(t, filepath.Join(root, "catalog/writing/opt.md"), strings.Replace(binding("opt", "x"), "0123456789abcdef0123456789abcdef01234567", "--upload-pack=touch /tmp/x", 1))
+		}, "full 40-character commit SHA"},
+		{"local repo path", func(t *testing.T, root string) {
+			write(t, filepath.Join(root, "catalog/writing/local.md"), strings.Replace(binding("local", "x"), "github.com/example/local", "/tmp/evil", 1))
+		}, "host path like github.com/owner/repo"},
+		{"file url repo", func(t *testing.T, root string) {
+			write(t, filepath.Join(root, "catalog/writing/fileurl.md"), strings.Replace(binding("fileurl", "x"), "github.com/example/fileurl", "file:///tmp/evil", 1))
+		}, "host path like github.com/owner/repo"},
+		{"unpinned upstream", func(t *testing.T, root string) {
+			write(t, filepath.Join(root, "catalog/writing/unpinned.md"), strings.Replace(binding("unpinned", "x"), "  content_hash: sha256:0000000000000000000000000000000000000000000000000000000000000000\n", "", 1))
+		}, "pin it with `paws pin`"},
 		{"require-skill with no source", func(t *testing.T, root string) {
 			write(t, filepath.Join(root, "catalog/aws/orphan.md"), "---\nname: orphan\nevent: pre-tool\naction:\n  type: require-skill\n  skill: ghost\ntags: [org]\n---\n")
 		}, `require-skill "ghost" has no upstream and no local skill`},

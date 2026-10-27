@@ -79,7 +79,7 @@ func TestEnsureHooksRepointsMovedBinary(t *testing.T) {
 
 func TestIsPawsCommandRejectsLookalikes(t *testing.T) {
 	lookalikes := []string{
-		`'/opt/paws' gate`,                  // right shape, no marker — pre-fix this matched via basename
+		`'/opt/paws' gate`,                   // right shape, no marker — pre-fix this matched via basename
 		`'/opt/other/paws-utils/check' gate`, // "paws" only as a path component
 		`echo paws && something gate`,
 	}

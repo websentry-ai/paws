@@ -12,6 +12,7 @@ import (
 	"fmt"
 	"io/fs"
 	"os"
+	"path"
 	"path/filepath"
 	"regexp"
 	"sort"
@@ -47,11 +48,23 @@ type Binding struct {
 	Rel string
 }
 
-// Catalog is everything under one root.
+// Catalog is everything under one root: a directory on disk or the catalog embedded in the binary.
 type Catalog struct {
-	Root     string
+	FS       fs.FS               // holds catalog/ and packs/
+	Root     string              // how problems name FS paths (a directory, or "embedded")
 	Bindings map[string]*Binding // keyed by path relative to catalog/
 	Packs    map[string]*Pack    // keyed by pack name
+}
+
+// Display names an FS path for messages.
+func (c *Catalog) Display(p string) string { return filepath.Join(c.Root, filepath.FromSlash(p)) }
+
+// BindingPath is a binding's FS path, e.g. catalog/writing/humanizer-pr.md.
+func BindingPath(rel string) string { return path.Join("catalog", rel) }
+
+// LocalSkillDir is the FS directory of a skill we ship beside a binding: catalog/<category>/skills/<skill>.
+func LocalSkillDir(b *Binding) string {
+	return path.Join(path.Dir(b.SourcePath), "skills", b.Action.Skill)
 }
 
 // Problem is one validation finding.
@@ -65,142 +78,168 @@ func (p Problem) String() string { return p.Path + ": " + p.Msg }
 var (
 	contentHashRe = regexp.MustCompile(`^sha256:[0-9a-f]{64}$`)
 	skillNameRe   = regexp.MustCompile(`^[a-z0-9][a-z0-9-]*$`) // also a directory name under skills/
+	packNameRe    = skillNameRe                                 // also a directory name under packs/
+	// RepoRe is a bare host path (github.com/owner/repo): fetched over https only, never a local path or URL.
+	RepoRe = regexp.MustCompile(`^[a-z0-9][a-z0-9.-]*\.[a-z]{2,}(/[A-Za-z0-9][A-Za-z0-9._-]*)+$`)
+	// RefRe is a full commit SHA: the pin is a commit, never a branch or tag that can move.
+	RefRe = regexp.MustCompile(`^[0-9a-f]{40}$`)
 )
 
-// isRegular reports whether path exists and is a regular file.
-func isRegular(path string) bool {
-	st, err := os.Stat(path)
+// ValidSkillName reports whether s can name a skill directory.
+func ValidSkillName(s string) bool { return skillNameRe.MatchString(s) }
+
+// isRegular reports whether name exists in fsys and is a regular file.
+func isRegular(fsys fs.FS, name string) bool {
+	st, err := fs.Stat(fsys, name)
 	return err == nil && st.Mode().IsRegular()
 }
 
-// CatalogDir and PacksDir locate the two trees under root.
+// CatalogDir and PacksDir locate the two trees under a directory root.
 func CatalogDir(root string) string { return filepath.Join(root, "catalog") }
 func PacksDir(root string) string   { return filepath.Join(root, "packs") }
 
-// Load parses every binding and pack under root. Parse failures come back as problems, not errors.
-func Load(root string) (*Catalog, []Problem) {
-	c := &Catalog{Root: root, Bindings: map[string]*Binding{}, Packs: map[string]*Pack{}}
-	var probs []Problem
+// Load parses every binding and pack under a directory root.
+func Load(root string) (*Catalog, []Problem) { return LoadFS(os.DirFS(root), root) }
 
-	cdir := CatalogDir(root)
-	_ = filepath.WalkDir(cdir, func(path string, d fs.DirEntry, err error) error {
+// LoadFS parses every binding and pack in fsys. Parse failures come back as problems, not errors.
+// A binding's SourcePath is its FS path (catalog/<category>/<name>.md).
+func LoadFS(fsys fs.FS, display string) (*Catalog, []Problem) {
+	c := &Catalog{FS: fsys, Root: display, Bindings: map[string]*Binding{}, Packs: map[string]*Pack{}}
+	var probs []Problem
+	bad := func(p string, err error) { probs = append(probs, Problem{c.Display(p), err.Error()}) }
+
+	_ = fs.WalkDir(fsys, "catalog", func(p string, d fs.DirEntry, err error) error {
 		if err != nil || d.IsDir() {
 			return nil
 		}
-		rel, _ := filepath.Rel(cdir, path)
+		rel := strings.TrimPrefix(p, "catalog/")
 		if !rule.IsRuleFile(rel) {
 			return nil
 		}
-		data, err := os.ReadFile(path)
+		data, err := fs.ReadFile(fsys, p)
 		if err != nil {
-			probs = append(probs, Problem{path, err.Error()})
+			bad(p, err)
 			return nil
 		}
 		if err := rule.CheckKnownFields(data); err != nil {
-			probs = append(probs, Problem{path, err.Error()})
+			bad(p, err)
 			return nil
 		}
-		r, err := rule.Parse(data, path)
+		r, err := rule.Parse(data, p)
 		if err != nil {
-			probs = append(probs, Problem{path, err.Error()})
+			bad(p, err)
 			return nil
 		}
-		c.Bindings[filepath.ToSlash(rel)] = &Binding{Rule: r, Rel: filepath.ToSlash(rel)}
+		c.Bindings[rel] = &Binding{Rule: r, Rel: rel}
 		return nil
 	})
 
-	if yml, _ := filepath.Glob(filepath.Join(PacksDir(root), "*.yml")); len(yml) > 0 {
-		for _, path := range yml {
-			probs = append(probs, Problem{path, "pack manifests use the .yaml extension"})
-		}
+	yml, _ := fs.Glob(fsys, "packs/*.yml")
+	for _, p := range yml {
+		probs = append(probs, Problem{c.Display(p), "pack manifests use the .yaml extension"})
 	}
-	manifests, _ := filepath.Glob(filepath.Join(PacksDir(root), "*.yaml"))
-	for _, path := range manifests {
-		p, err := LoadPack(path)
+	manifests, _ := fs.Glob(fsys, "packs/*.yaml")
+	for _, p := range manifests {
+		pk, err := loadPack(fsys, p)
 		if err != nil {
-			probs = append(probs, Problem{path, err.Error()})
+			bad(p, err)
 			continue
 		}
-		if prev, dup := c.Packs[p.Name]; dup {
-			probs = append(probs, Problem{path, fmt.Sprintf("pack name %q already used by %s", p.Name, prev.Path)})
+		if prev, dup := c.Packs[pk.Name]; dup {
+			probs = append(probs, Problem{c.Display(p), fmt.Sprintf("pack name %q already used by %s", pk.Name, c.Display(prev.Path))})
 			continue
 		}
-		c.Packs[p.Name] = p
+		c.Packs[pk.Name] = pk
 	}
 	return c, probs
 }
 
-// LoadPack parses one pack manifest.
-func LoadPack(path string) (*Pack, error) {
-	data, err := os.ReadFile(path)
+// loadPack parses one pack manifest; Path is its FS path.
+func loadPack(fsys fs.FS, p string) (*Pack, error) {
+	data, err := fs.ReadFile(fsys, p)
 	if err != nil {
 		return nil, err
 	}
-	var p Pack
-	if err := yaml.Unmarshal(data, &p); err != nil {
+	var pk Pack
+	if err := yaml.Unmarshal(data, &pk); err != nil {
 		return nil, fmt.Errorf("bad pack manifest: %w", err)
 	}
-	p.Path = path
-	return &p, nil
+	pk.Path = p
+	return &pk, nil
 }
 
-// Validate loads root and checks every binding and pack. Problems are sorted by path.
-func Validate(root string) (*Catalog, []Problem) {
-	c, probs := Load(root)
-	add := func(path, format string, a ...any) { probs = append(probs, Problem{path, fmt.Sprintf(format, a...)}) }
+// Validate checks every binding and pack under a directory root.
+func Validate(root string) (*Catalog, []Problem) { return ValidateFS(os.DirFS(root), root) }
+
+// ValidateFS checks every binding and pack in fsys. Problems are sorted by path.
+func ValidateFS(fsys fs.FS, display string) (*Catalog, []Problem) {
+	c, probs := LoadFS(fsys, display)
+	add := func(p, format string, a ...any) {
+		probs = append(probs, Problem{c.Display(p), fmt.Sprintf(format, a...)})
+	}
 
 	names := map[string]string{}
 	for _, b := range c.Bindings {
-		path := b.SourcePath
+		p := b.SourcePath
 		if prev, dup := names[b.Name]; dup {
-			add(path, "binding name %q already used by %s", b.Name, prev)
+			add(p, "binding name %q already used by %s", b.Name, c.Display(prev))
 		}
-		names[b.Name] = path
+		names[b.Name] = p
 		if b.Name == "" {
-			add(path, "binding needs a name")
+			add(p, "binding needs a name")
 		}
 		if len(b.Tags) == 0 {
-			add(path, "binding needs at least one tag")
+			add(p, "binding needs at least one tag")
 		}
 		u := b.Upstream
 		if u.Repo != "" && (u.Path == "" || u.Ref == "") {
-			add(path, "upstream needs repo, path and ref together")
+			add(p, "upstream needs repo, path and ref together")
 		}
-		if u.ContentHash != "" && !contentHashRe.MatchString(u.ContentHash) {
-			add(path, "upstream.content_hash must be sha256:<64 hex>, got %q", u.ContentHash)
+		if u.Repo != "" && !RepoRe.MatchString(u.Repo) {
+			add(p, "upstream.repo must be a host path like github.com/owner/repo, got %q", u.Repo)
+		}
+		if u.Ref != "" && !RefRe.MatchString(u.Ref) {
+			add(p, "upstream.ref must be a full 40-character commit SHA, got %q", u.Ref)
+		}
+		if u.Repo != "" && !contentHashRe.MatchString(u.ContentHash) {
+			add(p, "upstream.content_hash must be sha256:<64 hex> (pin it with `paws pin`), got %q", u.ContentHash)
 		}
 		if u.Path != "" {
 			if err := rule.RelativeInside(u.Path); err != nil {
-				add(path, "upstream.path %v", err)
+				add(p, "upstream.path %v", err)
 			}
 		}
-		dir := filepath.Dir(path)
+		dir := path.Dir(p)
 		if b.Action.Type == "require-skill" {
 			if !skillNameRe.MatchString(b.Action.Skill) {
-				add(path, "skill %q must be lowercase letters, digits and dashes", b.Action.Skill)
+				add(p, "skill %q must be lowercase letters, digits and dashes", b.Action.Skill)
 			} else if u.Repo == "" {
-				local := filepath.Join(dir, "skills", b.Action.Skill, "SKILL.md")
-				if !isRegular(local) {
-					add(path, "require-skill %q has no upstream and no local skill at %s", b.Action.Skill, local)
+				local := LocalSkillDir(b) + "/SKILL.md"
+				if !isRegular(fsys, local) {
+					add(p, "require-skill %q has no upstream and no local skill at %s", b.Action.Skill, c.Display(local))
 				}
 			}
 		}
 		if b.Action.Digest != "" {
-			if st, err := os.Stat(filepath.Join(dir, b.Action.Digest)); err != nil || !st.Mode().IsRegular() {
-				add(path, "digest file %s not found", b.Action.Digest)
+			d := path.Join(dir, filepath.ToSlash(b.Action.Digest))
+			if st, err := fs.Stat(fsys, d); err != nil || !st.Mode().IsRegular() {
+				add(p, "digest file %s not found", b.Action.Digest)
 			} else if st.Size() > rule.MaxDigest {
-				add(path, "digest file %s is %d bytes, over the %d-byte limit", b.Action.Digest, st.Size(), rule.MaxDigest)
+				add(p, "digest file %s is %d bytes, over the %d-byte limit", b.Action.Digest, st.Size(), rule.MaxDigest)
 			}
 		}
-		if b.Action.Type == "exec-script" && !isRegular(filepath.Join(dir, b.Action.Script)) {
-			add(path, "script %s not found", b.Action.Script)
+		if b.Action.Type == "exec-script" && !isRegular(fsys, path.Join(dir, filepath.ToSlash(b.Action.Script))) {
+			add(p, "script %s not found", b.Action.Script)
 		}
 	}
 
 	for _, p := range c.Packs {
-		want := strings.TrimSuffix(filepath.Base(p.Path), ".yaml")
+		want := strings.TrimSuffix(path.Base(p.Path), ".yaml")
 		if p.Name != want {
 			add(p.Path, "pack name %q must match its file name %q", p.Name, want)
+		}
+		if !packNameRe.MatchString(p.Name) {
+			add(p.Path, "pack name %q must be lowercase letters, digits and dashes", p.Name)
 		}
 		if p.Description == "" {
 			add(p.Path, "pack needs a description")

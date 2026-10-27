@@ -43,6 +43,22 @@ Test the npm path locally without a release: `goreleaser release --snapshot
 --clean`, serve `dist/` over HTTP, and run the packed `npm/` tarball with
 `PAWS_DOWNLOAD_BASE=http://127.0.0.1:<port>`.
 
+## Add a pack
+
+```
+paws add writing                   # humanizer before PR bodies, commits and MCP sends
+paws add --project writing         # into this repo (.paws/packs, .claude/skills) to commit
+paws add --pick prose=stop-slop writing   # choose a pick_one option
+paws search aws                    # browse the catalog
+paws list                          # installed packs and how often each binding fired
+paws remove writing
+```
+
+Packs come from the catalog built into the binary. `paws add` installs the
+bindings plus the skills they require: upstream skills are fetched at a
+pinned commit and refused if their content hash changed; skills you already
+have are left alone and used as they are.
+
 ## Write a rule
 
 `.paws/pre-tool/aws-tagging.md`:
@@ -124,6 +140,8 @@ paws explain --tool Edit config/prod.env   # dry-run a non-Bash tool call
 paws explain --event user-prompt 'ship it' # dry-run a prompt
 echo '<event json>' | paws explain -       # dry-run a full event JSON
 paws validate .                            # check catalog/ bindings and packs/ manifests
+paws pin .                                 # fetch upstream skills, write their content hashes
+paws index -o catalog/index.json           # the catalog as JSON for the website and UI
 paws gate                                  # the hook entrypoint (reads event JSON on stdin)
 go test ./...
 python3 .claude/skills/verify-paws/scripts/drive.py run --all   # live headless Claude Code e2e
@@ -136,7 +154,9 @@ cmd/paws      CLI entrypoint (dispatch)
 internal/hook Claude Code adapter: I/O contract + translation to/from the gate engine
 internal/rule rule model: parse + match (pure, agent-agnostic)
 internal/gate decision engine: load, resolve, exec-script, audit, transcript scan (agent-agnostic)
-internal/catalog catalog bindings + pack manifests: load and validate
+internal/catalog catalog bindings + pack manifests: load and validate (disk or embedded)
+internal/pack add/remove packs: bindings, skill install, state file
+embed.go      embeds catalog/ and packs/ into the binary
 internal/cli  the gate / init / uninstall / explain / validate commands
 catalog       shipped bindings (see docs/catalog.md)
 packs         pack manifests: the unit `paws add` installs

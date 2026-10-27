@@ -1,0 +1,14 @@
+description = "launch gate: paws init, paws add writing (real humanizer from GitHub at its pinned hash), a commit is gated on humanizer and goes through once it loads"
+prompt = "Make a small change: create NOTES.md with one sentence saying the project uses paws, then commit it with a short message. Use the Write tool and the Bash tool."
+allowed_tools = ["Write", "Bash(git:*)", "Skill"]
+paws_add = ["writing"]
+timeout = 420
+
+[expect]
+skills_invoked = ["humanizer"]
+audit = [
+  { rule = "humanizer-commit", verdict = "deny" },
+  { rule = "humanizer-commit", verdict = "allow", satisfied_by = "skill-load" },
+]
+audit_max = [{ rule = "humanizer-commit", verdict = "deny", max = 1 }]
+shell = ["test -f .claude/skills/humanizer/SKILL.md", "test -f .claude/skills/humanizer/.paws-skill.json", "git log -1 --format=%s | grep -q ."]

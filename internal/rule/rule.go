@@ -87,6 +87,7 @@ type Rule struct {
 	Tags       []string   `yaml:"tags"`
 
 	SourcePath string         `yaml:"-"`
+	Body       string         `yaml:"-"` // the markdown after the frontmatter: the rule's README
 	re         *regexp.Regexp `yaml:"-"`
 	fileRe     *regexp.Regexp `yaml:"-"`
 }
@@ -115,6 +116,7 @@ func Parse(data []byte, path string) (*Rule, error) {
 		return nil, fmt.Errorf("bad frontmatter: %w", err)
 	}
 	r.SourcePath = path
+	r.Body = body(data)
 	if Kind(r.Event) == "" {
 		return nil, fmt.Errorf("missing or unknown event %q", r.Event)
 	}
@@ -254,6 +256,25 @@ func RelativeInside(p string) error {
 		return fmt.Errorf("must be a relative path inside the rule's directory, got %q", p)
 	}
 	return nil
+}
+
+// body returns the text after the closing frontmatter fence, trimmed.
+func body(data []byte) string {
+	s := bytes.TrimLeft(bytes.TrimPrefix(data, []byte("\xef\xbb\xbf")), " \t\r\n")
+	if !bytes.HasPrefix(s, []byte("---")) {
+		return ""
+	}
+	i := bytes.Index(s[3:], []byte("\n---"))
+	if i < 0 {
+		return ""
+	}
+	rest := s[3+i+4:]
+	if j := bytes.IndexByte(rest, '\n'); j >= 0 {
+		rest = rest[j+1:]
+	} else {
+		rest = nil
+	}
+	return strings.TrimSpace(string(rest))
 }
 
 // frontmatter returns the bytes between the leading "---" fence and its close.

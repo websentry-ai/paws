@@ -258,6 +258,17 @@ def drive_case(case: Path, spec: dict, evidence: Path, scratch: Path, installer:
     if not (paws_home / "bin").is_dir():
         print("  paws init did not install its binary under PAWS_HOME/bin")
         return FAIL
+    if spec.get("paws_add"):
+        # The real install path: catalog packs into the scratch repo (never the user's ~/.claude).
+        try:
+            r = sh([*installer.init[:-1], "add", "--project", *spec["paws_add"]], project, env, timeout=300)
+        except subprocess.TimeoutExpired:
+            print("  paws add timed out")
+            return INDETERMINATE
+        (evidence / "add.txt").write_text(r.stdout + r.stderr)
+        if r.returncode != 0:
+            print(f"  paws add failed: {r.stdout}{r.stderr}")
+            return FAIL
     shutil.copy(project / ".claude" / "settings.json", evidence / "settings.json")
 
     args = ["claude", "-p", spec["prompt"], "--model", model or spec.get("model", "sonnet"),

@@ -23,8 +23,8 @@ swaps it for all of them.
 
 From source: `go build -o paws ./cmd/paws && ./paws init`.
 
-Upgrading from 0.1: re-run `paws init` once. 0.2 registers a SessionStart
-hook as well, and `session-start` rules never fire without it.
+Upgrading from 0.1: re-run `paws init` once. 0.2 also registers SessionStart
+(for `session-start` rules) and PostToolUse and Stop (for local telemetry).
 
 `--global` registers in `~/.claude/settings.json` instead (every repo on the
 machine); `--settings <path>` targets an explicit file. `paws uninstall`
@@ -51,6 +51,7 @@ paws add --project writing         # into this repo (.paws/packs, .claude/skills
 paws add --pick prose=stop-slop writing   # choose a pick_one option
 paws search aws                    # browse the catalog
 paws list                          # installed packs and how often each binding fired
+paws stats                         # what fired, what was already loaded (docs/telemetry.md)
 paws remove writing
 ```
 

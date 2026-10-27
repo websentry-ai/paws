@@ -3,7 +3,7 @@
 placeholders:
   BUCKET_NAME_PREFIX: <org-prefix>
   COST_THRESHOLD: $100/month
-  DEFAULT_COST_CENTER: <cost-center>
+  DEFAULT_COST_CENTER: unassigned
   DEFAULT_REGION: <region>
   DEFAULT_TEAM: <team>
   DEFAULT_TTL_DAYS: '90'

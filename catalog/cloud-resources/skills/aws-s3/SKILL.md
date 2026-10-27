@@ -96,7 +96,7 @@ Every resource that supports tags/labels gets the org's tag set at creation time
 | `{{TAG_TTL_KEY}}` | ISO date the resource can be reclaimed (see C3) |
 | `created-by` | `ai-agent` — always, so FinOps can distinguish agent-created resources |
 
-If a required tag value is unknown, use the org default and state it in one line; ask only where no default exists (cost center).
+If a required tag value is unknown, use the org default and state it in one line; cost center defaults to `{{DEFAULT_COST_CENTER}}` outside prod; ask for it only when env is prod.
 
 ### Rule C3: Everything has a termination date
 
@@ -121,10 +121,10 @@ Before creating anything above {{COST_THRESHOLD}} estimated monthly cost, state 
 
 Values in angle brackets are org settings this skill ships without. Until your org fills them in (the `placeholders:` map in this skill's `config.yaml`, or an edit to this file), apply the default below.
 
-- `<cost-center>`: No default. Ask the user (billing attribution is the one tag not worth guessing).
 - `<encryption-mode>`: SSE-S3 (AES256) — SSE-KMS when the org names a key. Use it and say which value you used.
 - `<kms-key-alias>`: No default — SSE-S3 applies until a key is configured. Skip the step that needs it and say so.
 - `<org-prefix>`: The org's short name, lowercased. Use it and say which value you used.
 - `<paved-road-registry>`: No default — raw CLI allowed, stated. Skip the step that needs it and say so.
 - `<region>`: The AWS CLI's configured region (aws configure get region). Use it and say which value you used.
 - `<team>`: The requesting human's team. Use it and say which value you used (state the team used).
+- `unassigned`: The `cost-center` tag value when the user gives none. Outside prod, use it and say so in one line; when env is prod, ask the user instead (billing attribution on prod spend is not worth guessing).

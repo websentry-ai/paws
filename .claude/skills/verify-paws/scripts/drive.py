@@ -246,7 +246,11 @@ def drive_case(case: Path, spec: dict, evidence: Path, scratch: Path, installer:
             print(f"  setup failed: {cmd}\n{r.stderr}")
             return INDETERMINATE
 
-    r = sh([*installer.init, *spec.get("init_args", [])], project, env, timeout=300)
+    try:
+        r = sh([*installer.init, *spec.get("init_args", [])], project, env, timeout=300)
+    except subprocess.TimeoutExpired:
+        print("  paws init timed out")
+        return INDETERMINATE
     (evidence / "init.txt").write_text(r.stdout + r.stderr)
     if r.returncode != 0:
         print(f"  paws init failed: {r.stdout}{r.stderr}")
@@ -314,7 +318,10 @@ class Installer:
         cfg = run_dir / "goreleaser.yaml"
         run_dir.mkdir(parents=True, exist_ok=True)
         dist = run_dir / "dist"
-        cfg.write_text((REPO / ".goreleaser.yaml").read_text()
+        base_cfg = (REPO / ".goreleaser.yaml").read_text()
+        if "\nsnapshot:" in base_cfg or "\ndist:" in base_cfg:
+            raise SystemExit(".goreleaser.yaml now sets snapshot: or dist:; update Installer.npm to merge them")
+        cfg.write_text(base_cfg
                        + f'\ndist: "{dist}"\nsnapshot:\n  version_template: "{version}"\n')
         r = sh(["goreleaser", "release", "--snapshot", "--clean", "--config", str(cfg)], REPO, timeout=600)
         if r.returncode != 0:
@@ -326,6 +333,9 @@ class Installer:
         server = subprocess.Popen([sys.executable, "-u", "-m", "http.server", "0", "--bind", "127.0.0.1", "--directory", str(dist)],
                                   stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, text=True)  # request logs go to stderr
         line = server.stdout.readline()  # "Serving HTTP on 127.0.0.1 port N ..."
+        if " port " not in line:
+            server.kill()
+            raise SystemExit(f"local release server did not start: {line!r}")
         port = line.split(" port ")[1].split()[0]
         env = {"PAWS_DOWNLOAD_BASE": f"http://127.0.0.1:{port}", "npm_config_update_notifier": "false"}
         def cleanup():

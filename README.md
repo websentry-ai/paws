@@ -17,7 +17,9 @@ The npm package downloads the release binary for your platform (checked
 against the release's `checksums.txt`). `paws init` copies the running binary
 to `~/.paws/bin/paws` and registers that path, so clearing the npm cache or
 deleting a `go build` output never breaks the hook. Re-run `init` after an
-upgrade to replace the copy.
+upgrade to replace the copy. Every repo and the global hook share that one
+binary, so `init` from any version (including an older one, or a dev build)
+swaps it for all of them.
 
 From source: `go build -o paws ./cmd/paws && ./paws init`.
 

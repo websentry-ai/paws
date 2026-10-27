@@ -30,6 +30,10 @@ function target() {
   return `paws_${pkg.version}_${goos}_${goarch}.${ext}`;
 }
 
+// Redirects may not downgrade to http: the archive and checksums.txt come from the same place,
+// so a downgraded pair would verify against itself. Plain http is only for a local test BASE.
+const ALLOW_HTTP = BASE.startsWith("http://");
+
 function fetch(url, redirects = 5) {
   return new Promise((resolve, reject) => {
     if (url.startsWith("file://")) {
@@ -41,7 +45,12 @@ function fetch(url, redirects = 5) {
       .get(url, { headers: { "User-Agent": "unbound-paws-installer" } }, (res) => {
         if ([301, 302, 303, 307, 308].includes(res.statusCode) && res.headers.location && redirects > 0) {
           res.resume();
-          resolve(fetch(new URL(res.headers.location, url).toString(), redirects - 1));
+          const next = new URL(res.headers.location, url).toString();
+          if (next.startsWith("http://") && !ALLOW_HTTP) {
+            reject(new Error(`refusing redirect from ${url} to insecure ${next}`));
+            return;
+          }
+          resolve(fetch(next, redirects - 1));
           return;
         }
         if (res.statusCode !== 200) {
@@ -79,8 +88,10 @@ async function ensureBinary() {
   try {
     const file = path.join(tmp, asset);
     fs.writeFileSync(file, archive);
-    // bsdtar (macOS, Windows 10+) and GNU tar both read .tar.gz; bsdtar also reads .zip.
-    execFileSync("tar", ["-xf", file, "-C", tmp, EXE], { stdio: "ignore" });
+    // bsdtar (macOS, Windows 10+) and GNU tar both read .tar.gz; only bsdtar reads .zip. On Windows,
+    // Git Bash puts GNU tar first on PATH, so call the system bsdtar by its full path.
+    const tar = process.platform === "win32" ? path.join(process.env.SystemRoot || "C:\\Windows", "System32", "tar.exe") : "tar";
+    execFileSync(tar, ["-xf", file, "-C", tmp, EXE], { stdio: "ignore" });
     fs.mkdirSync(VENDOR, { recursive: true });
     const staged = path.join(VENDOR, `.${EXE}.${process.pid}`);
     fs.copyFileSync(path.join(tmp, EXE), staged);

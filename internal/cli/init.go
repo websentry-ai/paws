@@ -6,6 +6,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 
 	"github.com/websentry-ai/paws/internal/gate"
@@ -163,8 +164,16 @@ func installSelf(self, userDir string) (string, error) {
 	if err == nil {
 		err = os.Chmod(tmp.Name(), 0o755)
 	}
+	if err == nil && runtime.GOOS == "windows" {
+		// Windows can't replace a running .exe but can rename it: move the old one aside
+		// (a hook mid-run keeps using it) and clear the previous leftover first.
+		os.Remove(dest + ".old")
+		if rerr := os.Rename(dest, dest+".old"); rerr != nil && !os.IsNotExist(rerr) {
+			err = rerr
+		}
+	}
 	if err == nil {
-		// rename is atomic: a hook mid-run keeps the old inode, the next call gets the new binary.
+		// On unix, rename is atomic: a hook mid-run keeps the old inode, the next call gets the new binary.
 		err = os.Rename(tmp.Name(), dest)
 	}
 	if err != nil {

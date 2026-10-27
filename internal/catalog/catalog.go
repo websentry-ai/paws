@@ -25,10 +25,10 @@ import (
 
 // PickOne is a group of interchangeable bindings; installing the pack installs exactly one option.
 type PickOne struct {
-	Name        string              `yaml:"name"`
-	Description string              `yaml:"description"`
-	Default     string              `yaml:"default"`
-	Options     map[string][]string `yaml:"options"` // option name -> binding paths
+	Name        string              `yaml:"name" json:"name"`
+	Description string              `yaml:"description" json:"description,omitempty"`
+	Default     string              `yaml:"default" json:"default"`
+	Options     map[string][]string `yaml:"options" json:"options"` // option name -> binding paths
 }
 
 // Pack is one packs/<name>.yaml manifest: the unit a user installs with `paws add`.

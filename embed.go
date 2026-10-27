@@ -14,3 +14,8 @@ var Catalog embed.FS
 //
 //go:embed skills/paws
 var Skill embed.FS
+
+// Web is the local UI (web/index.html) that `paws ui` serves.
+//
+//go:embed web
+var Web embed.FS

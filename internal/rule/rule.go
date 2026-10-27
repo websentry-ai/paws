@@ -58,19 +58,19 @@ type Action struct {
 
 // Upstream pins the third-party skill a catalog binding installs. The runner never reads it.
 type Upstream struct {
-	Repo        string `yaml:"repo"`
-	Path        string `yaml:"path"`
-	Ref         string `yaml:"ref"`
-	ContentHash string `yaml:"content_hash"`
+	Repo        string `yaml:"repo" json:"repo"`
+	Path        string `yaml:"path" json:"path"`
+	Ref         string `yaml:"ref" json:"ref"`
+	ContentHash string `yaml:"content_hash" json:"content_hash"`
 }
 
 // Provenance is catalog metadata about an upstream skill, shown on the catalog page.
 type Provenance struct {
-	Stars    int    `yaml:"stars"`
-	Installs int    `yaml:"installs"`
-	License  string `yaml:"license"`
-	LastPush string `yaml:"last_push"`
-	Fetched  string `yaml:"fetched"`
+	Stars    int    `yaml:"stars" json:"stars,omitempty"`
+	Installs int    `yaml:"installs" json:"installs,omitempty"`
+	License  string `yaml:"license" json:"license,omitempty"`
+	LastPush string `yaml:"last_push" json:"last_push,omitempty"`
+	Fetched  string `yaml:"fetched" json:"fetched,omitempty"`
 }
 
 // Rule is one .paws/*.md file: frontmatter directives + a human-readable body.

@@ -1,0 +1,15 @@
+description = "community pack: paws add testing (real superpowers TDD skill); the first src/ write with no test is gated, the agent loads TDD and writes a test"
+prompt = "Add a function add(a, b) that returns a + b in src/calc.py. Keep it small."
+allowed_tools = ["Write", "Edit", "Read", "Skill", "Bash(python3:*)", "Bash(mkdir:*)", "Bash(ls:*)"]
+paws_add = ["testing"]
+timeout = 420
+
+[expect]
+skills_invoked = ["test-driven-development"]
+audit = [{ rule = "tdd-superpowers", verdict = "deny", tool = "Write" }]
+audit_max = [{ rule = "tdd-superpowers", verdict = "deny", max = 2 }]
+shell = [
+  "test -f .claude/skills/test-driven-development/SKILL.md",
+  "test -f src/calc.py",
+  "ls -R | grep -Eq '(^test_.*\\.py|_test\\.py)$'",
+]

@@ -1,0 +1,10 @@
+name: testing
+description: Load a TDD skill before source under src/ changes while no test has been touched, so the failing test comes first.
+tags: [testing]
+pick_one:
+  - name: tdd
+    description: Which TDD skill to use.
+    default: superpowers
+    options:
+      superpowers: [testing/tdd-superpowers.md]
+      mattpocock: [testing/tdd-mattpocock.md]

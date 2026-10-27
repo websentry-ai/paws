@@ -148,3 +148,20 @@ func TestContextDelivered(t *testing.T) {
 		})
 	}
 }
+
+func TestWindowCountsResponsesNotBlocks(t *testing.T) {
+	// 20 responses of 3 blocks each (thinking, text, tool_use) after the skill load: still in window.
+	lines := []string{lnSkillOK}
+	for i := 0; i < 20; i++ {
+		for _, kind := range []string{"thinking", "text", "tool_use"} {
+			lines = append(lines, fmt.Sprintf(`{"type":"assistant","isSidechain":false,"message":{"id":"msg_%d","content":[{"type":"%s"}]}}`, i, kind))
+		}
+	}
+	if !SkillLoaded(write(t, lines...), "release-checklist", DefaultSkillWindow) {
+		t.Error("20 responses split into 60 entries are 20 turns, inside the window")
+	}
+	lines = append(lines, `{"type":"assistant","isSidechain":false,"message":{"id":"msg_20","content":[{"type":"text"}]}}`)
+	if SkillLoaded(write(t, lines...), "release-checklist", DefaultSkillWindow) {
+		t.Error("the 21st response is outside the window")
+	}
+}

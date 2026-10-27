@@ -80,6 +80,9 @@ allowed_tools = ["Bash(git:*)", "Skill"]
 setup = ["git commit -q --allow-empty -m base"]   # optional, run before paws init
 from_catalog = ["writing/humanizer-commit.md"]     # optional: copy real catalog/ bindings into .paws/
 paws_add = ["writing"]                             # optional: run `paws add --project` after init
+env = { AWS_CONFIG_FILE = "/dev/null" }            # optional: extra env; {project} expands
+# cases/<name>/bin/ (optional): fake commands put first on PATH. Use them for anything that
+# would reach a real account (aws, gcloud, kubectl); the real CLI must never run in a case.
 init_args = []                         # optional extra args for `paws init`
 timeout = 300
 # cases/<name>/mcp.json (optional): an --mcp-config file; {project} and {fixtures}

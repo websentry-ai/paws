@@ -231,7 +231,13 @@ def drive_case(case: Path, spec: dict, evidence: Path, scratch: Path, installer:
         # Ship-path check: the real catalog binding, copied as a repo rule.
         dest = project / ".paws" / "catalog" / rel
         dest.parent.mkdir(parents=True, exist_ok=True)
-        shutil.copy(REPO / "catalog" / rel, dest)
+        src = REPO / "catalog" / rel
+        shutil.copy(src, dest)
+        for line in src.read_text().splitlines():  # bring the binding's digest along
+            if line.strip().startswith("digest:"):
+                d = line.split(":", 1)[1].strip()
+                (dest.parent / d).parent.mkdir(parents=True, exist_ok=True)
+                shutil.copy(src.parent / d, dest.parent / d)
     if (case / "skills").exists():
         shutil.copytree(case / "skills", project / ".claude" / "skills")
     if (case / "paws-home").exists():
@@ -242,6 +248,13 @@ def drive_case(case: Path, spec: dict, evidence: Path, scratch: Path, installer:
     # paws init installs the binary under PAWS_HOME/bin; put it first so the agent and the
     # shell checks run the paws this case installed, on both the go and npm paths.
     env["PATH"] = f"{paws_home / 'bin'}{os.pathsep}{env.get('PATH', os.environ['PATH'])}"
+    if (case / "bin").exists():
+        # Fake commands (e.g. an aws that only logs its arguments) shadow real ones, so a case
+        # can never touch real cloud accounts. They come first on PATH.
+        shutil.copytree(case / "bin", scratch / "bin")
+        env["PATH"] = f"{scratch / 'bin'}{os.pathsep}{env['PATH']}"
+    for k, v in spec.get("env", {}).items():
+        env[k] = v.replace("{project}", str(project))
     for cmd in ["git init -q .", "git config user.email verify@paws.local", "git config user.name paws-verify",
                 *spec.get("setup", [])]:
         r = sh(cmd, project, env)

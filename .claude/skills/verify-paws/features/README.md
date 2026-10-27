@@ -12,7 +12,7 @@ One file per user-facing feature. Each names the cases that prove it.
 | advise | [advise.md](advise.md) | `advise-once` |
 | MCP and file matchers | [matchers.md](matchers.md) | `mcp-send-require-skill`, `file-glob-require-skill` |
 | when: conditions | [when.md](when.md) | `when-dependency-hit`, `when-dependency-miss`, `when-no-edit-tdd` |
-| on_miss digest | [digest.md](digest.md) | `digest-tag` |
+| on_miss digest | [digest.md](digest.md) | `digest-tag`, `aws-s3-digest` |
 | packs and skill install | [packs.md](packs.md) | `launch-journey`, `practice-testing-pack` |
 | local telemetry | [telemetry.md](telemetry.md) | `require-skill-commit` |
 | paws skill | [paws-skill.md](paws-skill.md) | `paws-skill-writes-rule` |

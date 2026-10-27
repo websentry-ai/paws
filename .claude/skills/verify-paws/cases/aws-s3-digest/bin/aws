@@ -1,0 +1,4 @@
+#!/bin/sh
+# Fake aws: logs the call, touches nothing. The real CLI must never run in a case.
+printf '%s\n' "$*" >> "$PAWS_VERIFY_LOG"
+echo '{}'

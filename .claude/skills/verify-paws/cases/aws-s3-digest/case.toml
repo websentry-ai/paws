@@ -1,0 +1,20 @@
+description = "second demo: with only the aws-s3 binding and its digest (no skill), creating a bucket is denied once with the digest; the agent follows it: blocks public access, encrypts, tags"
+prompt = "Create an S3 bucket named acme-demo-assets-dev in us-east-1 with the aws CLI, using the Bash tool. Team: platform. Cost center: eng-001. Owner: vishnu. If a hook gives you rules, follow them."
+allowed_tools = ["Bash(aws:*)"]
+# Only the binding and its digest: no aws-s3 skill installed, so the digest is the only guidance.
+from_catalog = ["cloud-resources/aws-s3.md"]
+env = { PAWS_VERIFY_LOG = "{project}/aws-calls.log", AWS_CONFIG_FILE = "/dev/null", AWS_SHARED_CREDENTIALS_FILE = "/dev/null", AWS_PROFILE = "paws-verify-none" }
+timeout = 360
+
+[expect]
+skills_not_invoked = ["aws-s3"]
+tool_result_contains = ["paws digest (aws-s3):"]
+audit = [
+  { rule = "aws-s3", verdict = "deny" },
+  { rule = "aws-s3", verdict = "allow", satisfied_by = "digest-delivered" },
+]
+audit_max = [{ rule = "aws-s3", verdict = "deny", max = 1 }]
+shell = [
+  "grep -q 'create-bucket\\|s3 mb' aws-calls.log",
+  "grep -q 'put-public-access-block' aws-calls.log",
+]

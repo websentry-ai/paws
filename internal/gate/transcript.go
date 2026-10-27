@@ -76,6 +76,22 @@ func ContextDelivered(path, marker string, window int) bool {
 	})
 }
 
+// DenyDelivered reports whether a hook deny whose reason contains marker reached the agent
+// within the last `window` turns. Claude Code records a PreToolUse deny as a tool result
+// whose toolUseResult is the bare reason string.
+func DenyDelivered(path, marker string, window int) bool {
+	if marker == "" {
+		return false
+	}
+	return scanWindow(path, window, func(e transcriptEntry) bool {
+		if e.Type != "user" || len(e.ToolUseResult) == 0 || e.ToolUseResult[0] != '"' {
+			return false
+		}
+		var reason string
+		return json.Unmarshal(e.ToolUseResult, &reason) == nil && strings.Contains(reason, marker)
+	})
+}
+
 // scanWindow walks the transcript backwards and reports whether hit matches an entry before
 // the window of agent turns runs out or a compaction boundary is crossed.
 func scanWindow(path string, window int, hit func(transcriptEntry) bool) bool {

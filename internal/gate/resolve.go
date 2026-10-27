@@ -3,6 +3,8 @@ package gate
 import (
 	"encoding/json"
 	"fmt"
+	"os"
+	"path/filepath"
 	"strings"
 
 	"github.com/websentry-ai/paws/internal/rule"
@@ -27,6 +29,9 @@ const DefaultSkillWindow = 20
 
 // skillLoadSatisfied tags an audit record whose allow came from a cleared require-skill gate.
 const skillLoadSatisfied = "skill-load"
+
+// digestSatisfied tags an audit record whose require-skill passed because its digest was delivered this window.
+const digestSatisfied = "digest-delivered"
 
 // adviceSatisfied tags an audit record whose advise was skipped: the agent already has it this window.
 const adviceSatisfied = "advice-delivered"
@@ -98,9 +103,20 @@ func evaluate(r *rule.Rule, ev Event) outcome {
 		if SkillLoaded(ev.Transcript, a.Skill, DefaultSkillWindow) {
 			return outcome{verdict: Allow, satisfiedBy: skillLoadSatisfied, fired: true}
 		}
+		digest := loadDigest(r)
+		if digest != "" && DenyDelivered(ev.Transcript, digestMarker(r), DefaultSkillWindow) {
+			// The digest already rode in a deny this window: the agent has the rules, let the retry through.
+			return outcome{verdict: Allow, satisfiedBy: digestSatisfied, fired: true}
+		}
 		if ev.Kind == rule.KindSession {
-			// A session start can't be denied: name the skill as context instead.
+			// A session start can't be denied: name the skill (or hand over its digest) as context instead.
+			if digest != "" {
+				return outcome{verdict: Allow, context: digestMarker(r) + " " + digest, fired: true}
+			}
 			return outcome{verdict: Allow, context: msgOr(a.Message, sessionSkillContext(a)), fired: true}
+		}
+		if digest != "" {
+			return outcome{verdict: DenyRetry, reason: digestReason(r, digest), fired: true}
 		}
 		return outcome{verdict: DenyRetry, reason: msgOr(a.DenyMessage, skillReason(a)), fired: true}
 	case "advise":
@@ -120,6 +136,33 @@ func evaluate(r *rule.Rule, ev Event) outcome {
 		return runScript(r, ev)
 	}
 	return outcome{}
+}
+
+// MaxDigest is the largest digest that rides in a deny; Claude Code caps hook output at 10k.
+const MaxDigest = 7000
+
+// loadDigest returns the rule's digest when on_miss is digest and the file is readable and
+// within MaxDigest, else "" so the rule falls back to load-required.
+func loadDigest(r *rule.Rule) string {
+	if r.Action.OnMiss != rule.OnMissDigest || r.Action.Digest == "" {
+		return ""
+	}
+	// rule.Parse rejects absolute and escaping paths, so this stays inside the rule's directory.
+	data, err := os.ReadFile(filepath.Join(filepath.Dir(r.SourcePath), r.Action.Digest))
+	if err != nil || len(data) > MaxDigest {
+		return ""
+	}
+	return strings.TrimSpace(string(data))
+}
+
+// digestMarker tags a digest deny so the transcript shows the agent already received it.
+func digestMarker(r *rule.Rule) string {
+	return fmt.Sprintf("paws digest (%s):", r.Name)
+}
+
+func digestReason(r *rule.Rule, digest string) string {
+	return fmt.Sprintf("%s This action requires the %q skill. Its rules follow; apply them, then retry the command (re-formed to follow them if needed).\n\n%s",
+		digestMarker(r), r.Action.Skill, digest)
 }
 
 // adviseMarker tags advise context so the transcript shows which rule already advised this window.

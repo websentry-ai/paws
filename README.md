@@ -106,7 +106,7 @@ command is chained after `cd x &&`, `;`, or `|`.
 | action | effect |
 |---|---|
 | `block` | hard deny, no retry path |
-| `require-skill` | deny; clears once the agent invokes `skill:` (checked against its session transcript, last 20 turns) and retries the exact same command. On `session-start` it adds context naming the skill instead |
+| `require-skill` | deny; clears once the agent invokes `skill:` (checked against its session transcript, last 20 turns) and retries the exact same command. On `session-start` it adds context naming the skill instead. With `on_miss: digest` the deny carries the skill's digest and the retry passes without the skill |
 | `warn` | Claude Code shows an interactive approval prompt; proceeds only if the human says yes. Not supported on `user-prompt` |
 | `audit` | allowed silently; recorded to `~/.paws/audit.log`. Agent sees nothing — pure observation |
 | `prompt-inject` | `user-prompt` rules only — appends `message:` to the prompt. Not recorded to `~/.paws/audit.log` |

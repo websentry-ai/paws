@@ -32,7 +32,7 @@ matcher:
 action:
   type: require-skill
   skill: humanizer
-  on_miss: load-required        # or digest (needs action.digest; parsed, not yet enforced)
+  on_miss: load-required        # or digest (needs action.digest); see docs/rules.md
 upstream:                       # third-party skill, installed at this ref
   repo: github.com/blader/humanizer
   path: SKILL.md

@@ -1,6 +1,8 @@
 package gate
 
 import (
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -181,4 +183,78 @@ func TestRequireSkillOnSessionStartAddsContext(t *testing.T) {
 	if d := Decide(Event{Kind: rule.KindTool, Tool: "Bash", Target: "ls"}, rules); d.Context != "" || d.Verdict != Allow {
 		t.Errorf("session rule fired on a tool call: %+v", d)
 	}
+}
+
+// digestRule writes a require-skill rule with on_miss: digest and its digest file into a temp dir.
+func digestRule(t *testing.T, digest string) *rule.Rule {
+	t.Helper()
+	dir := t.TempDir()
+	if digest != "" {
+		if err := os.MkdirAll(filepath.Join(dir, "digests"), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(filepath.Join(dir, "digests", "s3.md"), []byte(digest), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	md := "---\nname: s3-create\nevent: pre-tool\nmatcher:\n  tool: Bash\n  command_regex: aws s3 mb\naction:\n  type: require-skill\n  skill: aws-s3\n  on_miss: digest\n  digest: digests/s3.md\n---\n"
+	r, err := rule.Parse([]byte(md), filepath.Join(dir, "s3.md"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	return r
+}
+
+func TestDigestDenyThenRetryPasses(t *testing.T) {
+	DryRun = true
+	defer func() { DryRun = false }()
+
+	r := digestRule(t, "Block public access. Tag created-by=ai-agent.")
+	ev := Event{Kind: rule.KindTool, Tool: "Bash", Target: "aws s3 mb s3://x"}
+
+	first := ev
+	first.Transcript = write(t, lnAssistant)
+	d := Decide(first, []*rule.Rule{r})
+	if d.Verdict != DenyRetry || !strings.Contains(d.Reason, "paws digest (s3-create):") || !strings.Contains(d.Reason, "Tag created-by=ai-agent.") {
+		t.Fatalf("first call should deny carrying the tagged digest, got %+v", d)
+	}
+
+	lnDigestDeny := `{"type":"user","isSidechain":false,"toolUseResult":"Error: paws digest (s3-create): This action requires the \"aws-s3\" skill. Block public access."}`
+	retry := ev
+	retry.Transcript = write(t, lnDigestDeny, lnAssistant)
+	if d := Decide(retry, []*rule.Rule{r}); d.Verdict != Allow {
+		t.Errorf("retry after the digest was delivered should pass without the skill, got %+v", d)
+	}
+
+	compacted := ev
+	compacted.Transcript = write(t, lnDigestDeny, lnCompact, lnAssistant)
+	if d := Decide(compacted, []*rule.Rule{r}); d.Verdict != DenyRetry {
+		t.Errorf("after compaction the digest must be delivered again, got %+v", d)
+	}
+
+	loaded := ev
+	loaded.Transcript = write(t, lnSkillOKFor("aws-s3"), lnAssistant)
+	if d := Decide(loaded, []*rule.Rule{r}); d.Verdict != Allow {
+		t.Errorf("a loaded skill passes without the digest, got %+v", d)
+	}
+}
+
+func TestDigestFallsBackToLoadRequired(t *testing.T) {
+	DryRun = true
+	defer func() { DryRun = false }()
+	ev := Event{Kind: rule.KindTool, Tool: "Bash", Target: "aws s3 mb s3://x"}
+
+	for name, r := range map[string]*rule.Rule{
+		"missing digest file": digestRule(t, ""),
+		"oversize digest":     digestRule(t, strings.Repeat("x", MaxDigest+1)),
+	} {
+		d := Decide(ev, []*rule.Rule{r})
+		if d.Verdict != DenyRetry || strings.Contains(d.Reason, "paws digest") || !strings.Contains(d.Reason, "Invoke it with the Skill tool") {
+			t.Errorf("%s: want the load-required deny, got %+v", name, d)
+		}
+	}
+}
+
+func lnSkillOKFor(skill string) string {
+	return `{"type":"user","isSidechain":false,"toolUseResult":{"success":true,"commandName":"` + skill + `"}}`
 }

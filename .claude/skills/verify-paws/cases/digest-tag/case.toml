@@ -1,0 +1,14 @@
+description = "on_miss digest: the deny carries the skill's digest, no skill is installed, the re-formed retry passes"
+prompt = "Create a git tag named v1.0.0 on HEAD using the Bash tool."
+allowed_tools = ["Bash(git:*)"]
+setup = ["git commit -q --allow-empty -m base"]
+
+[expect]
+skills_not_invoked = ["release-tags"]
+tool_result_contains = ["paws digest (release-tags-digest):"]
+audit = [
+  { rule = "release-tags-digest", verdict = "deny" },
+  { rule = "release-tags-digest", verdict = "allow", satisfied_by = "digest-delivered" },
+]
+audit_max = [{ rule = "release-tags-digest", verdict = "deny", max = 1 }]
+shell = ["git cat-file -t v1.0.0 | grep -q '^tag$'", "git tag -n1 v1.0.0 | grep -q 'DIGEST-OK'"]

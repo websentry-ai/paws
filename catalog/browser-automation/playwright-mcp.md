@@ -2,7 +2,7 @@
 name: playwright-mcp
 event: pre-tool
 matcher:
-  tool: mcp__playwright__browser_fill_form|mcp__playwright__browser_file_upload|mcp__playwright__browser_click|mcp__claude-in-chrome__form_input|mcp__claude-in-chrome__file_upload|mcp__claude-in-chrome__computer
+  tool: mcp__playwright__browser_navigate|mcp__plugin_playwright_playwright__browser_navigate|mcp__claude-in-chrome__navigate
 action:
   type: require-skill
   skill: playwright
@@ -10,4 +10,4 @@ action:
   digest: digests/playwright.md
 tags: [org, browser]
 ---
-Loads the playwright skill before browser form fills, uploads and clicks, so credentials stay out of the agent's hands and irreversible submits get confirmed.
+Loads the playwright skill when the agent opens a page with Playwright or Chrome MCP (navigation only, so clicks and reads in an open page don't re-trigger it): credentials stay out of the agent's hands and irreversible submits get confirmed.

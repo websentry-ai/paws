@@ -1,6 +1,6 @@
 # slack digest
 
-Slack sends: `chat.postMessage`, `chat.scheduleMessage`, `chat.update`, `chat.delete`, `files.upload` (curl with `$SLACK_TOKEN`) or Slack MCP `post_message` / `schedule_message` / `upload_file`. Apply before retrying.
+Slack sends: `chat.postMessage`, `chat.scheduleMessage`, `chat.update`, `chat.delete`, `files.upload` (curl with `$SLACK_TOKEN`) or a Slack MCP send, draft or scheduled message. Apply before retrying.
 
 ## M1: narrate internal, draft external
 - Internal one-off: compose, state destination in one line ("Sending to #eng-infra (42 members)"), post.

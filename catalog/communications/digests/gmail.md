@@ -1,6 +1,6 @@
 # gmail digest
 
-Gmail MCP writes: `create_draft`, `label_message`, `label_thread`, `apply_sensitive_message_label`. A sent message is the org speaking and cannot be unsent. Apply to this call and its follow-ups.
+Gmail MCP writes: send, reply, forward, draft or label. A sent message is the org speaking and cannot be unsent. Apply to this call and its follow-ups.
 
 ## M1: draft first
 - `create_draft` lands in the user's Drafts for a human send. Say: "Drafted, in your Drafts folder — send from Gmail when ready."

@@ -1,6 +1,6 @@
 # playwright digest
 
-Browser fill, click or upload through Playwright MCP or Claude-in-Chrome. You act as the human, on their logged-in sessions. Apply to this call and every follow-up.
+Opening a page with Playwright MCP or Claude-in-Chrome. These rules govern every fill, click and upload that follows. You act as the human, on their logged-in sessions. Apply to this call and every follow-up.
 
 ## Y1: never type credentials (no override)
 - Password, OTP/2FA, recovery code, card number, CVV, banking field → do not call `browser_type` / `browser_fill_form` / `form_input` / `computer` type on it.

@@ -8,6 +8,7 @@ bindings:
   - container-runtime-local/docker.md
   - containers-orchestration/kubectl.md
   - containers-orchestration/kubectl-mcp.md
+  - containers-orchestration/kubectl-ops-mcp.md
   - observability/datadog.md
   - observability/datadog-mcp.md
   - package-publishing/npm.md

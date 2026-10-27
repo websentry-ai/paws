@@ -2,7 +2,8 @@
 name: salesforce-mcp
 event: pre-tool
 matcher:
-  tool: mcp__salesforce__create_record|mcp__salesforce__update_record|mcp__salesforce__delete_record|mcp__salesforce__upsert_record|mcp__salesforce__execute_soql_dml
+  tool: mcp__salesforce__*
+  mcp_action: create|update|delete
 action:
   type: require-skill
   skill: salesforce
@@ -10,4 +11,4 @@ action:
   digest: digests/salesforce.md
 tags: [org, crm]
 ---
-Loads the salesforce skill before a Salesforce MCP record write or DML.
+Loads the salesforce skill before a Salesforce MCP record create, update or delete.

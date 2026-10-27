@@ -5,3 +5,4 @@ bindings:
   - crm-systems/attio-mcp.md
   - crm-systems/salesforce.md
   - crm-systems/salesforce-mcp.md
+  - crm-systems/salesforce-dml-mcp.md

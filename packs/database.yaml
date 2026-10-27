@@ -6,3 +6,4 @@ bindings:
   - databases/postgres-mcp.md
   - data-analytics/bigquery.md
   - data-analytics/bigquery-mcp.md
+  - data-analytics/bigquery-write-mcp.md

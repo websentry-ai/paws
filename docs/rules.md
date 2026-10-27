@@ -77,11 +77,11 @@ One condition, or a list where every condition must hold.
 
 | Condition | Holds when |
 |---|---|
-| `dependency:PKG` | the repo root's package.json, go.mod, Cargo.toml, pyproject.toml or requirements.txt lists PKG |
+| `dependency:PKG` | the repo root lists PKG as a dependency: package.json (4 dependency maps), go.mod direct requires (full path, or last element without `/vN`), Cargo.toml dependency tables (key or `package` rename), pyproject.toml dependency tables, requirements.txt |
 | `repo-marker:PATH` | PATH exists under the repo root |
 | `new-file` | the Read/Write/Edit target does not exist yet |
-| `no-edit-matching:GLOB` | the agent has not edited or written a matching path in this session |
-| `agent-count>N` | the agent spawned more than N subagents since your last prompt |
+| `no-edit-matching:GLOB` | no successful Edit/Write on a matching path in the last 1 MB of the transcript (denied or failed edits don't count; very long sessions forget older edits) |
+| `agent-count>N` | the agent spawned more than N subagents since the last prompt you typed |
 
 The repo root is the nearest directory with `.git` above the agent's cwd.
 
@@ -121,7 +121,9 @@ script.
 
 ## Failure modes
 
-paws fails open: a rule that fails to parse is skipped (Claude Code shows a
-one-line notice), a missing transcript counts as "skill not loaded", and an
-internal error allows the call. `paws validate` checks catalog bindings
+paws fails open on its own errors: a rule that fails to parse is skipped
+(Claude Code shows a one-line notice) and an internal error allows the call.
+Missing session state is read as "nothing happened yet": with no transcript,
+a skill counts as not loaded (require-skill denies), no edit is known
+(no-edit-matching holds) and no subagents were spawned (agent-count is 0). `paws validate` checks catalog bindings
 strictly, including unknown keys.

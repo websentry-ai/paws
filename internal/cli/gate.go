@@ -31,10 +31,10 @@ func Gate() (code int) {
 	if err := json.Unmarshal(data, &in); err != nil {
 		return allow()
 	}
-	cwd := in.CWD
-	if cwd == "" {
-		cwd, _ = os.Getwd()
+	if in.CWD == "" {
+		in.CWD, _ = os.Getwd()
 	}
+	cwd := in.CWD
 	res := gate.Collect(cwd)
 	out := hook.Render(in.HookEventName, gate.Decide(hook.ToEvent(&in, data), res.Rules))
 	if n := len(res.Errs); n > 0 {

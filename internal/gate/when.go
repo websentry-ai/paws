@@ -8,6 +8,8 @@ import (
 	"regexp"
 	"strings"
 
+	"github.com/BurntSushi/toml"
+
 	"github.com/websentry-ai/paws/internal/rule"
 )
 
@@ -69,15 +71,16 @@ func repoRoot(cwd string) string {
 }
 
 // hasDependency looks for pkg in the manifests at root: package.json (dependencies,
-// devDependencies, peerDependencies, optionalDependencies), go.mod (module path, or its
-// last element), Cargo.toml dependency tables, and pyproject.toml / requirements.txt
-// requirement names (case-insensitive, - and _ equivalent).
+// devDependencies, peerDependencies, optionalDependencies), go.mod direct requires (full
+// module path, or its last element without a /vN suffix), Cargo.toml dependency tables
+// (crate key or its package rename), and pyproject.toml dependency tables or
+// requirements.txt (case-insensitive, - _ . equivalent).
 func hasDependency(root, pkg string) bool {
 	return packageJSONHas(filepath.Join(root, "package.json"), pkg) ||
 		goModHas(filepath.Join(root, "go.mod"), pkg) ||
 		cargoHas(filepath.Join(root, "Cargo.toml"), pkg) ||
-		pythonHas(filepath.Join(root, "pyproject.toml"), pkg) ||
-		pythonHas(filepath.Join(root, "requirements.txt"), pkg)
+		pyprojectHas(filepath.Join(root, "pyproject.toml"), pkg) ||
+		requirementsHas(filepath.Join(root, "requirements.txt"), pkg)
 }
 
 func packageJSONHas(path, pkg string) bool {
@@ -100,11 +103,33 @@ func packageJSONHas(path, pkg string) bool {
 	return false
 }
 
+var goMajorSuffix = regexp.MustCompile(`/v[0-9]+$`)
+
+// goModHas checks direct requires only: indirect deps, replace and exclude lines don't count.
 func goModHas(path, pkg string) bool {
-	found := false
+	found, inRequire := false, false
 	eachLine(path, func(line string) bool {
-		f := strings.Fields(strings.TrimPrefix(line, "require "))
-		if len(f) >= 2 && strings.Contains(f[0], ".") && (f[0] == pkg || strings.HasSuffix(f[0], "/"+pkg)) {
+		switch {
+		case line == ")":
+			inRequire = false
+			return true
+		case strings.HasPrefix(line, "require ("):
+			inRequire = true
+			return true
+		case strings.HasPrefix(line, "require "):
+			line = strings.TrimPrefix(line, "require ")
+		case !inRequire:
+			return true
+		}
+		if strings.Contains(line, "// indirect") {
+			return true
+		}
+		f := strings.Fields(line)
+		if len(f) < 2 {
+			return true
+		}
+		mod := f[0]
+		if mod == pkg || filepath.Base(goMajorSuffix.ReplaceAllString(mod, "")) == pkg {
 			found = true
 		}
 		return !found
@@ -112,42 +137,98 @@ func goModHas(path, pkg string) bool {
 	return found
 }
 
+// cargoHas checks [dependencies], [dev-dependencies], [build-dependencies] and their
+// [target.*.] forms, matching the crate key or a `package = "..."` rename.
 func cargoHas(path, pkg string) bool {
-	found, inDeps := false, false
-	eachLine(path, func(line string) bool {
-		if strings.HasPrefix(line, "[") {
-			inDeps = strings.Contains(line, "dependencies")
-			// [dependencies.serde] names the crate in the header itself
-			if inDeps && strings.HasSuffix(strings.TrimSuffix(line, "]"), "."+pkg) {
-				found = true
-			}
-			return !found
-		}
-		if inDeps {
-			if key, _, ok := strings.Cut(line, "="); ok && strings.Trim(strings.TrimSpace(key), `"`) == pkg {
-				found = true
+	var doc map[string]any
+	if _, err := toml.DecodeFile(path, &doc); err != nil {
+		return false
+	}
+	tables := []any{doc["dependencies"], doc["dev-dependencies"], doc["build-dependencies"]}
+	if targets, ok := doc["target"].(map[string]any); ok {
+		for _, t := range targets {
+			if tm, ok := t.(map[string]any); ok {
+				tables = append(tables, tm["dependencies"], tm["dev-dependencies"], tm["build-dependencies"])
 			}
 		}
-		return !found
-	})
-	return found
+	}
+	for _, t := range tables {
+		deps, _ := t.(map[string]any)
+		for key, v := range deps {
+			if key == pkg {
+				return true
+			}
+			if spec, ok := v.(map[string]any); ok && spec["package"] == pkg {
+				return true
+			}
+		}
+	}
+	return false
 }
 
-var pyReqName = regexp.MustCompile(`^["']?([A-Za-z0-9][A-Za-z0-9._-]*)`)
+var pyReqName = regexp.MustCompile(`^\s*([A-Za-z0-9][A-Za-z0-9._-]*)`)
 
-func pythonHas(path, pkg string) bool {
+// pyprojectHas checks [project] dependencies and optional-dependencies, [dependency-groups],
+// and poetry's dependency tables — not keywords, tool config or the project's own name.
+func pyprojectHas(path, pkg string) bool {
+	var doc struct {
+		Project struct {
+			Dependencies         []string            `toml:"dependencies"`
+			OptionalDependencies map[string][]string `toml:"optional-dependencies"`
+		} `toml:"project"`
+		DependencyGroups map[string][]any `toml:"dependency-groups"`
+		Tool             struct {
+			Poetry struct {
+				Dependencies    map[string]any `toml:"dependencies"`
+				DevDependencies map[string]any `toml:"dev-dependencies"`
+				Group           map[string]struct {
+					Dependencies map[string]any `toml:"dependencies"`
+				} `toml:"group"`
+			} `toml:"poetry"`
+		} `toml:"tool"`
+	}
+	if _, err := toml.DecodeFile(path, &doc); err != nil {
+		return false
+	}
 	want := normPy(pkg)
-	found := false
+	reqs := append([]string{}, doc.Project.Dependencies...)
+	for _, group := range doc.Project.OptionalDependencies {
+		reqs = append(reqs, group...)
+	}
+	for _, group := range doc.DependencyGroups {
+		for _, item := range group {
+			if s, ok := item.(string); ok { // {include-group = ...} tables name groups, not packages
+				reqs = append(reqs, s)
+			}
+		}
+	}
+	for _, r := range reqs {
+		if m := pyReqName.FindStringSubmatch(r); m != nil && normPy(m[1]) == want {
+			return true
+		}
+	}
+	poetry := []map[string]any{doc.Tool.Poetry.Dependencies, doc.Tool.Poetry.DevDependencies}
+	for _, g := range doc.Tool.Poetry.Group {
+		poetry = append(poetry, g.Dependencies)
+	}
+	for _, deps := range poetry {
+		for name := range deps {
+			if normPy(name) == want {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+func requirementsHas(path, pkg string) bool {
+	want, found := normPy(pkg), false
 	eachLine(path, func(line string) bool {
-		// pyproject lists ("requests>=2", ...), poetry tables (requests = "^2"), requirements lines.
-		for _, part := range strings.Split(strings.Trim(line, "[],"), ",") {
-			part = strings.TrimSpace(part)
-			if key, _, ok := strings.Cut(part, "="); ok && !strings.ContainsAny(key, "<>!~") {
-				part = key
-			}
-			if m := pyReqName.FindStringSubmatch(strings.TrimSpace(part)); m != nil && normPy(m[1]) == want {
-				found = true
-			}
+		if strings.HasPrefix(line, "-") { // -r other.txt, -e ., --index-url
+			return true
+		}
+		if m := pyReqName.FindStringSubmatch(line); m != nil && normPy(m[1]) == want {
+			found = true
 		}
 		return !found
 	})
@@ -168,7 +249,7 @@ func eachLine(path string, fn func(string) bool) {
 	sc := bufio.NewScanner(f)
 	for sc.Scan() {
 		line := strings.TrimSpace(sc.Text())
-		if line == "" || strings.HasPrefix(line, "#") {
+		if line == "" || strings.HasPrefix(line, "#") || strings.HasPrefix(line, "//") {
 			continue
 		}
 		if !fn(line) {
@@ -177,31 +258,71 @@ func eachLine(path string, fn func(string) bool) {
 	}
 }
 
-// toolUse is one tool_use block inside an assistant transcript message.
+// toolUse is one tool_use block inside an assistant transcript message. Input decodes only
+// the fields conditions read, never a Write's whole content.
 type toolUse struct {
-	Type  string         `json:"type"`
-	Name  string         `json:"name"`
-	Input map[string]any `json:"input"`
+	Type  string `json:"type"`
+	ID    string `json:"id"`
+	Name  string `json:"name"`
+	Input struct {
+		FilePath string `json:"file_path"`
+	} `json:"input"`
+}
+
+// toolResult is one tool_result block inside a user transcript message.
+type toolResult struct {
+	Type      string `json:"type"`
+	ToolUseID string `json:"tool_use_id"`
+	IsError   bool   `json:"is_error"`
 }
 
 type contentMessage struct {
 	Content json.RawMessage `json:"content"`
 }
 
-// editedMatching reports whether the main thread already ran Edit or Write on a path matching
-// glob, anywhere in the transcript tail. No transcript means no known edit.
+// mainEntry is a main-thread transcript line, decoded once for both conditions.
+type mainEntry struct {
+	Type             string         `json:"type"`
+	IsSidechain      bool           `json:"isSidechain"`
+	IsMeta           bool           `json:"isMeta"`
+	IsCompactSummary bool           `json:"isCompactSummary"`
+	Message          contentMessage `json:"message"`
+}
+
+// editedMatching reports whether the main thread already edited or wrote a path matching glob,
+// successfully, in the transcript tail: an Edit/Write whose tool_result is not an error. Denied
+// and failed edits don't count. No transcript means no known edit.
 func editedMatching(path string, glob *regexp.Regexp) bool {
 	lines, err := tailLines(path)
 	if err != nil {
 		return false
 	}
+	pending := map[string]bool{} // tool_use ids of matching edits awaiting a result
 	for _, ln := range lines {
-		for _, tu := range assistantToolUses(ln) {
-			if tu.Name != "Edit" && tu.Name != "Write" {
+		var e mainEntry
+		if json.Unmarshal(ln, &e) != nil || e.IsSidechain {
+			continue
+		}
+		switch e.Type {
+		case "assistant":
+			var blocks []toolUse
+			if json.Unmarshal(e.Message.Content, &blocks) != nil {
 				continue
 			}
-			if p, _ := tu.Input["file_path"].(string); p != "" && glob.MatchString(p) {
-				return true
+			for _, b := range blocks {
+				if b.Type == "tool_use" && (b.Name == "Edit" || b.Name == "Write") && b.Input.FilePath != "" && glob.MatchString(b.Input.FilePath) {
+					pending[b.ID] = true
+				}
+			}
+		case "user":
+			var blocks []toolResult
+			if json.Unmarshal(e.Message.Content, &blocks) != nil {
+				continue
+			}
+			for _, b := range blocks {
+				if b.Type == "tool_result" && pending[b.ToolUseID] && !b.IsError {
+					return true
+				}
 			}
 		}
 	}
@@ -216,11 +337,22 @@ func agentsSinceUserTurn(path string) int {
 	}
 	n := 0
 	for i := len(lines) - 1; i >= 0; i-- {
-		if isUserPrompt(lines[i]) {
+		var e mainEntry
+		if json.Unmarshal(lines[i], &e) != nil || e.IsSidechain {
+			continue
+		}
+		if isUserPrompt(e) {
 			break
 		}
-		for _, tu := range assistantToolUses(lines[i]) {
-			if tu.Name == "Agent" || tu.Name == "Task" {
+		if e.Type != "assistant" {
+			continue
+		}
+		var blocks []toolUse
+		if json.Unmarshal(e.Message.Content, &blocks) != nil {
+			continue
+		}
+		for _, b := range blocks {
+			if b.Type == "tool_use" && (b.Name == "Agent" || b.Name == "Task") {
 				n++
 			}
 		}
@@ -228,45 +360,23 @@ func agentsSinceUserTurn(path string) int {
 	return n
 }
 
-func assistantToolUses(line []byte) []toolUse {
-	var e struct {
-		Type        string         `json:"type"`
-		IsSidechain bool           `json:"isSidechain"`
-		Message     contentMessage `json:"message"`
-	}
-	if json.Unmarshal(line, &e) != nil || e.Type != "assistant" || e.IsSidechain {
-		return nil
-	}
-	var blocks []toolUse
-	if json.Unmarshal(e.Message.Content, &blocks) != nil {
-		return nil
-	}
-	out := blocks[:0]
-	for _, b := range blocks {
-		if b.Type == "tool_use" {
-			out = append(out, b)
-		}
-	}
-	return out
-}
+// harnessPrefixes mark user-role records Claude Code writes itself: slash-command output,
+// task notifications, shell escapes. They are not prompts the user typed.
+var harnessPrefixes = []string{"<local-command", "<command-", "<task-notification", "<bash-", "<system-reminder"}
 
-// isUserPrompt reports whether a transcript line is a prompt the user typed, not a tool result.
-func isUserPrompt(line []byte) bool {
-	var e struct {
-		Type        string         `json:"type"`
-		IsSidechain bool           `json:"isSidechain"`
-		IsMeta      bool           `json:"isMeta"`
-		Message     contentMessage `json:"message"`
-	}
-	if json.Unmarshal(line, &e) != nil || e.Type != "user" || e.IsSidechain || e.IsMeta {
+// isUserPrompt reports whether a transcript entry is a prompt the user typed, not a tool
+// result, a compaction summary or harness output.
+func isUserPrompt(e mainEntry) bool {
+	if e.Type != "user" || e.IsMeta || e.IsCompactSummary {
 		return false
 	}
-	c := strings.TrimSpace(string(e.Message.Content))
-	if strings.HasPrefix(c, `"`) {
-		return true
+	var text string
+	if json.Unmarshal(e.Message.Content, &text) == nil {
+		return typed(text)
 	}
 	var blocks []struct {
 		Type string `json:"type"`
+		Text string `json:"text"`
 	}
 	if json.Unmarshal(e.Message.Content, &blocks) != nil {
 		return false
@@ -275,6 +385,19 @@ func isUserPrompt(line []byte) bool {
 		if b.Type == "tool_result" {
 			return false
 		}
+		if b.Type == "text" && typed(b.Text) {
+			return true
+		}
 	}
-	return len(blocks) > 0
+	return false
+}
+
+func typed(text string) bool {
+	t := strings.TrimSpace(text)
+	for _, p := range harnessPrefixes {
+		if strings.HasPrefix(t, p) {
+			return false
+		}
+	}
+	return t != ""
 }

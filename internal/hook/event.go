@@ -74,7 +74,7 @@ func (in *Input) Command() string {
 		if q, ok := ti["query"].(string); ok {
 			return q
 		}
-	case "Task":
+	case "Task", "Agent":
 		if p, ok := ti["prompt"].(string); ok {
 			return p
 		}

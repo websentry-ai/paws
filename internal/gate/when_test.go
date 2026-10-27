@@ -39,12 +39,26 @@ func TestHasDependency(t *testing.T) {
 		{"go.mod full path", map[string]string{"go.mod": "module x\n\nrequire (\n\tgithub.com/stripe/stripe-go/v76 v76.0.0\n)\n"}, "github.com/stripe/stripe-go/v76", true},
 		{"go.mod single require", map[string]string{"go.mod": "module x\nrequire gopkg.in/yaml.v3 v3.0.1\n"}, "gopkg.in/yaml.v3", true},
 		{"go.mod own module ignored", map[string]string{"go.mod": "module github.com/me/stripe\n"}, "stripe", false},
+		{"go.mod major suffix", map[string]string{"go.mod": "module x\nrequire (\n\tgithub.com/stripe/stripe-go/v76 v76.0.0\n)\n"}, "stripe-go", true},
+		{"go.mod indirect", map[string]string{"go.mod": "module x\nrequire (\n\tgithub.com/foo/bar v1.0.0 // indirect\n)\n"}, "bar", false},
+		{"go.mod replace", map[string]string{"go.mod": "module x\nreplace (\n\tgithub.com/foo/bar => ../bar\n)\n"}, "bar", false},
 		{"Cargo key", map[string]string{"Cargo.toml": "[package]\nname = \"x\"\n\n[dependencies]\nserde = \"1\"\n"}, "serde", true},
 		{"Cargo dotted table", map[string]string{"Cargo.toml": "[dependencies.tokio]\nversion = \"1\"\n"}, "tokio", true},
 		{"Cargo package name not a dep", map[string]string{"Cargo.toml": "[package]\nname = \"serde\"\n"}, "serde", false},
+		{"Cargo field names", map[string]string{"Cargo.toml": "[dependencies.tokio]\nversion = \"1\"\nfeatures = [\"full\"]\n"}, "version", false},
+		{"Cargo rename", map[string]string{"Cargo.toml": "[dependencies]\nsj = { package = \"serde_json\", version = \"1\" }\n"}, "serde_json", true},
+		{"Cargo dev and target", map[string]string{"Cargo.toml": "[dev-dependencies]\ncriterion = \"0.5\"\n[target.'cfg(unix)'.dependencies]\nnix = \"0.29\"\n"}, "nix", true},
 		{"pyproject list", map[string]string{"pyproject.toml": "[project]\ndependencies = [\n  \"Django>=4\",\n  \"requests\",\n]\n"}, "django", true},
+		{"pyproject one-line list", map[string]string{"pyproject.toml": "[project]\ndependencies = [\"httpx>=0.27\", \"pydantic\"]\n"}, "httpx", true},
+		{"pyproject extras", map[string]string{"pyproject.toml": "[project]\ndependencies = [\"requests[socks]>=2\"]\n"}, "requests", true},
+		{"pyproject optional", map[string]string{"pyproject.toml": "[project.optional-dependencies]\ndev = [\"pytest\", \"ruff\"]\n"}, "pytest", true},
+		{"pyproject dependency-groups", map[string]string{"pyproject.toml": "[dependency-groups]\ntest = [\"pytest\", {include-group = \"lint\"}]\n"}, "pytest", true},
+		{"pyproject keywords", map[string]string{"pyproject.toml": "[project]\nname = \"x\"\nkeywords = [\"stripe\"]\n"}, "stripe", false},
+		{"pyproject tool config", map[string]string{"pyproject.toml": "[tool.isort]\nknown_third_party = [\"stripe\"]\n"}, "stripe", false},
+		{"pyproject own name", map[string]string{"pyproject.toml": "[project]\nname = \"stripe\"\n"}, "stripe", false},
 		{"poetry table", map[string]string{"pyproject.toml": "[tool.poetry.dependencies]\nsupabase_py = \"^2\"\n"}, "supabase-py", true},
 		{"requirements", map[string]string{"requirements.txt": "# deps\nstripe==8.0\n"}, "stripe", true},
+		{"requirements include line", map[string]string{"requirements.txt": "-r stripe.txt\n"}, "stripe", false},
 		{"no manifests", map[string]string{}, "stripe", false},
 	}
 	for _, c := range cases {
@@ -86,6 +100,8 @@ func TestWhenNewFile(t *testing.T) {
 
 const (
 	lnEditTest  = `{"type":"assistant","isSidechain":false,"message":{"role":"assistant","content":[{"type":"tool_use","id":"t1","name":"Edit","input":{"file_path":"/r/src/a_test.go","old_string":"a","new_string":"b"}}]}}`
+	lnEditOK    = `{"type":"user","isSidechain":false,"message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"t1","content":"ok"}]}}`
+	lnEditFail  = `{"type":"user","isSidechain":false,"message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"t1","content":"denied","is_error":true}]}}`
 	lnEditSide  = `{"type":"assistant","isSidechain":true,"message":{"role":"assistant","content":[{"type":"tool_use","id":"t2","name":"Write","input":{"file_path":"/r/src/b_test.go"}}]}}`
 	lnAgent     = `{"type":"assistant","isSidechain":false,"message":{"role":"assistant","content":[{"type":"tool_use","id":"a1","name":"Agent","input":{"prompt":"x"}},{"type":"tool_use","id":"a2","name":"Task","input":{"prompt":"y"}}]}}`
 	lnUserTyped = `{"type":"user","isSidechain":false,"message":{"role":"user","content":"do the thing"}}`
@@ -100,9 +116,13 @@ func TestWhenNoEditMatching(t *testing.T) {
 	if !Applies(r, ev) {
 		t.Error("no test edited yet: the rule applies")
 	}
-	ev.Transcript = write(t, lnEditTest, lnAssistant)
+	ev.Transcript = write(t, lnEditTest, lnEditOK, lnAssistant)
 	if Applies(r, ev) {
 		t.Error("a test file was edited: the rule must not apply")
+	}
+	ev.Transcript = write(t, lnEditTest, lnEditFail, lnAssistant)
+	if !Applies(r, ev) {
+		t.Error("a denied or failed test edit does not count")
 	}
 	ev.Transcript = write(t, lnEditSide, lnAssistant)
 	if !Applies(r, ev) {
@@ -135,5 +155,17 @@ func TestWhenParseErrors(t *testing.T) {
 		if _, err := rule.Parse([]byte(md), "t.md"); err == nil {
 			t.Errorf("%s: should fail to parse", name)
 		}
+	}
+}
+
+func TestAgentCountIgnoresHarnessUserRecords(t *testing.T) {
+	r := mustRule(t, "---\nname: par\nevent: pre-tool\nmatcher:\n  tool: Agent\nwhen: agent-count>1\naction:\n  type: audit\n---\n")
+	lnCmdOut := `{"type":"user","isSidechain":false,"message":{"role":"user","content":"<local-command-stdout>ok</local-command-stdout>"}}`
+	lnSummary := `{"type":"user","isSidechain":false,"isCompactSummary":true,"message":{"role":"user","content":"This session is being continued..."}}`
+	lnNotify := `{"type":"user","isSidechain":false,"message":{"role":"user","content":[{"type":"text","text":"<task-notification>done</task-notification>"}]}}`
+	ev := Event{Kind: rule.KindTool, Tool: "Agent", Target: "x"}
+	ev.Transcript = write(t, lnUserTyped, lnAgent, lnCmdOut, lnSummary, lnNotify, lnToolRes)
+	if !Applies(r, ev) {
+		t.Error("harness-written user records must not reset the count")
 	}
 }

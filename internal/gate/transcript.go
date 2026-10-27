@@ -22,6 +22,9 @@ type transcriptEntry struct {
 	// Polymorphic in the log: an object for tool results, a bare string for hook denials.
 	ToolUseResult json.RawMessage `json:"toolUseResult"`
 	Attachment    *attachment     `json:"attachment"`
+	Message       struct {
+		ID string `json:"id"`
+	} `json:"message"`
 }
 
 // attachment is a harness-written record; hook_additional_context holds what a hook's
@@ -116,7 +119,7 @@ func scanWindow(path string, window int, hit func(transcriptEntry) bool) bool {
 	if err != nil {
 		return false
 	}
-	turns := 0
+	turns, lastID := 0, ""
 	for i := len(lines) - 1; i >= 0; i-- {
 		var e transcriptEntry
 		if json.Unmarshal(lines[i], &e) != nil {
@@ -131,7 +134,12 @@ func scanWindow(path string, window int, hit func(transcriptEntry) bool) bool {
 		case e.Type == "system" && e.Subtype == "compact_boundary":
 			return false
 		case e.Type == "assistant":
-			turns++
+			// Claude Code writes one entry per content block (thinking, text, each tool_use),
+			// all sharing the response's message id. A turn is one response, not one entry.
+			if e.Message.ID == "" || e.Message.ID != lastID {
+				turns++
+			}
+			lastID = e.Message.ID
 			if turns > window {
 				return false
 			}

@@ -201,7 +201,7 @@ def grade(expect: dict, events: list[dict], audit: list[dict], project: Path) ->
 
 # ---------- run ----------
 
-def run_case(case: Path, run_dir: Path, paws_bin: Path, model: str | None, keep: bool) -> int:
+def run_case(case: Path, run_dir: Path, installer: "Installer", model: str | None, keep: bool) -> int:
     spec = tomllib.loads((case / "case.toml").read_text())
     unknown = set(spec.get("expect", {})) - EXPECT_KEYS
     if unknown:
@@ -211,7 +211,7 @@ def run_case(case: Path, run_dir: Path, paws_bin: Path, model: str | None, keep:
     evidence.mkdir(parents=True)
     scratch = Path(tempfile.mkdtemp(prefix=f"paws-verify-{case.name}-"))
     try:
-        return drive_case(case, spec, evidence, scratch, paws_bin, model)
+        return drive_case(case, spec, evidence, scratch, installer, model)
     finally:
         if keep:
             print(f"  scratch kept at {scratch}")
@@ -219,7 +219,7 @@ def run_case(case: Path, run_dir: Path, paws_bin: Path, model: str | None, keep:
             shutil.rmtree(scratch, ignore_errors=True)
 
 
-def drive_case(case: Path, spec: dict, evidence: Path, scratch: Path, paws_bin: Path, model: str | None) -> int:
+def drive_case(case: Path, spec: dict, evidence: Path, scratch: Path, installer: "Installer", model: str | None) -> int:
     project, paws_home = scratch / "proj", scratch / "paws-home"
     paws_home.mkdir()
 
@@ -237,7 +237,8 @@ def drive_case(case: Path, spec: dict, evidence: Path, scratch: Path, paws_bin: 
     if (case / "paws-home").exists():
         shutil.copytree(case / "paws-home", paws_home, dirs_exist_ok=True)
 
-    env = agent_env({"PAWS_HOME": str(paws_home), "PATH": f"{paws_bin.parent}{os.pathsep}{os.environ['PATH']}"})
+    # A per-case npm cache makes every --npm case download and verify the binary afresh.
+    env = agent_env({"PAWS_HOME": str(paws_home), "npm_config_cache": str(scratch / "npm-cache"), **installer.env})
     for cmd in ["git init -q .", "git config user.email verify@paws.local", "git config user.name paws-verify",
                 *spec.get("setup", [])]:
         r = sh(cmd, project, env)
@@ -245,10 +246,14 @@ def drive_case(case: Path, spec: dict, evidence: Path, scratch: Path, paws_bin: 
             print(f"  setup failed: {cmd}\n{r.stderr}")
             return INDETERMINATE
 
-    r = sh([str(paws_bin), "init", *spec.get("init_args", [])], project, env)
+    r = sh([*installer.init, *spec.get("init_args", [])], project, env, timeout=300)
+    (evidence / "init.txt").write_text(r.stdout + r.stderr)
     if r.returncode != 0:
-        print(f"  paws init failed: {r.stderr}")
+        print(f"  paws init failed: {r.stdout}{r.stderr}")
         return INDETERMINATE
+    if not (paws_home / "bin").is_dir():
+        print("  paws init did not install its binary under PAWS_HOME/bin")
+        return FAIL
     shutil.copy(project / ".claude" / "settings.json", evidence / "settings.json")
 
     args = ["claude", "-p", spec["prompt"], "--model", model or spec.get("model", "sonnet"),
@@ -291,24 +296,65 @@ def drive_case(case: Path, spec: dict, evidence: Path, scratch: Path, paws_bin: 
     return verdict
 
 
+class Installer:
+    """How a case gets paws: the init command plus env it needs."""
+
+    def __init__(self, init: list[str], env: dict[str, str], cleanup=lambda: None):
+        self.init, self.env, self.cleanup = init, env, cleanup
+
+    @staticmethod
+    def go(run_dir: Path) -> "Installer":
+        paws_bin = build_paws(run_dir / "bin")
+        return Installer([str(paws_bin), "init"], {"PATH": f"{paws_bin.parent}{os.pathsep}{os.environ['PATH']}"})
+
+    @staticmethod
+    def npm(run_dir: Path) -> "Installer":
+        """The ship path: GoReleaser snapshot at the npm package's version, served locally, then npx init."""
+        version = json.loads((REPO / "npm" / "package.json").read_text())["version"]
+        cfg = run_dir / "goreleaser.yaml"
+        run_dir.mkdir(parents=True, exist_ok=True)
+        dist = run_dir / "dist"
+        cfg.write_text((REPO / ".goreleaser.yaml").read_text()
+                       + f'\ndist: "{dist}"\nsnapshot:\n  version_template: "{version}"\n')
+        r = sh(["goreleaser", "release", "--snapshot", "--clean", "--config", str(cfg)], REPO, timeout=600)
+        if r.returncode != 0:
+            raise SystemExit(f"goreleaser snapshot failed:\n{r.stdout[-2000:]}{r.stderr[-2000:]}")
+        r = sh(["npm", "pack", "--pack-destination", str(run_dir)], REPO / "npm")
+        if r.returncode != 0:
+            raise SystemExit(f"npm pack failed:\n{r.stderr}")
+        tgz = run_dir / f"unbound-paws-{version}.tgz"
+        server = subprocess.Popen([sys.executable, "-u", "-m", "http.server", "0", "--bind", "127.0.0.1", "--directory", str(dist)],
+                                  stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, text=True)  # request logs go to stderr
+        line = server.stdout.readline()  # "Serving HTTP on 127.0.0.1 port N ..."
+        port = line.split(" port ")[1].split()[0]
+        env = {"PAWS_DOWNLOAD_BASE": f"http://127.0.0.1:{port}", "npm_config_update_notifier": "false"}
+        def cleanup():
+            server.terminate()
+            server.wait(timeout=10)
+        return Installer(["npx", "--yes", "--package", str(tgz), "unbound-paws", "init"], env, cleanup)
+
+
 def cmd_run(args: argparse.Namespace) -> int:
     names = sorted(p.name for p in CASES.iterdir() if (p / "case.toml").exists()) if args.all else args.cases
     if not names:
         print("name at least one case, or pass --all")
         return FAIL
     run_dir = ARTIFACTS / f"{time.strftime('%Y%m%d-%H%M%S')}-{os.getpid()}"
-    paws_bin = build_paws(run_dir / "bin")
+    installer = Installer.npm(run_dir) if args.npm else Installer.go(run_dir)
     worst = PASS
-    for name in names:
-        case = CASES / name
-        if not (case / "case.toml").exists():
-            print(f"{name}: no such case")
-            worst = max(worst, FAIL)
-            continue
-        print(f"{name}")
-        v = run_case(case, run_dir, paws_bin, args.model, args.keep)
-        print(f"  => {['PASS', 'FAIL', 'INDETERMINATE'][v]}")
-        worst = max(worst, v)
+    try:
+        for name in names:
+            case = CASES / name
+            if not (case / "case.toml").exists():
+                print(f"{name}: no such case")
+                worst = max(worst, FAIL)
+                continue
+            print(f"{name}")
+            v = run_case(case, run_dir, installer, args.model, args.keep)
+            print(f"  => {['PASS', 'FAIL', 'INDETERMINATE'][v]}")
+            worst = max(worst, v)
+    finally:
+        installer.cleanup()
     print(f"evidence: {run_dir}")
     return worst
 
@@ -323,6 +369,7 @@ def main() -> int:
     run.add_argument("--all", action="store_true")
     run.add_argument("--model")
     run.add_argument("--keep", action="store_true", help="keep the scratch repo for inspection")
+    run.add_argument("--npm", action="store_true", help="install via a GoReleaser snapshot + npx unbound-paws init")
     run.set_defaults(fn=cmd_run)
     args = p.parse_args()
     return args.fn(args)

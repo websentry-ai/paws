@@ -8,7 +8,8 @@ import (
 	"github.com/websentry-ai/paws/internal/cli"
 )
 
-const version = "0.1.0-dev"
+// version is stamped by GoReleaser (-X main.version) from the release tag.
+var version = "0.2.0-dev"
 
 func main() {
 	os.Exit(run(os.Args[1:]))

@@ -1,0 +1,13 @@
+description = "shipped catalog binding writing/humanizer-commit gates git commit on the humanizer skill"
+prompt = "Create an empty git commit in this repo with the message 'initial'. Use the Bash tool."
+allowed_tools = ["Bash(git:*)", "Skill"]
+from_catalog = ["writing/humanizer-commit.md"]
+
+[expect]
+skills_invoked = ["humanizer"]
+audit = [
+  { rule = "humanizer-commit", verdict = "deny" },
+  { rule = "humanizer-commit", verdict = "allow", satisfied_by = "skill-load" },
+]
+audit_max = [{ rule = "humanizer-commit", verdict = "deny", max = 1 }]
+shell = ["git log -1 --format=%B | grep -q 'Humanized: yes'"]

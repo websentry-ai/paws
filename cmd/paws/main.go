@@ -28,6 +28,8 @@ func run(args []string) int {
 		return cli.Uninstall(args[1:])
 	case "explain":
 		return cli.Explain(args[1:])
+	case "validate":
+		return cli.Validate(args[1:])
 	case "version", "--version", "-v":
 		fmt.Println("paws " + version)
 		return 0
@@ -50,6 +52,7 @@ Usage:
   paws uninstall [--global | --settings <path>]  Remove paws from a settings.json.
   paws explain [--tool T] [--event E] <command>  Dry-run: show matching rules and the decision.
   echo '<event json>' | paws explain -           Dry-run a full event JSON.
+  paws validate [root]                           Check root/catalog bindings and root/packs manifests.
   paws version                                   Print version.
 
 Rules are .paws/**/*.md files; paws reads every .paws/ from the working

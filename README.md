@@ -86,6 +86,7 @@ paws explain 'terraform apply'             # dry-run: matching rules + decision,
 paws explain --tool Edit config/prod.env   # dry-run a non-Bash tool call
 paws explain --event user-prompt 'ship it' # dry-run a prompt
 echo '<event json>' | paws explain -       # dry-run a full event JSON
+paws validate .                            # check catalog/ bindings and packs/ manifests
 paws gate                                  # the hook entrypoint (reads event JSON on stdin)
 go test ./...
 python3 .claude/skills/verify-paws/scripts/drive.py run --all   # live headless Claude Code e2e
@@ -98,6 +99,10 @@ cmd/paws      CLI entrypoint (dispatch)
 internal/hook Claude Code adapter: I/O contract + translation to/from the gate engine
 internal/rule rule model: parse + match (pure, agent-agnostic)
 internal/gate decision engine: load, resolve, exec-script, audit, transcript scan (agent-agnostic)
-internal/cli  the gate / init / uninstall / explain commands
+internal/catalog catalog bindings + pack manifests: load and validate
+internal/cli  the gate / init / uninstall / explain / validate commands
+catalog       shipped bindings (see docs/catalog.md)
+packs         pack manifests: the unit `paws add` installs
+docs          format references
 examples      sample .paws rules
 ```

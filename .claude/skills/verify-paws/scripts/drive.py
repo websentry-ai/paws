@@ -227,6 +227,11 @@ def drive_case(case: Path, spec: dict, evidence: Path, scratch: Path, paws_bin: 
         shutil.copytree(case / "project", project)
     else:
         project.mkdir()
+    for rel in spec.get("from_catalog", []):
+        # Ship-path check: the real catalog binding, copied as a repo rule.
+        dest = project / ".paws" / "catalog" / rel
+        dest.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copy(REPO / "catalog" / rel, dest)
     if (case / "skills").exists():
         shutil.copytree(case / "skills", project / ".claude" / "skills")
     if (case / "paws-home").exists():

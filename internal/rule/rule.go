@@ -29,6 +29,12 @@ type Matcher struct {
 	CommandRegex string `yaml:"command_regex"` // matched against the extracted command
 }
 
+// on_miss values: what a require-skill deny carries when the skill isn't loaded.
+const (
+	OnMissLoadRequired = "load-required" // name the skill; the agent invokes it (default)
+	OnMissDigest       = "digest"        // the binding's compiled digest rides in the deny
+)
+
 // Action is what paws does when a rule matches.
 type Action struct {
 	Type        string `yaml:"type"`
@@ -36,14 +42,38 @@ type Action struct {
 	DenyMessage string `yaml:"deny_message"`
 	Message     string `yaml:"message"`
 	Script      string `yaml:"script"`
+	OnMiss      string `yaml:"on_miss"`
+	Digest      string `yaml:"digest"` // path to the digest file, relative to the rule's directory
+}
+
+// Upstream pins the third-party skill a catalog binding installs. The runner never reads it.
+type Upstream struct {
+	Repo        string `yaml:"repo"`
+	Path        string `yaml:"path"`
+	Ref         string `yaml:"ref"`
+	ContentHash string `yaml:"content_hash"`
+}
+
+// Provenance is catalog metadata about an upstream skill, shown on the catalog page.
+type Provenance struct {
+	Stars    int    `yaml:"stars"`
+	Installs int    `yaml:"installs"`
+	License  string `yaml:"license"`
+	LastPush string `yaml:"last_push"`
+	Fetched  string `yaml:"fetched"`
 }
 
 // Rule is one .paws/*.md file: frontmatter directives + a human-readable body.
+// A catalog binding is the same file with upstream/provenance/tags filled in;
+// unknown keys are ignored so the two formats stay one.
 type Rule struct {
-	Name    string  `yaml:"name"`
-	Event   string  `yaml:"event"`
-	Matcher Matcher `yaml:"matcher"`
-	Action  Action  `yaml:"action"`
+	Name       string     `yaml:"name"`
+	Event      string     `yaml:"event"`
+	Matcher    Matcher    `yaml:"matcher"`
+	Action     Action     `yaml:"action"`
+	Upstream   Upstream   `yaml:"upstream"`
+	Provenance Provenance `yaml:"provenance"`
+	Tags       []string   `yaml:"tags"`
 
 	SourcePath string         `yaml:"-"`
 	re         *regexp.Regexp `yaml:"-"`
@@ -80,6 +110,23 @@ func Parse(data []byte, path string) (*Rule, error) {
 	if r.Action.Type == "require-skill" && r.Action.Skill == "" {
 		return nil, fmt.Errorf("require-skill needs a skill")
 	}
+	switch r.Action.OnMiss {
+	case "", OnMissLoadRequired:
+	case OnMissDigest:
+		if r.Action.Digest == "" {
+			return nil, fmt.Errorf("on_miss: digest needs a digest file")
+		}
+	default:
+		return nil, fmt.Errorf("unknown action.on_miss %q (want %s or %s)", r.Action.OnMiss, OnMissLoadRequired, OnMissDigest)
+	}
+	if r.Action.OnMiss != "" && r.Action.Type != "require-skill" {
+		return nil, fmt.Errorf("on_miss only applies to require-skill")
+	}
+	if r.Action.Digest != "" {
+		if err := relativeInside(r.Action.Digest); err != nil {
+			return nil, fmt.Errorf("digest %w", err)
+		}
+	}
 	if r.Action.Type == "exec-script" {
 		if r.Action.Script == "" {
 			return nil, fmt.Errorf("exec-script needs a script path")
@@ -87,9 +134,8 @@ func Parse(data []byte, path string) (*Rule, error) {
 		// Scripts run with full shell trust, same as the rule file itself — but the
 		// path must stay inside the rule's own directory tree, not point anywhere
 		// on disk, so `paws explain`/review of a .paws/ dir sees everything it runs.
-		clean := filepath.Clean(r.Action.Script)
-		if filepath.IsAbs(clean) || clean == ".." || strings.HasPrefix(clean, ".."+string(filepath.Separator)) {
-			return nil, fmt.Errorf("exec-script script must be a relative path inside the rule's directory, got %q", r.Action.Script)
+		if err := relativeInside(r.Action.Script); err != nil {
+			return nil, fmt.Errorf("exec-script script %w", err)
 		}
 	}
 	if r.Action.Type == "warn" && Kind(r.Event) == KindPrompt {
@@ -117,6 +163,15 @@ func Parse(data []byte, path string) (*Rule, error) {
 		r.re = re
 	}
 	return &r, nil
+}
+
+// relativeInside rejects a path that is absolute or escapes the rule's directory.
+func relativeInside(p string) error {
+	clean := filepath.Clean(p)
+	if filepath.IsAbs(clean) || clean == ".." || strings.HasPrefix(clean, ".."+string(filepath.Separator)) {
+		return fmt.Errorf("must be a relative path inside the rule's directory, got %q", p)
+	}
+	return nil
 }
 
 // frontmatter returns the bytes between the leading "---" fence and its close.

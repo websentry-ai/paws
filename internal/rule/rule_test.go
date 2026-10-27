@@ -58,6 +58,10 @@ func TestParseValidation(t *testing.T) {
 		{"exec-script traversal", "---\nname: x\nevent: pre-tool\naction:\n  type: exec-script\n  script: ../../etc/passwd\n---\n"},
 		{"bad regex", "---\nname: x\nevent: pre-tool\nmatcher:\n  command_regex: \"([\"\naction:\n  type: block\n---\n"},
 		{"warn on user-prompt", "---\nname: x\nevent: user-prompt\naction:\n  type: warn\n---\n"},
+		{"unknown on_miss", "---\nname: x\nevent: pre-tool\naction:\n  type: require-skill\n  skill: s\n  on_miss: maybe\n---\n"},
+		{"digest without file", "---\nname: x\nevent: pre-tool\naction:\n  type: require-skill\n  skill: s\n  on_miss: digest\n---\n"},
+		{"on_miss on block", "---\nname: x\nevent: pre-tool\naction:\n  type: block\n  on_miss: load-required\n---\n"},
+		{"digest traversal", "---\nname: x\nevent: pre-tool\naction:\n  type: require-skill\n  skill: s\n  on_miss: digest\n  digest: ../secret.md\n---\n"},
 		{"audit with message", "---\nname: x\nevent: pre-tool\naction:\n  type: audit\n  message: hi\n---\n"},
 		{"prompt-inject no message", "---\nname: x\nevent: user-prompt\naction:\n  type: prompt-inject\n---\n"},
 		{"prompt-inject on pre-tool", "---\nname: x\nevent: pre-tool\naction:\n  type: prompt-inject\n  message: hi\n---\n"},
@@ -130,5 +134,49 @@ func TestMatchesGitSyntheticEvents(t *testing.T) {
 	}
 	if !push.Matches("Bash", "git -C sub push") {
 		t.Error("pre-push should match git with flags before the subcommand")
+	}
+}
+
+func TestParseBindingSuperset(t *testing.T) {
+	r := mustRule(t, `---
+name: humanizer-pr
+event: pre-tool
+matcher:
+  tool: Bash
+  command_regex: (^|[;&|\n])\s*gh\s+pr\s+create\b
+action:
+  type: require-skill
+  skill: humanizer
+  on_miss: digest
+  digest: humanizer.digest.md
+upstream:
+  repo: github.com/blader/humanizer
+  path: SKILL.md
+  ref: main
+  content_hash: sha256:abc
+provenance:
+  stars: 56905
+  license: MIT
+  last_push: 2026-09-28
+  fetched: 2026-10-14
+tags: [practice, writing]
+some_future_key: ignored
+---
+Removes the AI tells from PR bodies.
+`)
+	if r.Action.OnMiss != OnMissDigest || r.Action.Digest != "humanizer.digest.md" {
+		t.Errorf("on_miss/digest not parsed: %+v", r.Action)
+	}
+	if r.Upstream.Repo != "github.com/blader/humanizer" || r.Upstream.ContentHash != "sha256:abc" {
+		t.Errorf("upstream not parsed: %+v", r.Upstream)
+	}
+	if r.Provenance.Stars != 56905 || r.Provenance.License != "MIT" {
+		t.Errorf("provenance not parsed: %+v", r.Provenance)
+	}
+	if len(r.Tags) != 2 || r.Tags[1] != "writing" {
+		t.Errorf("tags not parsed: %v", r.Tags)
+	}
+	if !r.Matches("Bash", "git add . && gh pr create --fill") {
+		t.Error("binding should match like a plain rule")
 	}
 }

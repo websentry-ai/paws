@@ -1,0 +1,6 @@
+name: source-control
+description: "Org guardrails for git and GitHub writes: commit format, protected branches, secret scan before commit, no force-push to shared refs."
+tags: [org, git]
+bindings:
+  - source-control/git.md
+  - source-control/github-mcp.md

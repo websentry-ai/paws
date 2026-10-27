@@ -1,0 +1,7 @@
+# Filled into SKILL.md at install: each KEY placeholder gets its value. Angle-bracket values are
+# org settings with no safe default; SKILL.md "Defaults" says what applies until set.
+placeholders:
+  INSTRUCTIONS_FORMAT: 'the org''s instruction-file convention (default: concise imperative bullets, sections by topic, no prose duplication of the codebase)'
+  MANAGED_SETTINGS_PATHS: <managed-settings-paths>
+  MCP_ALLOWLIST: <mcp-allowlist>
+  SKILL_CATALOG: <skill-catalog>

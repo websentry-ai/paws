@@ -1,0 +1,7 @@
+name: comms
+description: "Org guardrails for Slack and Gmail: destination checked, external boundary respected, no mass pings, agent identity stated."
+tags: [org, comms]
+bindings:
+  - communications/slack.md
+  - communications/slack-mcp.md
+  - communications/gmail-mcp.md

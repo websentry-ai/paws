@@ -1,0 +1,7 @@
+# Filled into SKILL.md at install: each KEY placeholder gets its value. Angle-bracket values are
+# org settings with no safe default; SKILL.md "Defaults" says what applies until set.
+placeholders:
+  CHANGELOG_CONVENTION: CHANGELOG.md in keep-a-changelog format
+  ORG_SCOPE: <org-scope>
+  PROVENANCE_POLICY: publish with --provenance from CI when the pipeline supports it, otherwise state that provenance is absent
+  SANCTIONED_REGISTRY: https://registry.npmjs.org

@@ -1,0 +1,9 @@
+# Filled into SKILL.md at install: each KEY placeholder gets its value. Angle-bracket values are
+# org settings with no safe default; SKILL.md "Defaults" says what applies until set.
+placeholders:
+  EXTERNAL_DESTINATIONS_POLICY: <external-destinations-policy>
+  GCS_ORG_PROJECTS: the projects listed by `gcloud projects list` under the org's domain
+  PREFERRED_CLI: gcloud storage where installed, gsutil otherwise
+  SANCTIONED_REMOTES: <sanctioned-remotes>
+  SENSITIVITY_TIERS: <sensitivity-tiers>
+  TRANSFER_THRESHOLD: 10 GB

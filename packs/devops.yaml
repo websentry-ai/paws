@@ -1,0 +1,14 @@
+name: devops
+description: "Org guardrails for shipping and running services: GitHub Actions and Vercel deploys, Docker, kubectl/helm, Datadog monitors and npm publishing."
+tags: [org, devops, deploy]
+bindings:
+  - ci-cd-deployment/github-actions.md
+  - ci-cd-deployment/github-actions-mcp.md
+  - ci-cd-deployment/vercel-mcp.md
+  - container-runtime-local/docker.md
+  - containers-orchestration/kubectl.md
+  - containers-orchestration/kubectl-mcp.md
+  - containers-orchestration/kubectl-ops-mcp.md
+  - observability/datadog.md
+  - observability/datadog-mcp.md
+  - package-publishing/npm.md

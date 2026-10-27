@@ -1,0 +1,9 @@
+# Filled into SKILL.md at install: each KEY placeholder gets its value. Angle-bracket values are
+# org settings with no safe default; SKILL.md "Defaults" says what applies until set.
+placeholders:
+  CREDENTIALS_SOURCE: ~/.pgpass or PGSERVICE
+  MIGRATION_TOOL: <migration-tool>
+  PGSERVICE_PROD: <prod-pgservice>
+  PROD_ENVIRONMENTS: <prod-environments>
+  READ_REPLICA: <read-replica>
+  STATEMENT_TIMEOUT: 30s

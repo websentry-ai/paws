@@ -1,0 +1,10 @@
+# Filled into SKILL.md at install: each KEY placeholder gets its value. Angle-bracket values are
+# org settings with no safe default; SKILL.md "Defaults" says what applies until set.
+placeholders:
+  AGENT_ATTRIBUTION_CONVENTION: '[created-by: ai-agent]'
+  DEFAULT_ASSIGNEE: the requesting human
+  DEFAULT_EPIC_POLICY: link to the epic in session context and state it; if none fits, ask
+  ESTIMATION_POLICY: agents never set points or estimates; user-supplied values only
+  JIRA_PROJECT_KEY: <project-key>
+  JIRA_SITE: <jira-site>
+  TICKET_TEMPLATE_REGISTRY: 'the standard per-type sections — Bug: Steps / Expected / Actual / Environment; Task/Story: Context / Acceptance criteria'

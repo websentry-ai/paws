@@ -1,0 +1,6 @@
+name: os-packages
+description: "Org guardrails for apt and Homebrew: refresh and simulate first, respect holds and pins, sanctioned sources only."
+tags: [org, packages]
+bindings:
+  - os-package-managers/apt.md
+  - os-package-managers/brew.md

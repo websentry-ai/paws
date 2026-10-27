@@ -1,0 +1,9 @@
+name: database
+description: "Org guardrails for data writes: count before UPDATE/DELETE, transactions and migrations for Postgres, cost preview and scratch zones for BigQuery."
+tags: [org, database]
+bindings:
+  - databases/postgres.md
+  - databases/postgres-mcp.md
+  - data-analytics/bigquery.md
+  - data-analytics/bigquery-mcp.md
+  - data-analytics/bigquery-write-mcp.md

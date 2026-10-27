@@ -1,169 +1,182 @@
 # paws
 
-**P**re-tool **A**gent **W**orkflow **S**ystem — Husky for AI coding agents.
-Drop a `.paws/` folder of markdown rules in your repo; paws registers itself
-as a Claude Code hook and gates every tool call against them. No daemon, no
-compile step, no network. Fails open — any internal error allows the call.
+**Skills that actually fire.**
 
-Apache-2.0 · targets Claude Code.
+You install a skill (humanizer, a TDD skill, your team's AWS rules) and your
+coding agent decides on every turn whether it's relevant enough to load.
+Often it decides no: the PR body goes out with the AI tells, the tests get
+skipped, the bucket gets created without tags. Installed is not applied.
 
-## Install
+paws is a small local hook for Claude Code that fixes that one thing. When a
+bound action is about to run (a commit, a PR, a Slack send, an S3 bucket),
+paws checks the session transcript for the skill. If it isn't loaded, the call
+is denied once with a message naming the skill; the agent loads it and
+retries, and the retry goes through. Husky, for agents.
+
+paws guarantees the skill was loaded; the skill governs the behaviour. It
+never rewrites tool input, reads tool output, or calls the network.
+
+Apache-2.0 · Claude Code · no account.
+
+## Ten minutes
+
+```bash
+npx unbound-paws init      # registers the hook in this repo's .claude/settings.json
+paws add writing           # humanizer before PR bodies, commits and MCP sends
+```
+
+(If `paws` isn't on your PATH yet, it's at `~/.paws/bin/paws`.)
+
+Now ask Claude Code for a commit or a PR. You'll see:
 
 ```
-npx unbound-paws init              # registers paws in ./.claude/settings.json
+agent runs `git commit ...`  → paws denies once:
+  This action requires the "humanizer" skill. Invoke it with the Skill tool,
+  then retry this exact command.
+agent invokes humanizer, retries → the commit goes through, humanized
 ```
 
-The npm package downloads the release binary for your platform (checked
-against the release's `checksums.txt`). `paws init` copies the running binary
-to `~/.paws/bin/paws` and registers that path, so clearing the npm cache or
-deleting a `go build` output never breaks the hook. Re-run `init` after an
-upgrade to replace the copy. Every repo and the global hook share that one
-binary, so `init` from any version (including an older one, or a dev build)
-swaps it for all of them.
+Dry-run any action without a session:
 
-From source: `go build -o paws ./cmd/paws && ./paws init`.
-
-Upgrading from 0.1: re-run `paws init` once. 0.2 also registers SessionStart
-(for `session-start` rules) and PostToolUse and Stop (for local telemetry).
-
-`--global` registers in `~/.claude/settings.json` instead (every repo on the
-machine); `--settings <path>` targets an explicit file. `paws uninstall`
-takes the same flags and removes the entry; it leaves `~/.paws/bin/paws` for
-other repos that still use it.
-
-## Release
-
-Push a `v*` tag. GoReleaser builds darwin/linux/windows for amd64/arm64 and
-attaches archives plus `checksums.txt` to the GitHub release. The `npm` job
-then publishes `unbound-paws` at the tag's version (prereleases to the `next`
-dist-tag) once an `NPM_TOKEN` secret exists. The npm installer downloads from
-the release, so the repo must be public for `npx` installs to work.
-
-Test the npm path locally without a release: `goreleaser release --snapshot
---clean`, serve `dist/` over HTTP, and run the packed `npm/` tarball with
-`PAWS_DOWNLOAD_BASE=http://127.0.0.1:<port>`.
-
-## Add a pack
-
+```bash
+paws explain 'gh pr create --fill'
 ```
-paws add writing                   # humanizer before PR bodies, commits and MCP sends
-paws add --project writing         # into this repo (.paws/packs, .claude/skills) to commit
-paws add --pick prose=stop-slop writing   # choose a pick_one option
-paws search aws                    # browse the catalog
-paws list                          # installed packs and how often each binding fired
-paws stats                         # what fired, what was already loaded (docs/telemetry.md)
-paws ui                            # the same, plus the catalog, as a local page
+
+## Packs
+
+```bash
+paws search aws            # browse the catalog built into the binary
+paws add writing           # install for you (~/.paws, ~/.claude/skills)
+paws add --project writing # install into this repo, to commit for the team
+paws list                  # what's installed, how often each binding fired
+paws stats                 # what fired, and how often the skill was already loaded
+paws ui                    # all of that as a local page
 paws remove writing
 ```
 
-Packs come from the catalog built into the binary. `paws add` installs the
-bindings plus the skills they require: upstream skills are fetched at a
-pinned commit and refused if their content hash changed; skills you already
-have are left alone and used as they are.
+`paws add` installs the bindings and the skills they require. Third-party
+skills are fetched from upstream at a pinned commit and refused if their
+content changed; skills you already have, or have edited, are left alone.
+See [docs/catalog.md](docs/catalog.md).
 
-## Write a rule
+## Your own rules
 
-`.paws/pre-tool/aws-tagging.md`:
+A rule is a markdown file in `.paws/` (repo) or `~/.paws/` (you). It takes
+effect on the next tool call.
 
 ```markdown
 ---
-name: aws-tagging
+name: humanizer-pr
 event: pre-tool
 matcher:
   tool: Bash
-  command_regex: (^|[;&|])\s*(aws (ec2 run-instances|s3 mb)|terraform apply)
+  command_regex: (^|[;&|\n])\s*gh\s+pr\s+(create|edit)\b
 action:
   type: require-skill
-  skill: aws-tagging-standards
-  deny_message: Invoke the aws-tagging-standards skill, then retry this exact command.
+  skill: humanizer
 ---
-Ensures every AWS resource carries Owner/Environment/ManagedBy tags.
+PR titles and bodies read like a person wrote them.
 ```
 
-Rules take effect immediately — no restart, no re-init. paws reads
-`.paws/**/*.md` from cwd up to the repo root (or `$HOME`), plus `~/.paws`,
-fresh on every tool call. `$PAWS_HOME`, when set to an absolute path, replaces
-`~/.paws` (user rules and the audit log). Claude Code passes a settings
-file's `env` to hooks, so a repo whose `.claude/settings.json` sets
-`PAWS_HOME` can move your user rules and audit log for sessions in that repo;
-review `.claude/settings.json` like you review `.paws/`.
+Or ask Claude Code: "always load humanizer before I open a PR". `paws init`
+installs a `paws` skill that knows the format and checks its work with
+`paws explain`.
 
-The full authoring reference, with RE2 tips and `when:` conditions, is
-[docs/rules.md](docs/rules.md).
-
-## Events
-
-| `event:` | fires on |
+| | |
 |---|---|
-| `pre-tool` | any tool call |
-| `pre-push` | `pre-tool`, plus the Bash command must match `git push` |
-| `pre-commit` | `pre-tool`, plus the Bash command must match `git commit` |
-| `user-prompt` | the submitted prompt text, not a tool call |
-| `session-start` | a session starting; `command_regex` matches the source (`startup`, `resume`, `clear`, `compact`) |
+| events | `pre-tool`, `pre-commit`, `pre-push`, `user-prompt`, `session-start` |
+| matcher | `tool` (names, `mcp__server__*`), `command_regex`, `file_glob`, `mcp_action` (`send`, `create`, `update`, `delete`) |
+| when | `dependency:PKG`, `repo-marker:PATH`, `new-file`, `no-edit-matching:GLOB`, `agent-count>N` |
+| actions | `require-skill`, `advise`, `block`, `warn`, `audit`, `prompt-inject`, `exec-script` |
 
-## Matcher
+The full reference: [docs/rules.md](docs/rules.md).
 
-`tool:` — a tool name (`Bash`, `Read`, `Write`, `Edit`, `Grep`, `Glob`,
-`WebFetch`, `WebSearch`, `mcp__<server>__<tool>`), a `prefix*` pattern
-(`mcp__slack__*`), an `A|B` list of either, or omitted/`"*"` (quoted) for any.
+## What paws does and doesn't do
 
-`mcp_action:` — `send`, `create`, `update` or `delete` (or an `A|B` list):
-any MCP tool whose own name says it does that, on any server. Reads never
-match; drafts and comments count as `send`.
+- **Local only.** The hook reads rule files and the session transcript and
+  writes `~/.paws/audit.log`. Nothing leaves the machine
+  ([docs/telemetry.md](docs/telemetry.md)).
+- **Fails open.** A rule that doesn't parse is skipped with a one-line
+  notice; an internal error allows the call. A hook that wedges your terminal
+  gets uninstalled within the hour.
+- **Per context window.** A skill counts as loaded when it was invoked in the
+  last 20 agent turns. After a compaction its text is gone, so the next gated
+  call denies once more.
+- **Not a sandbox.** Regex rules match command text, not shell semantics.
+  `block` stops an agent following instructions, not an adversary.
 
-`file_glob:` — `**`, `*`, `?`, `{a,b}` over the absolute `file_path` of
-Read/Write/Edit. A relative glob (`src/**/*.ts`) matches at any directory.
+## Install details
 
-`command_regex:` — matched against the Bash command, file path, URL, or
-prompt text, depending on the event. It's a regex over literal text, not a
-shell parser — anchor with `(^|[;&|])\s*` if the match must hold whether the
-command is chained after `cd x &&`, `;`, or `|`.
-
-## Actions
-
-| action | effect |
-|---|---|
-| `block` | hard deny, no retry path |
-| `require-skill` | deny; clears once the agent invokes `skill:` (checked against its session transcript, last 20 turns) and retries the exact same command. On `session-start` it adds context naming the skill instead. With `on_miss: digest` the deny carries the skill's digest and the retry passes without the skill |
-| `warn` | Claude Code shows an interactive approval prompt; proceeds only if the human says yes. Not supported on `user-prompt` |
-| `audit` | allowed silently; recorded to `~/.paws/audit.log`. Agent sees nothing — pure observation |
-| `prompt-inject` | `user-prompt` rules only — appends `message:` to the prompt. Not recorded to `~/.paws/audit.log` |
-| `advise` | allows the call and attaches `message:` as context, once per 20-turn window (again after a compaction) |
-| `exec-script` | delegates to `script:` (relative path inside the rule's own directory); exit 2 denies, stderr is the reason, anything else allows |
-
-When multiple rules match, the most restrictive wins: `block`/`require-skill`
-(unresolved) > `warn` > `audit`/`prompt-inject`/allow.
-
-## Commands
-
+```bash
+npx unbound-paws init            # this repo
+npx unbound-paws init --global   # every repo for this user (~/.claude/settings.json)
+paws uninstall [--global]
 ```
-paws explain 'terraform apply'             # dry-run: matching rules + decision, no session
-paws explain --tool Edit config/prod.env   # dry-run a non-Bash tool call
-paws explain --event user-prompt 'ship it' # dry-run a prompt
-echo '<event json>' | paws explain -       # dry-run a full event JSON
-paws validate .                            # check catalog/ bindings and packs/ manifests
-paws pin .                                 # fetch upstream skills, write their content hashes
-paws index -o catalog/index.json           # the catalog as JSON for the website and UI
-paws gate                                  # the hook entrypoint (reads event JSON on stdin)
+
+The npm package downloads the release binary for your platform and checks it
+against the release's `checksums.txt`. `paws init` copies the binary to
+`~/.paws/bin/paws` and registers that path, so clearing the npm cache never
+breaks the hook; re-run `init` after an upgrade. All repos share that one
+binary. From source: `go build -o paws ./cmd/paws && ./paws init`.
+
+Upgrading from 0.1: re-run `paws init` once. 0.2 also registers SessionStart
+(for `session-start` rules) and PostToolUse and Stop (for local telemetry,
+async).
+
+`$PAWS_HOME`, when set to an absolute path, replaces `~/.paws`. Claude Code
+passes a settings file's `env` to hooks, so a repo's `.claude/settings.json`
+can set it; review `.claude/settings.json` like you review `.paws/`.
+
+## FAQ
+
+**An LLM following instructions isn't enforcement.** Right. paws
+deterministically guarantees the skill was loaded before the action, not that
+the agent followed it. That's why we say "activated", never "used".
+
+**Isn't this just a rules file?** Claude Code's path-scoped rules load text
+when the agent touches matching files. paws fires on commits, PRs, MCP sends,
+session start and repo conditions, before the first write, and installs and
+pins the skill itself.
+
+**Open-core bait?** The hook, the rule format and the catalog are Apache-2.0,
+and stay that way. A hosted portal for synced, opt-in telemetry will be the
+paid part; the hook never needs it.
+
+**A catalog of injected instructions is an attack surface.** Third-party
+skills are installed from upstream at a pinned commit and refused if their
+content hash changes; nothing is redistributed from this repo.
+
+## Develop
+
+```bash
 go test ./...
-python3 .claude/skills/verify-paws/scripts/drive.py run --all   # live headless Claude Code e2e
+go run ./cmd/paws validate .                     # catalog bindings and packs
+go run ./cmd/paws pin .                          # pin upstream skill hashes
+python3 .claude/skills/verify-paws/scripts/drive.py run --all        # live Claude Code e2e
+python3 .claude/skills/verify-paws/scripts/drive.py run --npm launch-journey
 ```
 
-## Layout
+`.claude/skills/verify-paws/` drives a real headless Claude Code session per
+case against a freshly built paws and grades the transcript, the audit log
+and repo side effects.
+
+Releases: push a `v*` tag. GoReleaser builds darwin/linux/windows for
+amd64/arm64 with `checksums.txt`; the `npm` job publishes `unbound-paws` at
+the tag's version once an `NPM_TOKEN` secret exists. `npx` installs download
+from GitHub releases, so the repo must be public for them to work.
 
 ```
-cmd/paws      CLI entrypoint (dispatch)
-internal/hook Claude Code adapter: I/O contract + translation to/from the gate engine
-internal/rule rule model: parse + match (pure, agent-agnostic)
-internal/gate decision engine: load, resolve, exec-script, audit, transcript scan (agent-agnostic)
-internal/catalog catalog bindings + pack manifests: load and validate (disk or embedded)
-internal/pack add/remove packs: bindings, skill install, state file
-embed.go      embeds catalog/, packs/, skills/paws and web/ into the binary
-web           the local page `paws ui` serves (one file, no build step)
-internal/cli  the gate / init / uninstall / explain / validate commands
-catalog       shipped bindings (see docs/catalog.md)
-packs         pack manifests: the unit `paws add` installs
-docs          format references
-npm           the unbound-paws npm wrapper (downloads the release binary)
-examples      sample .paws rules
+cmd/paws          CLI entrypoint
+internal/hook     Claude Code adapter (hook I/O, settings entries)
+internal/rule     rule format: parse, match, when-conditions (pure)
+internal/gate     decision engine: load, resolve, transcript scan, audit
+internal/catalog  catalog bindings and pack manifests (disk or embedded)
+internal/pack     paws add/remove: bindings, skill install, state
+internal/cli      the commands
+catalog, packs    shipped bindings and packs
+skills/paws       the skill paws init installs
+web               the page paws ui serves
+npm               the unbound-paws npm wrapper
+docs              rules, catalog, telemetry references
+examples          sample .paws rules
 ```

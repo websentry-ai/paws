@@ -54,3 +54,16 @@ func TestDecideAuditFiresAndStaysInvisible(t *testing.T) {
 		t.Error("audit rule should still have logged despite the silent decision")
 	}
 }
+
+func TestLogAuditHonorsPawsHome(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	custom := filepath.Join(t.TempDir(), "paws-home")
+	t.Setenv("PAWS_HOME", custom)
+
+	r := mustRule(t, "---\nname: audited\nevent: pre-tool\naction:\n  type: audit\n---\n")
+	logAudit(Event{Agent: "claude-code", Tool: "Bash", Target: "ls"}, r, outcome{verdict: Allow, fired: true})
+
+	if _, err := os.Stat(filepath.Join(custom, "audit.log")); err != nil {
+		t.Errorf("expected audit log under $PAWS_HOME: %v", err)
+	}
+}

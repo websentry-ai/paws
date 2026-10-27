@@ -152,7 +152,7 @@ def subset(record: dict, want: dict) -> bool:
 
 # ---------- grading ----------
 
-def grade(expect: dict, events: list[dict], audit: list[dict], project: Path) -> list[dict]:
+def grade(expect: dict, events: list[dict], audit: list[dict], project: Path, env: dict[str, str] | None = None) -> list[dict]:
     checks = []
 
     def check(name: str, ok: bool, detail: str = "") -> None:
@@ -194,7 +194,7 @@ def grade(expect: dict, events: list[dict], audit: list[dict], project: Path) ->
         check(f"final reply contains: {text!r}", text in final)
 
     for cmd in expect.get("shell", []):
-        r = sh(cmd, project)
+        r = sh(cmd, project, env)  # same env as the agent: paws on PATH, the scratch PAWS_HOME
         check(f"shell: {cmd}", r.returncode == 0, (r.stdout + r.stderr).strip()[:300])
     return checks
 
@@ -304,7 +304,7 @@ def drive_case(case: Path, spec: dict, evidence: Path, scratch: Path, installer:
         print(f"  agent produced no result; see {evidence / 'stderr.txt'}")
         return INDETERMINATE
 
-    checks = grade(spec.get("expect", {}), events, audit, project)
+    checks = grade(spec.get("expect", {}), events, audit, project, env)
     if not checks:
         checks = [{"check": "case declares at least one expectation", "pass": False, "detail": "empty [expect]"}]
     verdict = PASS if all(c["pass"] for c in checks) else FAIL

@@ -8,3 +8,9 @@ import "embed"
 //
 //go:embed catalog packs
 var Catalog embed.FS
+
+// Skill is the paws skill (skills/paws): how Claude Code writes and checks rules.
+// paws init installs it beside the hook.
+//
+//go:embed skills/paws
+var Skill embed.FS

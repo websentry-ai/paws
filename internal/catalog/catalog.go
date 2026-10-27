@@ -78,7 +78,7 @@ func (p Problem) String() string { return p.Path + ": " + p.Msg }
 var (
 	contentHashRe = regexp.MustCompile(`^sha256:[0-9a-f]{64}$`)
 	skillNameRe   = regexp.MustCompile(`^[a-z0-9][a-z0-9-]*$`) // also a directory name under skills/
-	packNameRe    = skillNameRe                                 // also a directory name under packs/
+	packNameRe    = skillNameRe                                // also a directory name under packs/
 	// RepoRe is a bare host path (github.com/owner/repo): fetched over https only, never a local path or URL.
 	RepoRe = regexp.MustCompile(`^[a-z0-9][a-z0-9.-]*\.[a-z]{2,}(/[A-Za-z0-9][A-Za-z0-9._-]*)+$`)
 	// RefRe is a full commit SHA: the pin is a commit, never a branch or tag that can move.

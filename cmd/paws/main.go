@@ -16,6 +16,7 @@ func main() {
 }
 
 func run(args []string) int {
+	cli.Version = version
 	if len(args) == 0 {
 		usage()
 		return 2

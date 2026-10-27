@@ -1,0 +1,13 @@
+description = "the paws skill (installed by paws init) turns a plain request into a working rule, checked with paws explain"
+prompt = "In this repo, make sure the humanizer skill is always loaded before any git commit. Set that up with paws."
+allowed_tools = ["Skill", "Read", "Write", "Edit", "Bash(paws:*)", "Bash(mkdir:*)", "Bash(ls:*)", "Bash(cat:*)"]
+timeout = 300
+
+[expect]
+skills_invoked = ["paws"]
+shell = [
+  "test -f .claude/skills/paws/SKILL.md",
+  "ls .paws/**/*.md .paws/*.md 2>/dev/null | head -1 | grep -q .",
+  "paws explain 'git commit -m wip' | grep -q 'DENY.*humanizer'",
+  "paws explain 'git status' | grep -q 'allow (no matching gate)'",
+]

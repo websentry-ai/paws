@@ -265,3 +265,10 @@ func copyFile(fsys fs.FS, src, dest string) error {
 	}
 	return out.Close()
 }
+
+// InstallBundledSkill installs a skill that ships inside the binary (fsys rooted at the skill
+// directory). Same rules as pack skills: an existing directory paws doesn't own, or that the
+// user edited, is kept.
+func InstallBundledSkill(fsys fs.FS, skillsDir, name, source string) (bool, error) {
+	return installSkill(fsys, skillsDir, name, marker{Skill: name, Source: source})
+}

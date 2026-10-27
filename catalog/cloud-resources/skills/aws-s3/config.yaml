@@ -1,0 +1,20 @@
+# Filled into SKILL.md at install: each KEY placeholder gets its value. Angle-bracket values are
+# org settings with no safe default; SKILL.md "Defaults" says what applies until set.
+placeholders:
+  BUCKET_NAME_PREFIX: <org-prefix>
+  COST_THRESHOLD: $100/month
+  DEFAULT_COST_CENTER: <cost-center>
+  DEFAULT_REGION: <region>
+  DEFAULT_TEAM: <team>
+  DEFAULT_TTL_DAYS: '90'
+  ENCRYPTION_MODE: <encryption-mode>
+  ENV_VALUES: dev, staging, prod
+  KMS_KEY_ALIAS: <kms-key-alias>
+  PAVED_ROAD_REGISTRY: <paved-road-registry>
+  PUBLIC_CONTENT_PATH: CloudFront + Origin Access Control in front of a private bucket
+  TAG_COSTCENTER_KEY: cost-center
+  TAG_ENV_KEY: env
+  TAG_OWNER_KEY: owner
+  TAG_TEAM_KEY: team
+  TAG_TTL_KEY: ttl
+  VERSIONING_DEFAULT: Enabled

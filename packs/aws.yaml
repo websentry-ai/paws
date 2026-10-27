@@ -1,0 +1,11 @@
+name: aws
+description: "Org guardrails for AWS: S3 buckets stay private, encrypted and tagged; IAM writes avoid wildcards and self-escalation; Terraform applies run from a saved plan with state backed up."
+tags: [org, aws, cloud]
+bindings:
+  - cloud-resources/aws-s3.md
+  - cloud-resources/aws-s3-mcp.md
+  - cloud-resources/aws-s3-call-aws-mcp.md
+  - identity-access/aws-iam.md
+  - identity-access/aws-iam-mcp.md
+  - infrastructure-as-code/terraform.md
+  - infrastructure-as-code/terraform-mcp.md

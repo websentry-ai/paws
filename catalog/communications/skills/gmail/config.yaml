@@ -1,0 +1,11 @@
+# Filled into SKILL.md at install: each KEY placeholder gets its value. Angle-bracket values are
+# org settings with no safe default; SKILL.md "Defaults" says what applies until set.
+placeholders:
+  AGENT_IDENTITY_CONVENTION: '[drafted by AI agent for <user>]'
+  CHANNEL_TOPIC_REGISTRY: 'none for email: thread selection replaces channel selection'
+  EXTERNAL_DOMAINS_POLICY: treat any non-org email domain as external
+  GMAIL_ORG_DOMAINS: the authenticated Gmail account's domain
+  MASS_PING_THRESHOLD: '5'
+  ORG_VOICE_GUIDE: 'the org voice guide (default: plain, concise, no emojis)'
+  SEND_APPROVAL_POLICY: 'default: draft-first; external sends confirmed, internal sends stated'
+  SENSITIVITY_TIERS: anything not already public

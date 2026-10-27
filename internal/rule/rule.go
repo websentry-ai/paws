@@ -77,6 +77,7 @@ type Rule struct {
 	Event      string     `yaml:"event"`
 	Matcher    Matcher    `yaml:"matcher"`
 	Action     Action     `yaml:"action"`
+	When       When       `yaml:"when"`
 	Upstream   Upstream   `yaml:"upstream"`
 	Provenance Provenance `yaml:"provenance"`
 	Tags       []string   `yaml:"tags"`
@@ -176,6 +177,11 @@ func Parse(data []byte, path string) (*Rule, error) {
 			return nil, fmt.Errorf("bad file_glob: %w", err)
 		}
 		r.fileRe = re
+	}
+	for _, c := range r.When {
+		if c.Kind == WhenNewFile && Kind(r.Event) != KindTool {
+			return nil, fmt.Errorf("when: new-file needs a tool event")
+		}
 	}
 	if r.Action.Type == "warn" && Kind(r.Event) == KindPrompt {
 		return nil, fmt.Errorf("warn is not supported on user-prompt (use block, audit, or prompt-inject)")

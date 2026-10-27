@@ -1,0 +1,8 @@
+description = "when dependency:stripe stays silent in a repo without stripe"
+prompt = "Create an empty git commit in this repo with the message 'initial'. Use the Bash tool."
+allowed_tools = ["Bash(git:*)", "Skill"]
+
+[expect]
+skills_not_invoked = ["payments-review"]
+audit_absent = [{ rule = "stripe-commit" }]
+shell = ["git log -1 --format=%s | grep -q 'initial'", "! git log -1 --format=%s | grep -q 'PAY-OK'"]

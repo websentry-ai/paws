@@ -16,6 +16,7 @@ type Event struct {
 	Target     string // the string rules match against (command, path, or prompt)
 	Session    string
 	Transcript string // path to the session log, when the agent supplies one
+	Cwd        string // the agent's working directory; repo conditions resolve from it
 	AgentID    string // set when the call comes from a subagent rather than the main thread
 	AgentType  string
 	Raw        json.RawMessage // original agent event, passed through to exec-scripts
@@ -60,10 +61,7 @@ type outcome struct {
 func Decide(ev Event, rules []*rule.Rule) Decision {
 	var matched []*rule.Rule
 	for _, r := range rules {
-		if ev.Kind == "" || rule.Kind(r.Event) != ev.Kind {
-			continue
-		}
-		if r.Matches(ev.Tool, ev.Target) {
+		if Applies(r, ev) {
 			matched = append(matched, r)
 		}
 	}

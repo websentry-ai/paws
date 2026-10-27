@@ -1,0 +1,12 @@
+description = "file_glob src/** + when no-edit-matching tests: the first source write without a test needs the tdd skill"
+prompt = "Create src/add.py containing a function add(a, b) that returns a + b. Use the Write tool."
+allowed_tools = ["Write", "Skill"]
+
+[expect]
+skills_invoked = ["tdd-probe"]
+# After the skill, the retried source write either leaves no record (the test Write was
+# already in the transcript, so no-edit-matching is false) or an allow via skill-load
+# (both Writes ran in parallel from one message, before the transcript had either).
+audit = [{ rule = "tests-first", verdict = "deny", tool = "Write" }]
+audit_max = [{ rule = "tests-first", verdict = "deny", max = 1 }]
+shell = ["test -f tests/test_add.py", "grep -q 'TDD-OK' tests/test_add.py", "test -f src/add.py"]

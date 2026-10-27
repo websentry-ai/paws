@@ -112,8 +112,23 @@ func scanWindow(path string, window int, hit func(transcriptEntry) bool) bool {
 	return false
 }
 
-// tailLines returns the last tailBytes of path split into whole lines.
+// tailCache holds tails already read in this process. paws gate is one process per hook
+// call, so several rules scanning the same transcript read and split it once.
+var tailCache = map[string][][]byte{}
+
+// tailLines returns the last tailBytes of path split into whole lines, cached per path.
 func tailLines(path string) ([][]byte, error) {
+	if lines, ok := tailCache[path]; ok {
+		return lines, nil
+	}
+	lines, err := readTail(path)
+	if err == nil {
+		tailCache[path] = lines
+	}
+	return lines, err
+}
+
+func readTail(path string) ([][]byte, error) {
 	f, err := os.Open(path)
 	if err != nil {
 		return nil, err

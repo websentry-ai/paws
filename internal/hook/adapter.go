@@ -21,6 +21,7 @@ func ToEvent(in *Input, raw []byte) gate.Event {
 		Target:     in.MatchTarget(),
 		Session:    in.SessionID,
 		Transcript: in.TranscriptPath,
+		Cwd:        in.CWD,
 		AgentID:    in.AgentID,
 		AgentType:  in.AgentType,
 		Raw:        raw,

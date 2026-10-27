@@ -11,3 +11,4 @@ One file per user-facing feature. Each names the cases that prove it.
 | session-start | [session-start.md](session-start.md) | `session-start-require-skill` |
 | advise | [advise.md](advise.md) | `advise-once` |
 | MCP and file matchers | [matchers.md](matchers.md) | `mcp-send-require-skill`, `file-glob-require-skill` |
+| when: conditions | [when.md](when.md) | `when-dependency-hit`, `when-dependency-miss`, `when-no-edit-tdd` |

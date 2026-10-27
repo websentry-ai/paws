@@ -9,7 +9,6 @@ import (
 
 	"github.com/websentry-ai/paws/internal/gate"
 	"github.com/websentry-ai/paws/internal/hook"
-	"github.com/websentry-ai/paws/internal/rule"
 )
 
 // Explain is the local dry-run: show which .paws rules are in scope, which match, and the resulting decision.
@@ -64,6 +63,9 @@ func Explain(args []string) int {
 	}
 
 	cwd, _ := os.Getwd()
+	if in.CWD == "" {
+		in.CWD = cwd
+	}
 	res := gate.Collect(cwd)
 	ev := hook.ToEvent(in, nil)
 
@@ -79,7 +81,7 @@ func Explain(args []string) int {
 	fmt.Println("\nrules:")
 	for _, r := range res.Rules {
 		mark := "  "
-		if rule.Kind(r.Event) == ev.Kind && r.Matches(ev.Tool, ev.Target) {
+		if gate.Applies(r, ev) {
 			mark = "→ "
 		}
 		fmt.Printf("  %s%-24s event=%-12s action=%-14s [%s]\n", mark, r.Name, r.Event, r.Action.Type, r.SourcePath)

@@ -70,6 +70,9 @@ file's `env` to hooks, so a repo whose `.claude/settings.json` sets
 `PAWS_HOME` can move your user rules and audit log for sessions in that repo;
 review `.claude/settings.json` like you review `.paws/`.
 
+The full authoring reference, with RE2 tips and `when:` conditions, is
+[docs/rules.md](docs/rules.md).
+
 ## Events
 
 | `event:` | fires on |

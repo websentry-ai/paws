@@ -31,6 +31,7 @@ upstream:
   repo: github.com/example/%[1]s
   path: SKILL.md
   ref: main
+  content_hash: sha256:0000000000000000000000000000000000000000000000000000000000000000
 tags: [writing]
 ---
 `
@@ -107,8 +108,11 @@ func TestValidateProblems(t *testing.T) {
 			write(t, filepath.Join(root, "catalog/writing/partial.md"), strings.Replace(binding("partial", "x"), "  ref: main\n", "", 1))
 		}, "repo, path and ref together"},
 		{"bad content hash", func(t *testing.T, root string) {
-			write(t, filepath.Join(root, "catalog/writing/hash.md"), strings.Replace(binding("hash", "x"), "  ref: main\n", "  ref: main\n  content_hash: md5:1\n", 1))
+			write(t, filepath.Join(root, "catalog/writing/hash.md"), strings.Replace(binding("hash", "x"), "sha256:0000000000000000000000000000000000000000000000000000000000000000", "md5:1", 1))
 		}, "sha256:<64 hex>"},
+		{"unpinned upstream", func(t *testing.T, root string) {
+			write(t, filepath.Join(root, "catalog/writing/unpinned.md"), strings.Replace(binding("unpinned", "x"), "  content_hash: sha256:0000000000000000000000000000000000000000000000000000000000000000\n", "", 1))
+		}, "pin it with `paws pin`"},
 		{"require-skill with no source", func(t *testing.T, root string) {
 			write(t, filepath.Join(root, "catalog/aws/orphan.md"), "---\nname: orphan\nevent: pre-tool\naction:\n  type: require-skill\n  skill: ghost\ntags: [org]\n---\n")
 		}, `require-skill "ghost" has no upstream and no local skill`},

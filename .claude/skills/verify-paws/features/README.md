@@ -13,3 +13,4 @@ One file per user-facing feature. Each names the cases that prove it.
 | MCP and file matchers | [matchers.md](matchers.md) | `mcp-send-require-skill`, `file-glob-require-skill` |
 | when: conditions | [when.md](when.md) | `when-dependency-hit`, `when-dependency-miss`, `when-no-edit-tdd` |
 | on_miss digest | [digest.md](digest.md) | `digest-tag` |
+| packs and skill install | [packs.md](packs.md) | `launch-journey` |

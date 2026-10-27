@@ -31,6 +31,18 @@ func run(args []string) int {
 		return cli.Explain(args[1:])
 	case "validate":
 		return cli.Validate(args[1:])
+	case "add":
+		return cli.Add(args[1:])
+	case "remove":
+		return cli.Remove(args[1:])
+	case "list":
+		return cli.List(args[1:])
+	case "search":
+		return cli.Search(args[1:])
+	case "index":
+		return cli.Index(args[1:])
+	case "pin":
+		return cli.Pin(args[1:])
 	case "version", "--version", "-v":
 		fmt.Println("paws " + version)
 		return 0
@@ -53,7 +65,14 @@ Usage:
   paws uninstall [--global | --settings <path>]  Remove paws from a settings.json.
   paws explain [--tool T] [--event E] <command>  Dry-run: show matching rules and the decision.
   echo '<event json>' | paws explain -           Dry-run a full event JSON.
+  paws add [--project] [--pick g=o] <pack|cat/binding>...
+                                                 Install packs: bindings plus the skills they require.
+  paws remove [--project] <pack>                 Uninstall a pack (and skills only it needed).
+  paws list [--project]                          Installed packs with local fire counts.
+  paws search <text>                             Search the catalog.
+  paws index [-o file]                           The catalog as JSON (website, local UI).
   paws validate [root]                           Check root/catalog bindings and root/packs manifests.
+  paws pin [root]                                Fetch upstream skills and pin their content hashes.
   paws version                                   Print version.
 
 Rules are .paws/**/*.md files; paws reads every .paws/ from the working

@@ -79,6 +79,7 @@ model = "sonnet"                       # optional, default sonnet
 allowed_tools = ["Bash(git:*)", "Skill"]
 setup = ["git commit -q --allow-empty -m base"]   # optional, run before paws init
 from_catalog = ["writing/humanizer-commit.md"]     # optional: copy real catalog/ bindings into .paws/
+paws_add = ["writing"]                             # optional: run `paws add --project` after init
 init_args = []                         # optional extra args for `paws init`
 timeout = 300
 # cases/<name>/mcp.json (optional): an --mcp-config file; {project} and {fixtures}
@@ -123,6 +124,7 @@ Make every case prove behaviour, not just a hook return value:
 | `audit.jsonl` | the scratch paws audit log: what paws decided |
 | `settings.json` | the `.claude/settings.json` that `paws init` wrote |
 | `init.txt` | `paws init` (or `npx unbound-paws init`) output |
+| `add.txt` | `paws add --project` output, when the case sets `paws_add` |
 | `git-log.txt` | the scratch repo's commits after the run |
 
 Exit code: 0 PASS, 1 FAIL (including a case with no or unknown `[expect]` keys),

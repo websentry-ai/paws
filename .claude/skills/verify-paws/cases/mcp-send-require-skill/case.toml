@@ -1,0 +1,12 @@
+description = "mcp_action send: any MCP send needs the humanizer skill first; deny once, invoke, retry sends the humanized text"
+prompt = "Use the fakechat MCP send_message tool to post 'deploy finished' to the #general channel."
+allowed_tools = ["mcp__fakechat__send_message", "mcp__fakechat__list_messages", "Skill"]
+
+[expect]
+skills_invoked = ["humanizer"]
+audit = [
+  { rule = "humanize-sends", verdict = "deny", tool = "mcp__fakechat__send_message" },
+  { rule = "humanize-sends", verdict = "allow", satisfied_by = "skill-load" },
+]
+audit_max = [{ rule = "humanize-sends", verdict = "deny", max = 1 }]
+shell = ["grep -q 'HUMAN-OK' sent.jsonl"]

@@ -12,22 +12,27 @@ import (
 	"gopkg.in/yaml.v3"
 )
 
-// Rule kinds: which class of agent event a rule applies to. Not exhaustive —
-// lifecycle/audit-only events (session start, stop) have no kind here yet.
+// Rule kinds: which class of agent event a rule applies to.
 const (
-	KindTool   = "tool"   // a pending tool call
-	KindPrompt = "prompt" // a submitted user prompt
+	KindTool    = "tool"    // a pending tool call
+	KindPrompt  = "prompt"  // a submitted user prompt
+	KindSession = "session" // a session starting (startup, resume, clear, compact)
 )
 
 var validActions = map[string]bool{
 	"block": true, "require-skill": true, "warn": true, "audit": true,
-	"prompt-inject": true, "exec-script": true,
+	"prompt-inject": true, "exec-script": true, "advise": true,
 }
+
+// sessionActions are the actions that make sense when nothing can be denied: a session is starting.
+var sessionActions = map[string]bool{"require-skill": true, "advise": true, "audit": true}
 
 // Matcher decides whether a rule applies to a pending call.
 type Matcher struct {
-	Tool         string `yaml:"tool"`          // tool name, "A|B" list, or omit / quoted "*" for any
+	Tool         string `yaml:"tool"`          // tool name, "A|B" list, "mcp__server__*" prefix, or omit / quoted "*" for any
 	CommandRegex string `yaml:"command_regex"` // matched against the extracted command
+	FileGlob     string `yaml:"file_glob"`     // matched against file_path on Read/Write/Edit
+	MCPAction    string `yaml:"mcp_action"`    // send|create|update|delete, or an "A|B" list; MCP tools only
 }
 
 // on_miss values: what a require-skill deny carries when the skill isn't loaded.
@@ -78,6 +83,7 @@ type Rule struct {
 
 	SourcePath string         `yaml:"-"`
 	re         *regexp.Regexp `yaml:"-"`
+	fileRe     *regexp.Regexp `yaml:"-"`
 }
 
 // Kind maps a paws event to its rule kind; unknown events map to "".
@@ -87,6 +93,8 @@ func Kind(e string) string {
 		return KindTool
 	case "user-prompt":
 		return KindPrompt
+	case "session-start":
+		return KindSession
 	}
 	return ""
 }
@@ -138,6 +146,36 @@ func Parse(data []byte, path string) (*Rule, error) {
 		if err := RelativeInside(r.Action.Script); err != nil {
 			return nil, fmt.Errorf("exec-script script %w", err)
 		}
+	}
+	if Kind(r.Event) == KindSession {
+		if !sessionActions[r.Action.Type] {
+			return nil, fmt.Errorf("session-start supports require-skill, advise and audit, not %s", r.Action.Type)
+		}
+		if r.Matcher.Tool != "" || r.Matcher.FileGlob != "" || r.Matcher.MCPAction != "" {
+			return nil, fmt.Errorf("session-start has no tool call; only matcher.command_regex (against the start source) applies")
+		}
+	}
+	if r.Action.Type == "advise" {
+		if Kind(r.Event) == KindPrompt {
+			return nil, fmt.Errorf("advise is for tool and session events (use prompt-inject on user-prompt)")
+		}
+		if r.Action.Message == "" {
+			return nil, fmt.Errorf("advise needs a message")
+		}
+	}
+	if r.Matcher.MCPAction != "" {
+		for _, a := range strings.Split(r.Matcher.MCPAction, "|") {
+			if !mcpActions[strings.TrimSpace(a)] {
+				return nil, fmt.Errorf("unknown matcher.mcp_action %q (want send, create, update or delete)", a)
+			}
+		}
+	}
+	if r.Matcher.FileGlob != "" {
+		re, err := globRegexp(r.Matcher.FileGlob)
+		if err != nil {
+			return nil, fmt.Errorf("bad file_glob: %w", err)
+		}
+		r.fileRe = re
 	}
 	if r.Action.Type == "warn" && Kind(r.Event) == KindPrompt {
 		return nil, fmt.Errorf("warn is not supported on user-prompt (use block, audit, or prompt-inject)")

@@ -126,3 +126,25 @@ func BenchmarkSkillLoaded(b *testing.B) {
 		SkillLoaded(p, "release-checklist", 20)
 	}
 }
+
+func TestContextDelivered(t *testing.T) {
+	lnOther := `{"type":"attachment","isSidechain":false,"attachment":{"type":"hook_additional_context","content":["paws (other-rule): x"]}}`
+	cases := []struct {
+		name  string
+		lines []string
+		want  bool
+	}{
+		{"delivered", []string{lnAdvised, lnAssistant}, true},
+		{"other rule's context", []string{lnOther, lnAssistant}, false},
+		{"plain hook attachment", []string{lnAttach, lnAssistant}, false},
+		{"compaction since", []string{lnAdvised, lnCompact, lnAssistant}, false},
+		{"window exhausted", append([]string{lnAdvised}, strings.Split(strings.Repeat(lnAssistant+"\n", 21), "\n")[:21]...), false},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			if got := ContextDelivered(write(t, c.lines...), "paws (use-agent-browser):", DefaultSkillWindow); got != c.want {
+				t.Errorf("got %v, want %v", got, c.want)
+			}
+		})
+	}
+}

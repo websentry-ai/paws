@@ -264,6 +264,11 @@ def drive_case(case: Path, spec: dict, evidence: Path, scratch: Path, installer:
             "--setting-sources", "project", "--output-format", "stream-json", "--verbose"]
     if spec.get("allowed_tools"):
         args += ["--allowedTools", *spec["allowed_tools"]]
+    if (case / "mcp.json").exists():
+        # {project} and {fixtures} are filled in so servers get absolute paths.
+        cfg = (case / "mcp.json").read_text().replace("{project}", str(project)).replace("{fixtures}", str(SKILL_DIR / "fixtures"))
+        (scratch / "mcp.json").write_text(cfg)
+        args += ["--mcp-config", str(scratch / "mcp.json"), "--strict-mcp-config"]
     started = time.time()
     try:
         r = sh(args, project, env, timeout=spec.get("timeout", 300))

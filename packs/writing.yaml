@@ -1,6 +1,7 @@
 name: writing
-description: Load humanizer before PR bodies and commit messages go out, so they read like a person wrote them.
+description: Load humanizer before PR bodies, commit messages and MCP sends go out, so they read like a person wrote them.
 tags: [writing]
 bindings:
   - writing/humanizer-pr.md
   - writing/humanizer-commit.md
+  - writing/humanizer-mcp-send.md

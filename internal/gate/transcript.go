@@ -6,6 +6,7 @@ import (
 	"errors"
 	"io"
 	"os"
+	"strings"
 )
 
 // tailBytes is how much of a transcript's end is read. Sessions reach tens of MB,
@@ -19,6 +20,14 @@ type transcriptEntry struct {
 	IsSidechain bool   `json:"isSidechain"`
 	// Polymorphic in the log: an object for tool results, a bare string for hook denials.
 	ToolUseResult json.RawMessage `json:"toolUseResult"`
+	Attachment    *attachment     `json:"attachment"`
+}
+
+// attachment is a harness-written record; hook_additional_context holds what a hook's
+// additionalContext delivered to the agent.
+type attachment struct {
+	Type    string   `json:"type"`
+	Content []string `json:"content"`
 }
 
 // skillResult is the agent-written result of a skill invocation. Only the agent
@@ -36,7 +45,41 @@ type skillResult struct {
 // the caller gates on false. A compaction ends the search: the skill's text was
 // dropped from the agent's context, so the load no longer means it has the guidance.
 func SkillLoaded(path, skill string, window int) bool {
-	if path == "" || skill == "" || window < 1 {
+	if skill == "" {
+		return false
+	}
+	return scanWindow(path, window, func(e transcriptEntry) bool {
+		if e.Type != "user" || len(e.ToolUseResult) == 0 || e.ToolUseResult[0] != '{' {
+			return false
+		}
+		var sr skillResult
+		return json.Unmarshal(e.ToolUseResult, &sr) == nil && sr.Success && sr.CommandName == skill
+	})
+}
+
+// ContextDelivered reports whether a hook's additionalContext containing marker reached the
+// agent within the last `window` turns. Same window and compaction rules as SkillLoaded.
+func ContextDelivered(path, marker string, window int) bool {
+	if marker == "" {
+		return false
+	}
+	return scanWindow(path, window, func(e transcriptEntry) bool {
+		if e.Type != "attachment" || e.Attachment == nil || e.Attachment.Type != "hook_additional_context" {
+			return false
+		}
+		for _, c := range e.Attachment.Content {
+			if strings.Contains(c, marker) {
+				return true
+			}
+		}
+		return false
+	})
+}
+
+// scanWindow walks the transcript backwards and reports whether hit matches an entry before
+// the window of agent turns runs out or a compaction boundary is crossed.
+func scanWindow(path string, window int, hit func(transcriptEntry) bool) bool {
+	if path == "" || window < 1 {
 		return false
 	}
 	lines, err := tailLines(path)
@@ -62,11 +105,8 @@ func SkillLoaded(path, skill string, window int) bool {
 			if turns > window {
 				return false
 			}
-		case e.Type == "user" && len(e.ToolUseResult) > 0 && e.ToolUseResult[0] == '{':
-			var sr skillResult
-			if json.Unmarshal(e.ToolUseResult, &sr) == nil && sr.Success && sr.CommandName == skill {
-				return true
-			}
+		case hit(e):
+			return true
 		}
 	}
 	return false

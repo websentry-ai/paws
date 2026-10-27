@@ -1,0 +1,9 @@
+description = "session-start require-skill: the start context names the skill, the agent loads it before working, and follows it"
+prompt = "Create an empty git commit in this repo with the message 'initial'. Use the Bash tool."
+allowed_tools = ["Bash(git:*)", "Skill"]
+
+[expect]
+skills_invoked = ["house-style"]
+audit = [{ rule = "house-style-at-start", event = "session-start" }]
+audit_absent = [{ verdict = "deny" }]
+shell = ["git log -1 --format=%s | grep -q '^START-7Q: '"]

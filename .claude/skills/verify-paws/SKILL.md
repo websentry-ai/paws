@@ -81,6 +81,9 @@ setup = ["git commit -q --allow-empty -m base"]   # optional, run before paws in
 from_catalog = ["writing/humanizer-commit.md"]     # optional: copy real catalog/ bindings into .paws/
 init_args = []                         # optional extra args for `paws init`
 timeout = 300
+# cases/<name>/mcp.json (optional): an --mcp-config file; {project} and {fixtures}
+# expand to absolute paths. fixtures/fakechat_mcp.py is a stdio MCP server whose
+# send_message appends to the JSONL file given as its argument.
 
 [expect]
 skills_invoked = ["house-style"]       # Skill tool_use with this skill

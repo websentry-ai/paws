@@ -47,9 +47,12 @@ func Explain(args []string) int {
 			}
 		}
 		text := strings.Join(words, " ")
-		if in.HookEventName == "UserPromptSubmit" {
+		switch in.HookEventName {
+		case "UserPromptSubmit":
 			in.Prompt = text
-		} else {
+		case "SessionStart":
+			in.ToolName, in.Source = "", text
+		default:
 			in.ToolInput = map[string]any{}
 			switch in.ToolName {
 			case "Read", "Write", "Edit":

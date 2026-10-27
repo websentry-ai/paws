@@ -1,6 +1,6 @@
 # npm digest
 
-npm publish-side command: publish, unpublish, deprecate, version, dist-tag, access, token (npm, yarn or pnpm publish). Apply before retrying.
+npm publish-side command: publish, unpublish, deprecate, dist-tag add/rm, access changes, token create/revoke (npm, yarn or pnpm publish). Apply before retrying.
 
 Target registry https://registry.npmjs.org, scope `<org-scope>` (no default: ask the user for the scope; never publish an unscoped or foreign-scoped package without asking). Posture: reviewed dry-run, one-line statement, publish. Confirm only unpublish, `latest` rollback and private→public flips.
 

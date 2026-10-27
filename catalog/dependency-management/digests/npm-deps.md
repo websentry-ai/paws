@@ -1,6 +1,6 @@
 # npm-deps digest
 
-npm install/ci/update/rebuild or npx. Apply before retrying. Publishing (`npm publish`, version, dist-tag) is a different skill.
+Adding a package: npm install/i/add <pkg>, yarn add, pnpm add or bun add. Apply before retrying. Publishing (`npm publish`, version, dist-tag) is a different skill.
 
 ## ci vs install
 - Existing project with package-lock.json, no dependency change intended → `npm ci`. Bare `npm install` there can rewrite the lockfile; don't.

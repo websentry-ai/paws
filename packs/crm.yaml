@@ -1,0 +1,7 @@
+name: crm
+description: "Org guardrails for Attio and Salesforce writes: dedupe before create, schema-valid values, owner and attribution set, no hard deletes."
+tags: [org, crm]
+bindings:
+  - crm-systems/attio-mcp.md
+  - crm-systems/salesforce.md
+  - crm-systems/salesforce-mcp.md

@@ -19,6 +19,9 @@ next tool call; nothing needs restarting.
    `~/.paws/<name>.md` for this user only. Ask if unclear.
 4. **Check it** with `paws explain` (below) before you report it done.
 
+If `paws` is not on PATH (it was installed with `npx unbound-paws init`), run
+it as `~/.paws/bin/paws` (or `$PAWS_HOME/bin/paws` when that is set).
+
 Write the file with frontmatter, then one or two sentences saying why:
 
 ```markdown
@@ -46,13 +49,15 @@ as Claude Code lists it.
 | skill X before commits | `pre-commit` | `tool: Bash` | `require-skill` |
 | skill X before pushes | `pre-push` | `tool: Bash` | `require-skill` |
 | skill X before any Slack/Gmail/Notion/Linear send | `pre-tool` | `mcp_action: send` | `require-skill` |
-| skill X when editing React files | `pre-tool` | `file_glob: "**/*.{tsx,jsx}"` | `require-skill` |
+| skill X when editing React files | `pre-tool` | `tool: Write\|Edit`, `file_glob: '**/*.{tsx,jsx}'` | `require-skill` |
 | skill X at the start of every session | `session-start` | none | `require-skill` |
-| never `rm -rf` | `pre-tool` | `tool: Bash`, `command_regex: (^\|[;&\|\n])\s*rm\s+-[a-zA-Z]*r[a-zA-Z]*f` | `block` |
+| never `rm -rf` (also `-fr`, `-Rf`, `sudo`) | `pre-tool` | `tool: Bash`, `command_regex: (^\|[;&\|\n])\s*(sudo\s+)?rm\s+(-\S+\s+)*-[a-zA-Z]*([rR][a-zA-Z]*f\|f[a-zA-Z]*[rR])` | `block` |
 | ask me before `terraform apply` | `pre-tool` | `tool: Bash`, `command_regex: (^\|[;&\|\n])\s*terraform\s+apply\b` | `warn` |
 | skill X only in repos using stripe | add `when: dependency:stripe` | | |
 
-(`\|` in the table is a plain `|` in the file.)
+(`\|` in the table is a plain `|` in the file.) Split flags such as
+`rm -r -f` need an `exec-script` check; a regex over the command line is not
+a shell parser.
 
 ## Events
 
@@ -67,8 +72,13 @@ as Claude Code lists it.
 - `command_regex`: Go RE2 over the target (Bash command, file path, URL,
   prompt, MCP input JSON). No lookahead or lookbehind. Start Bash patterns
   with `(^|[;&|\n])\s*` so chained commands match and echoed text does not.
-  Quote the value in YAML if it contains `: ` or starts with a symbol.
+  Leave regexes unquoted (a leading `(` or `^` is fine), or wrap them in
+  single quotes when they contain `: ` or start with `*`, `&`, `!` or `{`.
+  Never use double quotes: YAML reads `\s` and `\b` inside them as escapes,
+  so the rule fails to parse or silently never matches.
 - `file_glob`: `**`, `*`, `?`, `{a,b}`, for Read/Write/Edit/NotebookEdit.
+  It matches Read too: add `tool: Write|Edit` to gate only changes. Quote a
+  glob that starts with `*` (single quotes).
 - `mcp_action`: `send`, `create`, `update`, `delete`.
 
 ## when (optional; all must hold)
@@ -102,10 +112,17 @@ reason. Then tell the user what the rule does and where it lives.
 
 ## When a gate fires on you
 
-If a tool call is denied with "This action requires the X skill", invoke X
-with the Skill tool and retry the exact same command. Do not rewrite the
-command to dodge the rule. For a "Blocked by paws rule" deny, stop and tell
-the user; do not look for another way to do the same thing.
+- "This action requires the X skill. Invoke it with the Skill tool...":
+  invoke X with the Skill tool, then retry the same command. Do not rewrite
+  the command to dodge the rule.
+- A deny that starts with `paws digest (...)` carries the skill's rules: no
+  Skill call is needed. Apply the rules, re-forming the command if they say
+  so, and retry.
+- "Blocked by paws rule ...": stop and tell the user. Do not look for another
+  way to do the same thing.
+- If X cannot be loaded (no such skill), or the same deny comes back after you
+  loaded it, stop and tell the user which rule and skill are involved. Do not
+  keep retrying.
 
 ## Packs
 

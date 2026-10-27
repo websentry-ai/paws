@@ -239,6 +239,9 @@ def drive_case(case: Path, spec: dict, evidence: Path, scratch: Path, installer:
 
     # A per-case npm cache makes every --npm case download and verify the binary afresh.
     env = agent_env({"PAWS_HOME": str(paws_home), "npm_config_cache": str(scratch / "npm-cache"), **installer.env})
+    # paws init installs the binary under PAWS_HOME/bin; put it first so the agent and the
+    # shell checks run the paws this case installed, on both the go and npm paths.
+    env["PATH"] = f"{paws_home / 'bin'}{os.pathsep}{env.get('PATH', os.environ['PATH'])}"
     for cmd in ["git init -q .", "git config user.email verify@paws.local", "git config user.name paws-verify",
                 *spec.get("setup", [])]:
         r = sh(cmd, project, env)

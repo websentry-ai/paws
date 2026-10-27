@@ -104,4 +104,17 @@ func TestInstallPawsSkillBesideSettings(t *testing.T) {
 	if got, _ := os.ReadFile(filepath.Join(own, "skills", "paws", "SKILL.md")); string(got) != "mine" {
 		t.Error("init replaced a paws skill it did not install")
 	}
+
+	// A settings file outside .claude gets no skills dir beside it.
+	custom := filepath.Join(dir, "elsewhere", "custom.json")
+	installPawsSkill(custom)
+	if _, err := os.Stat(filepath.Join(dir, "elsewhere", "skills")); err == nil {
+		t.Error("--settings outside .claude must not create a skills dir")
+	}
+
+	// Uninstall removes the unedited copy.
+	removePawsSkill(settings)
+	if _, err := os.Stat(filepath.Join(dir, ".claude", "skills", "paws")); err == nil {
+		t.Error("uninstall should remove the paws skill it installed")
+	}
 }

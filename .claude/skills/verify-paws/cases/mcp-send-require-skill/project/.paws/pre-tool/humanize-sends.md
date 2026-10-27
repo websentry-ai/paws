@@ -5,6 +5,6 @@ matcher:
   mcp_action: send
 action:
   type: require-skill
-  skill: humanizer
+  skill: outbound-voice
 ---
-Any MCP send (chat, mail, comments) loads humanizer first.
+Any MCP send (chat, mail, comments) loads the outbound-voice skill first.

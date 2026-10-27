@@ -85,6 +85,7 @@ func Uninstall(args []string) int {
 		return 1
 	}
 	fmt.Printf("Removed paws from %s\n", settingsPath)
+	removePawsSkill(settingsPath)
 	return 0
 }
 
@@ -218,21 +219,47 @@ func sameFile(a, b string) (bool, error) {
 	return bytes.Equal(da, db), nil
 }
 
-// installPawsSkill puts the paws skill in the skills directory beside the settings file
-// (<dir>/.claude/skills/paws), so Claude Code can write and check rules. Best-effort: a
-// failure is reported, never fatal, and a skill the user owns or edited is left alone.
+// pawsSkillDir is the skills directory Claude Code reads beside settingsPath, or "" when the
+// settings file isn't in a .claude directory (a --settings path elsewhere, managed settings).
+func pawsSkillDir(settingsPath string) string {
+	dir := filepath.Dir(settingsPath)
+	if filepath.Base(dir) != ".claude" {
+		return ""
+	}
+	return filepath.Join(dir, "skills")
+}
+
+// installPawsSkill puts the paws skill in <dir>/.claude/skills/paws beside the settings file,
+// so Claude Code can write and check rules. Best-effort: a failure is reported, never fatal,
+// and a skill the user owns or edited is left alone.
 func installPawsSkill(settingsPath string) {
+	skillsDir := pawsSkillDir(settingsPath)
+	if skillsDir == "" {
+		fmt.Printf("Skipped the paws skill: %s is not in a .claude directory\n", settingsPath)
+		return
+	}
 	src, err := fs.Sub(paws.Skill, "skills/paws")
 	if err != nil {
 		return
 	}
-	skillsDir := filepath.Join(filepath.Dir(settingsPath), "skills")
-	installed, err := pack.InstallBundledSkill(src, skillsDir, "paws", "paws "+Version)
+	status, err := pack.InstallBundledSkill(src, skillsDir, "paws", "paws "+Version)
+	dest := filepath.Join(skillsDir, "paws")
 	switch {
 	case err != nil:
 		fmt.Fprintf(os.Stderr, "paws: could not install the paws skill: %v\n", err)
-	case installed:
-		fmt.Printf("Installed the paws skill in %s\n", filepath.Join(skillsDir, "paws"))
+	case status == pack.BundledInstalled:
+		fmt.Printf("Installed the paws skill in %s\n", dest)
+	case status == pack.BundledKept:
+		fmt.Printf("Left %s as is (not installed by paws, or edited); it may describe an older rule format\n", dest)
+	}
+}
+
+// removePawsSkill undoes installPawsSkill on uninstall, keeping a skill the user edited.
+func removePawsSkill(settingsPath string) {
+	if skillsDir := pawsSkillDir(settingsPath); skillsDir != "" {
+		if removed, _ := pack.RemoveBundledSkill(skillsDir, "paws"); removed {
+			fmt.Printf("Removed the paws skill from %s\n", filepath.Join(skillsDir, "paws"))
+		}
 	}
 }
 

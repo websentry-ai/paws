@@ -4,6 +4,7 @@ package rule
 import (
 	"bytes"
 	"fmt"
+	"io"
 	"path/filepath"
 	"regexp"
 	"strings"
@@ -123,7 +124,7 @@ func Parse(data []byte, path string) (*Rule, error) {
 		return nil, fmt.Errorf("on_miss only applies to require-skill")
 	}
 	if r.Action.Digest != "" {
-		if err := relativeInside(r.Action.Digest); err != nil {
+		if err := RelativeInside(r.Action.Digest); err != nil {
 			return nil, fmt.Errorf("digest %w", err)
 		}
 	}
@@ -134,7 +135,7 @@ func Parse(data []byte, path string) (*Rule, error) {
 		// Scripts run with full shell trust, same as the rule file itself — but the
 		// path must stay inside the rule's own directory tree, not point anywhere
 		// on disk, so `paws explain`/review of a .paws/ dir sees everything it runs.
-		if err := relativeInside(r.Action.Script); err != nil {
+		if err := RelativeInside(r.Action.Script); err != nil {
 			return nil, fmt.Errorf("exec-script script %w", err)
 		}
 	}
@@ -165,8 +166,41 @@ func Parse(data []byte, path string) (*Rule, error) {
 	return &r, nil
 }
 
-// relativeInside rejects a path that is absolute or escapes the rule's directory.
-func relativeInside(p string) error {
+// IsRuleFile reports whether a path relative to a .paws or catalog root is a rule/binding file.
+// READMEs, skills (skills/**, SKILL.md) and digests (digests/**) live beside rules and are not rules.
+func IsRuleFile(rel string) bool {
+	if filepath.Ext(rel) != ".md" {
+		return false
+	}
+	if base := filepath.Base(rel); base == "README.md" || base == "SKILL.md" {
+		return false
+	}
+	for _, seg := range strings.Split(filepath.ToSlash(filepath.Dir(rel)), "/") {
+		if seg == "skills" || seg == "digests" {
+			return false
+		}
+	}
+	return true
+}
+
+// CheckKnownFields re-decodes the frontmatter strictly: a misspelled key (comand_regex) is an error.
+// Parse stays lenient so a newer rule file never breaks an older runner; catalog validation uses this.
+func CheckKnownFields(data []byte) error {
+	fm, err := frontmatter(data)
+	if err != nil {
+		return err
+	}
+	dec := yaml.NewDecoder(bytes.NewReader(fm))
+	dec.KnownFields(true)
+	var r Rule
+	if err := dec.Decode(&r); err != nil && err != io.EOF {
+		return fmt.Errorf("frontmatter: %w", err)
+	}
+	return nil
+}
+
+// RelativeInside rejects a path that is absolute or escapes the rule's directory.
+func RelativeInside(p string) error {
 	clean := filepath.Clean(p)
 	if filepath.IsAbs(clean) || clean == ".." || strings.HasPrefix(clean, ".."+string(filepath.Separator)) {
 		return fmt.Errorf("must be a relative path inside the rule's directory, got %q", p)

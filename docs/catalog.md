@@ -13,7 +13,8 @@ packs/<pack>.yaml                            a pack manifest
 ```
 
 Files named `README.md` or `SKILL.md`, and anything under `skills/` or
-`digests/`, are not bindings.
+`digests/`, are not bindings. The runner skips them in `.paws/` too, so a
+category copied into `.paws/` loads cleanly.
 
 ## Binding
 
@@ -31,7 +32,7 @@ matcher:
 action:
   type: require-skill
   skill: humanizer
-  on_miss: load-required        # or digest (needs action.digest)
+  on_miss: load-required        # or digest (needs action.digest; parsed, not yet enforced)
 upstream:                       # third-party skill, installed at this ref
   repo: github.com/blader/humanizer
   path: SKILL.md
@@ -49,7 +50,10 @@ What the binding does, in a sentence or two.
 
 Rules for a valid binding (`paws validate` checks each one):
 
-- It parses as a paws rule.
+- It parses as a paws rule, and every frontmatter key is a known one. The
+  runner itself ignores unknown keys; the validator catches typos.
+- A `require-skill` skill name is lowercase letters, digits and dashes.
+- `upstream.path` is relative and stays inside the upstream repo.
 - Its `name` is unique across the catalog.
 - It has at least one tag.
 - `upstream.repo`, `path` and `ref` are set together or not at all.
@@ -75,9 +79,10 @@ pick_one:                       # optional: install exactly one option
       stop-slop: [writing/stop-slop-pr.md]
 ```
 
-A pack lists at least one binding. A binding appears once per pack. A
-`pick_one` group has at least two options, each with at least one binding,
-and its `default` is one of them.
+A pack lists at least one binding. A `pick_one` group has a unique name, at
+least two options, each with at least one binding, and its `default` is one
+of them. A binding appears once in what installs together: the top-level
+`bindings` plus one option. Two options of one group may share a binding.
 
 ## Check it
 

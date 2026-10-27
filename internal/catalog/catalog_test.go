@@ -130,6 +130,31 @@ func TestValidateProblems(t *testing.T) {
 		{"binding listed twice", func(t *testing.T, root string) {
 			write(t, filepath.Join(root, "packs/aws.yaml"), "name: aws\ndescription: x\nbindings: [aws/s3-create.md, aws/s3-create.md]\n")
 		}, "listed more than once"},
+		{"misspelled frontmatter key", func(t *testing.T, root string) {
+			write(t, filepath.Join(root, "catalog/writing/typo.md"), strings.Replace(binding("typo", "x"), "command_regex", "comand_regex", 1))
+		}, "field comand_regex not found"},
+		{"skill name traversal", func(t *testing.T, root string) {
+			write(t, filepath.Join(root, "catalog/writing/evil.md"), binding("evil", "../../evil"))
+		}, "lowercase letters, digits and dashes"},
+		{"upstream path traversal", func(t *testing.T, root string) {
+			write(t, filepath.Join(root, "catalog/writing/up.md"), strings.Replace(binding("up", "x"), "path: SKILL.md", "path: ../../SKILL.md", 1))
+		}, "upstream.path must be a relative path"},
+		{"yml manifest", func(t *testing.T, root string) {
+			write(t, filepath.Join(root, "packs/extra.yml"), "name: extra\n")
+		}, "use the .yaml extension"},
+		{"digest is a directory", func(t *testing.T, root string) {
+			os.Remove(filepath.Join(root, "catalog/aws/digests/aws-s3.md"))
+			if err := os.MkdirAll(filepath.Join(root, "catalog/aws/digests/aws-s3.md"), 0o755); err != nil {
+				t.Fatal(err)
+			}
+		}, "digest file digests/aws-s3.md not found"},
+		{"duplicate pick_one group", func(t *testing.T, root string) {
+			g := "  - name: prose\n    default: humanizer\n    options:\n      humanizer: [writing/humanizer-pr.md]\n      stop-slop: [writing/stop-slop-pr.md]\n"
+			write(t, filepath.Join(root, "packs/writing.yaml"), "name: writing\ndescription: x\npick_one:\n"+g+g)
+		}, `pick_one group "prose" defined more than once`},
+		{"option repeats a top-level binding", func(t *testing.T, root string) {
+			write(t, filepath.Join(root, "packs/writing.yaml"), "name: writing\ndescription: x\nbindings: [writing/humanizer-pr.md]\npick_one:\n  - name: prose\n    default: humanizer\n    options:\n      humanizer: [writing/humanizer-pr.md]\n      stop-slop: [writing/stop-slop-pr.md]\n")
+		}, "listed more than once (pick_one prose)"},
 		{"empty pack", func(t *testing.T, root string) {
 			write(t, filepath.Join(root, "packs/aws.yaml"), "name: aws\ndescription: x\n")
 		}, "lists no bindings"},
@@ -146,5 +171,14 @@ func TestValidateProblems(t *testing.T) {
 			}
 			t.Errorf("want a problem containing %q, got %v", c.want, probs)
 		})
+	}
+}
+
+func TestPickOneOptionsMayShareABinding(t *testing.T) {
+	root := goodRoot(t)
+	write(t, filepath.Join(root, "catalog/writing/shared.md"), binding("shared", "shared"))
+	write(t, filepath.Join(root, "packs/writing.yaml"), "name: writing\ndescription: x\npick_one:\n  - name: prose\n    default: humanizer\n    options:\n      humanizer: [writing/humanizer-pr.md, writing/shared.md]\n      stop-slop: [writing/stop-slop-pr.md, writing/shared.md]\n")
+	if _, probs := Validate(root); len(probs) != 0 {
+		t.Errorf("options installing separately may share a binding, got %v", probs)
 	}
 }

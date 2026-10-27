@@ -62,28 +62,20 @@ type Problem struct {
 
 func (p Problem) String() string { return p.Path + ": " + p.Msg }
 
-var contentHashRe = regexp.MustCompile(`^sha256:[0-9a-f]{64}$`)
+var (
+	contentHashRe = regexp.MustCompile(`^sha256:[0-9a-f]{64}$`)
+	skillNameRe   = regexp.MustCompile(`^[a-z0-9][a-z0-9-]*$`) // also a directory name under skills/
+)
+
+// isRegular reports whether path exists and is a regular file.
+func isRegular(path string) bool {
+	st, err := os.Stat(path)
+	return err == nil && st.Mode().IsRegular()
+}
 
 // CatalogDir and PacksDir locate the two trees under root.
 func CatalogDir(root string) string { return filepath.Join(root, "catalog") }
 func PacksDir(root string) string   { return filepath.Join(root, "packs") }
-
-// isBinding reports whether a catalog-relative path is a binding file rather than a skill, digest or doc.
-func isBinding(rel string) bool {
-	if filepath.Ext(rel) != ".md" {
-		return false
-	}
-	base := filepath.Base(rel)
-	if base == "README.md" || base == "SKILL.md" {
-		return false
-	}
-	for _, seg := range strings.Split(filepath.ToSlash(filepath.Dir(rel)), "/") {
-		if seg == "skills" || seg == "digests" {
-			return false
-		}
-	}
-	return true
-}
 
 // Load parses every binding and pack under root. Parse failures come back as problems, not errors.
 func Load(root string) (*Catalog, []Problem) {
@@ -96,11 +88,15 @@ func Load(root string) (*Catalog, []Problem) {
 			return nil
 		}
 		rel, _ := filepath.Rel(cdir, path)
-		if !isBinding(rel) {
+		if !rule.IsRuleFile(rel) {
 			return nil
 		}
 		data, err := os.ReadFile(path)
 		if err != nil {
+			probs = append(probs, Problem{path, err.Error()})
+			return nil
+		}
+		if err := rule.CheckKnownFields(data); err != nil {
 			probs = append(probs, Problem{path, err.Error()})
 			return nil
 		}
@@ -113,6 +109,11 @@ func Load(root string) (*Catalog, []Problem) {
 		return nil
 	})
 
+	if yml, _ := filepath.Glob(filepath.Join(PacksDir(root), "*.yml")); len(yml) > 0 {
+		for _, path := range yml {
+			probs = append(probs, Problem{path, "pack manifests use the .yaml extension"})
+		}
+	}
 	manifests, _ := filepath.Glob(filepath.Join(PacksDir(root), "*.yaml"))
 	for _, path := range manifests {
 		p, err := LoadPack(path)
@@ -168,22 +169,27 @@ func Validate(root string) (*Catalog, []Problem) {
 		if u.ContentHash != "" && !contentHashRe.MatchString(u.ContentHash) {
 			add(path, "upstream.content_hash must be sha256:<64 hex>, got %q", u.ContentHash)
 		}
+		if u.Path != "" {
+			if err := rule.RelativeInside(u.Path); err != nil {
+				add(path, "upstream.path %v", err)
+			}
+		}
 		dir := filepath.Dir(path)
-		if b.Action.Type == "require-skill" && u.Repo == "" {
-			local := filepath.Join(filepath.Dir(dir), filepath.Base(dir), "skills", b.Action.Skill, "SKILL.md")
-			if _, err := os.Stat(local); err != nil {
-				add(path, "require-skill %q has no upstream and no local skill at %s", b.Action.Skill, local)
+		if b.Action.Type == "require-skill" {
+			if !skillNameRe.MatchString(b.Action.Skill) {
+				add(path, "skill %q must be lowercase letters, digits and dashes", b.Action.Skill)
+			} else if u.Repo == "" {
+				local := filepath.Join(dir, "skills", b.Action.Skill, "SKILL.md")
+				if !isRegular(local) {
+					add(path, "require-skill %q has no upstream and no local skill at %s", b.Action.Skill, local)
+				}
 			}
 		}
-		if b.Action.Digest != "" {
-			if _, err := os.Stat(filepath.Join(dir, b.Action.Digest)); err != nil {
-				add(path, "digest file %s not found", b.Action.Digest)
-			}
+		if b.Action.Digest != "" && !isRegular(filepath.Join(dir, b.Action.Digest)) {
+			add(path, "digest file %s not found", b.Action.Digest)
 		}
-		if b.Action.Type == "exec-script" {
-			if _, err := os.Stat(filepath.Join(dir, b.Action.Script)); err != nil {
-				add(path, "script %s not found", b.Action.Script)
-			}
+		if b.Action.Type == "exec-script" && !isRegular(filepath.Join(dir, b.Action.Script)) {
+			add(path, "script %s not found", b.Action.Script)
 		}
 	}
 
@@ -198,9 +204,11 @@ func Validate(root string) (*Catalog, []Problem) {
 		if len(p.Bindings) == 0 && len(p.PickOne) == 0 {
 			add(p.Path, "pack lists no bindings")
 		}
-		seen := map[string]bool{}
-		ref := func(rel, where string) {
-			if seen[rel] {
+		// Installing a pack takes the top-level bindings plus one option per group, so a binding
+		// may repeat across options of one group but never within a set that installs together.
+		top := map[string]bool{}
+		ref := func(rel, where string, seen map[string]bool) {
+			if seen[rel] || (seen != nil && top[rel] && where != "bindings") {
 				add(p.Path, "binding %s listed more than once (%s)", rel, where)
 			}
 			seen[rel] = true
@@ -209,12 +217,16 @@ func Validate(root string) (*Catalog, []Problem) {
 			}
 		}
 		for _, rel := range p.Bindings {
-			ref(rel, "bindings")
+			ref(rel, "bindings", top)
 		}
+		groups := map[string]bool{}
 		for _, g := range p.PickOne {
 			if g.Name == "" {
 				add(p.Path, "pick_one group needs a name")
+			} else if groups[g.Name] {
+				add(p.Path, "pick_one group %q defined more than once", g.Name)
 			}
+			groups[g.Name] = true
 			if len(g.Options) < 2 {
 				add(p.Path, "pick_one %q needs at least two options", g.Name)
 			}
@@ -225,8 +237,9 @@ func Validate(root string) (*Catalog, []Problem) {
 				if len(rels) == 0 {
 					add(p.Path, "pick_one %q option %q lists no bindings", g.Name, opt)
 				}
+				seen := map[string]bool{}
 				for _, rel := range rels {
-					ref(rel, "pick_one "+g.Name)
+					ref(rel, "pick_one "+g.Name, seen)
 				}
 			}
 		}

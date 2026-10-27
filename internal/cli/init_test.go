@@ -3,6 +3,7 @@ package cli
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -82,5 +83,38 @@ func TestInstallSelfCopiesAndUpgrades(t *testing.T) {
 func TestInstallSelfWithoutUserDirUsesSelf(t *testing.T) {
 	if got, err := installSelf("/opt/paws", ""); err != nil || got != "/opt/paws" {
 		t.Errorf("got %q, %v", got, err)
+	}
+}
+
+func TestInstallPawsSkillBesideSettings(t *testing.T) {
+	dir := t.TempDir()
+	settings := filepath.Join(dir, ".claude", "settings.json")
+	installPawsSkill(settings)
+	data, err := os.ReadFile(filepath.Join(dir, ".claude", "skills", "paws", "SKILL.md"))
+	if err != nil || !strings.Contains(string(data), "name: paws") {
+		t.Fatalf("paws skill not installed: %v", err)
+	}
+	// A user's own paws skill is never replaced.
+	own := filepath.Join(dir, "other", ".claude")
+	if err := os.MkdirAll(filepath.Join(own, "skills", "paws"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	os.WriteFile(filepath.Join(own, "skills", "paws", "SKILL.md"), []byte("mine"), 0o644)
+	installPawsSkill(filepath.Join(own, "settings.json"))
+	if got, _ := os.ReadFile(filepath.Join(own, "skills", "paws", "SKILL.md")); string(got) != "mine" {
+		t.Error("init replaced a paws skill it did not install")
+	}
+
+	// A settings file outside .claude gets no skills dir beside it.
+	custom := filepath.Join(dir, "elsewhere", "custom.json")
+	installPawsSkill(custom)
+	if _, err := os.Stat(filepath.Join(dir, "elsewhere", "skills")); err == nil {
+		t.Error("--settings outside .claude must not create a skills dir")
+	}
+
+	// Uninstall removes the unedited copy.
+	removePawsSkill(settings)
+	if _, err := os.Stat(filepath.Join(dir, ".claude", "skills", "paws")); err == nil {
+		t.Error("uninstall should remove the paws skill it installed")
 	}
 }

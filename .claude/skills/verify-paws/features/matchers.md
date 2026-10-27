@@ -16,7 +16,7 @@
 ## Driving it with drive.py
 
 - `run mcp-send-require-skill`: fixtures/fakechat_mcp.py serves `send_message`.
-  Proof: one deny on `mcp__fakechat__send_message`, humanizer invoked, and the
+  Proof: one deny on `mcp__fakechat__send_message`, the skill invoked, and the
   message written to `sent.jsonl` ends with the skill's `HUMAN-OK` token.
 - `run file-glob-require-skill`: Write of `styles/app.css` is denied, the
   skill is invoked, and the file starts with `/* PROBE-CSS */`.
@@ -27,3 +27,5 @@
   `--strict-mcp-config` so the user's own MCP servers stay out.
 - The verb table lives in `internal/rule/mcp.go`; its test lists real tool
   names from Slack, Gmail, Notion, Linear, GitHub, Drive and Calendar.
+- The case skill is named `outbound-voice`, not `humanizer`: a model that
+  knows humanizer loads it before sending, and the deny path never runs.

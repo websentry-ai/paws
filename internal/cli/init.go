@@ -4,12 +4,15 @@ import (
 	"bytes"
 	"fmt"
 	"io"
+	"io/fs"
 	"os"
 	"path/filepath"
 	"runtime"
 	"strings"
 
+	"github.com/websentry-ai/paws"
 	"github.com/websentry-ai/paws/internal/gate"
+	"github.com/websentry-ai/paws/internal/pack"
 )
 
 // Init registers the paws binary as an agent hook: repo root's .claude/settings.json by default, ~/.claude with --global.
@@ -44,6 +47,7 @@ func Init(args []string) int {
 	}
 	if !changed {
 		fmt.Printf("paws already registered in %s\n", settingsPath)
+		installPawsSkill(settingsPath)
 		return 0
 	}
 	if err := writeSettings(settingsPath, doc); err != nil {
@@ -51,6 +55,7 @@ func Init(args []string) int {
 		return 1
 	}
 	fmt.Printf("Registered paws in %s\n  command: %s\n", settingsPath, command)
+	installPawsSkill(settingsPath)
 	fmt.Println("Open a Claude Code session in this project to activate it.")
 	return 0
 }
@@ -80,6 +85,7 @@ func Uninstall(args []string) int {
 		return 1
 	}
 	fmt.Printf("Removed paws from %s\n", settingsPath)
+	removePawsSkill(settingsPath)
 	return 0
 }
 
@@ -212,3 +218,50 @@ func sameFile(a, b string) (bool, error) {
 	}
 	return bytes.Equal(da, db), nil
 }
+
+// pawsSkillDir is the skills directory Claude Code reads beside settingsPath, or "" when the
+// settings file isn't in a .claude directory (a --settings path elsewhere, managed settings).
+func pawsSkillDir(settingsPath string) string {
+	dir := filepath.Dir(settingsPath)
+	if filepath.Base(dir) != ".claude" {
+		return ""
+	}
+	return filepath.Join(dir, "skills")
+}
+
+// installPawsSkill puts the paws skill in <dir>/.claude/skills/paws beside the settings file,
+// so Claude Code can write and check rules. Best-effort: a failure is reported, never fatal,
+// and a skill the user owns or edited is left alone.
+func installPawsSkill(settingsPath string) {
+	skillsDir := pawsSkillDir(settingsPath)
+	if skillsDir == "" {
+		fmt.Printf("Skipped the paws skill: %s is not in a .claude directory\n", settingsPath)
+		return
+	}
+	src, err := fs.Sub(paws.Skill, "skills/paws")
+	if err != nil {
+		return
+	}
+	status, err := pack.InstallBundledSkill(src, skillsDir, "paws", "paws "+Version)
+	dest := filepath.Join(skillsDir, "paws")
+	switch {
+	case err != nil:
+		fmt.Fprintf(os.Stderr, "paws: could not install the paws skill: %v\n", err)
+	case status == pack.BundledInstalled:
+		fmt.Printf("Installed the paws skill in %s\n", dest)
+	case status == pack.BundledKept:
+		fmt.Printf("Left %s as is (not installed by paws, or edited); it may describe an older rule format\n", dest)
+	}
+}
+
+// removePawsSkill undoes installPawsSkill on uninstall, keeping a skill the user edited.
+func removePawsSkill(settingsPath string) {
+	if skillsDir := pawsSkillDir(settingsPath); skillsDir != "" {
+		if removed, _ := pack.RemoveBundledSkill(skillsDir, "paws"); removed {
+			fmt.Printf("Removed the paws skill from %s\n", filepath.Join(skillsDir, "paws"))
+		}
+	}
+}
+
+// Version is set by main so installs can record which paws wrote them.
+var Version = "dev"

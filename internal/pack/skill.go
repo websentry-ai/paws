@@ -265,3 +265,44 @@ func copyFile(fsys fs.FS, src, dest string) error {
 	}
 	return out.Close()
 }
+
+// Bundled-skill install outcomes.
+const (
+	BundledInstalled = "installed" // written (new, or replaced an older paws copy)
+	BundledCurrent   = "current"   // already this exact version
+	BundledKept      = "kept"      // the user's own or edited copy; left alone
+)
+
+// InstallBundledSkill installs a skill that ships inside the binary (fsys rooted at the skill
+// directory). Same rules as pack skills: an existing directory paws doesn't own, or that the
+// user edited, is kept.
+func InstallBundledSkill(fsys fs.FS, skillsDir, name, source string) (string, error) {
+	dest := filepath.Join(skillsDir, name)
+	if exists(dest) {
+		if !replaceable(dest) {
+			return BundledKept, nil
+		}
+		want, err := HashSkill(fsys)
+		if err == nil && want == installedHash(dest) {
+			return BundledCurrent, nil
+		}
+	}
+	if _, err := installSkill(fsys, skillsDir, name, marker{Skill: name, Source: source}); err != nil {
+		return "", err
+	}
+	return BundledInstalled, nil
+}
+
+// RemoveBundledSkill removes a bundled skill paws installed and nobody edited; it reports
+// whether it did.
+func RemoveBundledSkill(skillsDir, name string) (bool, error) { return removeSkill(skillsDir, name) }
+
+func installedHash(dir string) string {
+	data, err := os.ReadFile(filepath.Join(dir, markerFile))
+	if err != nil {
+		return ""
+	}
+	var m marker
+	json.Unmarshal(data, &m)
+	return m.Installed
+}

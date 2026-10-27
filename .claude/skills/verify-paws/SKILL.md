@@ -98,7 +98,7 @@ audit = [                              # ordered subsequence of audit lines, sub
 ]
 audit_absent = [{ verdict = "deny" }]
 audit_max = [{ rule = "commit-house-style", verdict = "deny", max = 1 }]
-shell = ["git log -1 --format=%s | grep -q '^PROBE-7Q: '"]   # run in scratch repo, must exit 0
+shell = ["git log -1 --format=%s | grep -q '^PROBE-7Q: '"]   # run in scratch repo with the case env, must exit 0
 ```
 
 Make every case prove behaviour, not just a hook return value:

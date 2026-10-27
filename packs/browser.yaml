@@ -1,0 +1,5 @@
+name: browser
+description: Load agent-browser before Playwright or Chrome MCP calls, so the agent weighs the agent-browser CLI first.
+tags: [browser]
+bindings:
+  - browser/agent-browser-mcp.md

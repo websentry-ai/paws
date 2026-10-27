@@ -1,0 +1,10 @@
+name: planning
+description: Explore or stress-test a design with the user before a plan or spec file is written.
+tags: [planning]
+pick_one:
+  - name: planner
+    description: Which planning skill to use.
+    default: brainstorming
+    options:
+      brainstorming: [planning/brainstorm-before-plan.md, planning/writing-plans-before-plan.md]
+      grilling: [planning/grill-before-plan.md]

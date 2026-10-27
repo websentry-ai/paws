@@ -1,0 +1,5 @@
+name: frontend
+description: Load a design skill before components and stylesheets change, so the UI has a deliberate visual direction.
+tags: [frontend]
+bindings:
+  - frontend/frontend-design-ui.md

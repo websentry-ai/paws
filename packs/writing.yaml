@@ -1,7 +1,16 @@
 name: writing
-description: Load humanizer before PR bodies, commit messages and MCP sends go out, so they read like a person wrote them.
+description: Load a de-slop skill (humanizer or stop-slop) before PR bodies, commit messages and MCP sends go out, so they read like a person wrote them.
 tags: [writing]
-bindings:
-  - writing/humanizer-pr.md
-  - writing/humanizer-commit.md
-  - writing/humanizer-mcp-send.md
+pick_one:
+  - name: prose
+    description: Which de-slop skill to use.
+    default: humanizer
+    options:
+      humanizer:
+        - writing/humanizer-pr.md
+        - writing/humanizer-commit.md
+        - writing/humanizer-mcp-send.md
+      stop-slop:
+        - writing/stop-slop-pr.md
+        - writing/stop-slop-commit.md
+        - writing/stop-slop-mcp-send.md

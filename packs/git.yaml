@@ -1,0 +1,7 @@
+name: git
+description: Verify work with real command output before every commit and push, and write commit messages in Conventional Commits form.
+tags: [git]
+bindings:
+  - git/verify-before-commit.md
+  - git/verify-before-push.md
+  - git/git-commit-message.md

@@ -5,18 +5,40 @@ Drop a `.paws/` folder of markdown rules in your repo; paws registers itself
 as a Claude Code hook and gates every tool call against them. No daemon, no
 compile step, no network. Fails open — any internal error allows the call.
 
-Apache-2.0 · v0.1 targets Claude Code.
+Apache-2.0 · targets Claude Code.
 
 ## Install
 
 ```
-go build -o paws ./cmd/paws
-./paws init                        # registers paws in ./.claude/settings.json
+npx unbound-paws init              # registers paws in ./.claude/settings.json
 ```
+
+The npm package downloads the release binary for your platform (checked
+against the release's `checksums.txt`). `paws init` copies the running binary
+to `~/.paws/bin/paws` and registers that path, so clearing the npm cache or
+deleting a `go build` output never breaks the hook. Re-run `init` after an
+upgrade to replace the copy. Every repo and the global hook share that one
+binary, so `init` from any version (including an older one, or a dev build)
+swaps it for all of them.
+
+From source: `go build -o paws ./cmd/paws && ./paws init`.
 
 `--global` registers in `~/.claude/settings.json` instead (every repo on the
 machine); `--settings <path>` targets an explicit file. `paws uninstall`
-takes the same flags and removes the entry.
+takes the same flags and removes the entry; it leaves `~/.paws/bin/paws` for
+other repos that still use it.
+
+## Release
+
+Push a `v*` tag. GoReleaser builds darwin/linux/windows for amd64/arm64 and
+attaches archives plus `checksums.txt` to the GitHub release. The `npm` job
+then publishes `unbound-paws` at the tag's version (prereleases to the `next`
+dist-tag) once an `NPM_TOKEN` secret exists. The npm installer downloads from
+the release, so the repo must be public for `npx` installs to work.
+
+Test the npm path locally without a release: `goreleaser release --snapshot
+--clean`, serve `dist/` over HTTP, and run the packed `npm/` tarball with
+`PAWS_DOWNLOAD_BASE=http://127.0.0.1:<port>`.
 
 ## Write a rule
 
@@ -104,5 +126,6 @@ internal/cli  the gate / init / uninstall / explain / validate commands
 catalog       shipped bindings (see docs/catalog.md)
 packs         pack manifests: the unit `paws add` installs
 docs          format references
+npm           the unbound-paws npm wrapper (downloads the release binary)
 examples      sample .paws rules
 ```

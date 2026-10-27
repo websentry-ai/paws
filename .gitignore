@@ -6,3 +6,7 @@
 
 .DS_Store
 /.verify-artifacts/
+
+# goreleaser output
+/dist/
+/npm/vendor/

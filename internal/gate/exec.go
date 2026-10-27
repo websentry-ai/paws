@@ -8,7 +8,6 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strings"
-	"syscall"
 	"time"
 
 	"github.com/websentry-ai/paws/internal/rule"
@@ -30,10 +29,9 @@ func runScript(r *rule.Rule, ev Event) outcome {
 	ctx, cancel := context.WithTimeout(context.Background(), scriptTimeout)
 	defer cancel()
 
-	cmd := exec.CommandContext(ctx, "/bin/sh", script)
-	// own process group + WaitDelay: a backgrounded grandchild must not wedge the gate past the timeout
-	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
-	cmd.Cancel = func() error { return syscall.Kill(-cmd.Process.Pid, syscall.SIGKILL) }
+	cmd := exec.CommandContext(ctx, scriptShell, script)
+	// own process group (where the OS has them) + WaitDelay: a backgrounded grandchild must not wedge the gate past the timeout
+	isolate(cmd)
 	cmd.WaitDelay = time.Second
 
 	payload, _ := json.Marshal(map[string]any{

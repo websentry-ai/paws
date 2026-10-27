@@ -16,3 +16,9 @@ jobs:
       - run: go vet ./...
       - run: go test ./...
       - run: go run ./cmd/paws validate .
+      - uses: goreleaser/goreleaser-action@v6
+        with:
+          distribution: goreleaser
+          version: "~> v2"
+          args: check
+      - run: node --check npm/install.js && node --check npm/bin/paws.js

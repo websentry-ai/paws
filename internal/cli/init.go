@@ -1,10 +1,15 @@
 package cli
 
 import (
+	"bytes"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
+
+	"github.com/websentry-ai/paws/internal/gate"
 )
 
 // Init registers the paws binary as an agent hook: repo root's .claude/settings.json by default, ~/.claude with --global.
@@ -20,7 +25,12 @@ func Init(args []string) int {
 		return 1
 	}
 	self, _ = filepath.Abs(self)
-	command := pawsMarker + shellQuote(self) + " gate"
+	bin, err := installSelf(self, gate.UserDir())
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "paws: install binary: %v\n", err)
+		return 1
+	}
+	command := pawsMarker + shellQuote(bin) + " gate"
 
 	doc, err := readSettings(settingsPath)
 	if err != nil {
@@ -122,4 +132,83 @@ func projectRoot(cwd string) string {
 // shellQuote wraps p in POSIX single quotes so $, backticks and spaces survive.
 func shellQuote(p string) string {
 	return "'" + strings.ReplaceAll(p, "'", `'\''`) + "'"
+}
+
+// installSelf copies the running binary to <userDir>/bin and returns the path the hook should run.
+// npx and go-run binaries live in caches that get cleaned; a hook pointing there breaks silently.
+// Re-running init after an upgrade replaces the copy atomically. With no user dir, self is used.
+func installSelf(self, userDir string) (string, error) {
+	if userDir == "" {
+		return self, nil
+	}
+	dest := filepath.Join(userDir, "bin", filepath.Base(self))
+	if same, _ := sameFile(self, dest); same {
+		return dest, nil
+	}
+	if err := os.MkdirAll(filepath.Dir(dest), 0o700); err != nil {
+		return "", err
+	}
+	src, err := os.Open(self)
+	if err != nil {
+		return "", err
+	}
+	defer src.Close()
+	tmp, err := os.CreateTemp(filepath.Dir(dest), ".paws-*")
+	if err != nil {
+		return "", err
+	}
+	_, err = io.Copy(tmp, src)
+	if cerr := tmp.Close(); err == nil {
+		err = cerr
+	}
+	if err == nil {
+		err = os.Chmod(tmp.Name(), 0o755)
+	}
+	if err == nil && runtime.GOOS == "windows" {
+		// Windows can't replace a running .exe but can rename it: move the old one aside
+		// (a hook mid-run keeps using it) and clear the previous leftover first.
+		os.Remove(dest + ".old")
+		if rerr := os.Rename(dest, dest+".old"); rerr != nil && !os.IsNotExist(rerr) {
+			err = rerr
+		}
+	}
+	if err == nil {
+		// On unix, rename is atomic: a hook mid-run keeps the old inode, the next call gets the new binary.
+		err = os.Rename(tmp.Name(), dest)
+	}
+	if err != nil {
+		os.Remove(tmp.Name())
+		return "", err
+	}
+	if self != dest {
+		fmt.Printf("Installed paws binary to %s\n", dest)
+	}
+	return dest, nil
+}
+
+// sameFile reports whether a and b are the same file, or byte-identical copies.
+func sameFile(a, b string) (bool, error) {
+	sa, err := os.Stat(a)
+	if err != nil {
+		return false, err
+	}
+	sb, err := os.Stat(b)
+	if err != nil {
+		return false, err
+	}
+	if os.SameFile(sa, sb) {
+		return true, nil
+	}
+	if sa.Size() != sb.Size() {
+		return false, nil
+	}
+	da, err := os.ReadFile(a)
+	if err != nil {
+		return false, err
+	}
+	db, err := os.ReadFile(b)
+	if err != nil {
+		return false, err
+	}
+	return bytes.Equal(da, db), nil
 }

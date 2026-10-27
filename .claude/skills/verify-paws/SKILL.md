@@ -22,6 +22,16 @@ python3 .claude/skills/verify-paws/scripts/drive.py run block-tag --keep   # kee
 
 A case finishes when `claude -p` exits (end of turn). Default timeout 300 s.
 
+`--npm` tests the ship path instead of `go build`: it builds a GoReleaser
+snapshot at `npm/package.json`'s version, packs `npm/`, serves the archives on
+a local port, and each case runs `npx --package <tgz> unbound-paws init` with
+`PAWS_DOWNLOAD_BASE` pointed at that port and its own npm cache. It needs
+`goreleaser` and `npm`. The server stops when the run ends.
+
+```bash
+python3 .claude/skills/verify-paws/scripts/drive.py run --npm catalog-humanizer-commit
+```
+
 ## Doctor
 
 ```bash
@@ -109,6 +119,7 @@ Make every case prove behaviour, not just a hook return value:
 | `events.json` | flattened tool_use / tool_result / text / result events |
 | `audit.jsonl` | the scratch paws audit log: what paws decided |
 | `settings.json` | the `.claude/settings.json` that `paws init` wrote |
+| `init.txt` | `paws init` (or `npx unbound-paws init`) output |
 | `git-log.txt` | the scratch repo's commits after the run |
 
 Exit code: 0 PASS, 1 FAIL (including a case with no or unknown `[expect]` keys),

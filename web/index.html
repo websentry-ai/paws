@@ -102,6 +102,7 @@ function renderInstalled(packs) {
     $("#installed").innerHTML = `<div class="empty">No packs installed yet. Open <b>Catalog</b>, or run ${cmd("paws add writing")}</div>`;
     return;
   }
+  packs.forEach((p) => (p.bindings = p.bindings || []));
   const max = Math.max(1, ...packs.flatMap((p) => p.bindings.map((b) => b.fires)));
   $("#installed").innerHTML = packs.map((p) => `
     <div class="card">
@@ -142,6 +143,7 @@ function renderCatalog() {
 $("#q").addEventListener("input", renderCatalog);
 
 function renderActivity({ stats: s, log }) {
+  s.rules = s.rules || []; s.dormant = s.dormant || [];
   const tiles = [["Rules fired", s.rules.reduce((n, r) => n + r.fires, 0)], ["Sessions", s.sessions], ["Turns", s.turns], ["Tool calls", s.tool_calls]];
   let html = `<div class="tiles">${tiles.map(([k, v]) => `<div class="tile"><b>${v}</b><span>${k}</span></div>`).join("")}</div>`;
   html += "<h3>By rule</h3>";

@@ -41,6 +41,10 @@ func TestUIHandler(t *testing.T) {
 			t.Errorf("index keys should be snake_case for the page and the website: %.300s", rec.Body)
 		}
 	}
+	// Fresh install: no audit log yet. Lists must be [] so the page renders its empty states.
+	if rec := do("GET", "/api/stats", "127.0.0.1:4242"); !strings.Contains(rec.Body.String(), `"rules":[]`) || !strings.Contains(rec.Body.String(), `"dormant":[]`) {
+		t.Errorf("empty stats should serialise lists as []: %s", rec.Body)
+	}
 	for _, p := range []string{"/api/installed", "/api/stats"} {
 		if rec := do("GET", p, "127.0.0.1:4242"); rec.Code != 200 || !json.Valid(rec.Body.Bytes()) {
 			t.Errorf("%s: %d %s", p, rec.Code, rec.Body)

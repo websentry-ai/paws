@@ -48,7 +48,8 @@ type auditRecord struct {
 
 // summarize reads audit records in order (rotated file first) and counts them.
 func summarize(paths []string, inScope []string) Stats {
-	st := Stats{Skills: map[string]int{}}
+	// Empty lists, not nil: JSON consumers (paws ui, scripts) get [] instead of null.
+	st := Stats{Skills: map[string]int{}, Rules: []RuleStats{}, Dormant: []string{}}
 	byRule := map[string]*RuleStats{}
 	deniedIn := map[string]bool{} // rule|session pairs that saw a deny
 	sessions := map[string]bool{}

@@ -93,7 +93,7 @@ func uiHandler(addr string) http.Handler {
 			http.Error(w, "read-only", http.StatusMethodNotAllowed)
 			return
 		}
-		w.Header().Set("Content-Security-Policy", "default-src 'self'; style-src 'self' 'unsafe-inline'; script-src 'self' 'unsafe-inline'")
+		w.Header().Set("Content-Security-Policy", "default-src 'self'; style-src 'self' 'unsafe-inline'; script-src 'self' 'unsafe-inline'; frame-ancestors 'none'")
 		w.Header().Set("X-Content-Type-Options", "nosniff")
 		mux.ServeHTTP(w, r)
 	})
@@ -134,7 +134,7 @@ func installedView() []installedPack {
 		}
 		for _, n := range sortedKeys(state.Packs) {
 			inst := state.Packs[n]
-			ip := installedPack{Name: n, Scope: scope, At: inst.At, Picks: inst.Picks, Skills: inst.Skills}
+			ip := installedPack{Name: n, Scope: scope, At: inst.At, Picks: inst.Picks, Skills: inst.Skills, Bindings: []installedBinding{}}
 			for _, rel := range inst.Bindings {
 				name := ruleName(filepath.Join(pack.InstallDir(t, n), filepath.FromSlash(rel)))
 				ip.Bindings = append(ip.Bindings, installedBinding{Path: rel, Name: name, Fires: fires[name]})

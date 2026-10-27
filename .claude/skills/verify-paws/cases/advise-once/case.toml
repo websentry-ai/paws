@@ -1,0 +1,11 @@
+description = "advise: allow with context the first time, skip it while the advice is still in the window"
+prompt = "Run `git status` in this repo with the Bash tool and wait for its output. Only after you have read that output, make a separate Bash call to run `git status --short`. Do not run the two commands in parallel. Then tell me the branch name."
+allowed_tools = ["Bash(git:*)"]
+
+[expect]
+audit = [
+  { rule = "status-note", action = "advise", verdict = "allow" },
+  { rule = "status-note", action = "advise", satisfied_by = "advice-delivered" },
+]
+audit_absent = [{ verdict = "deny" }]
+final_contains = ["NOTE-99"]

@@ -80,3 +80,11 @@ func TestSettingsEntryTimeoutIsSeconds(t *testing.T) {
 		t.Error("UserPromptSubmit entries must not carry a matcher — Claude Code ignores it there")
 	}
 }
+
+func TestRenderSessionStartContext(t *testing.T) {
+	out := Render("SessionStart", gate.Decision{Verdict: gate.Allow, Context: "load caveman"})
+	if out.SpecificOutput == nil || out.SpecificOutput.HookEventName != "SessionStart" ||
+		out.SpecificOutput.AdditionalContext != "load caveman" || out.SpecificOutput.PermissionDecision != "" {
+		t.Errorf("SessionStart context should render as additionalContext only, got %+v", out.SpecificOutput)
+	}
+}

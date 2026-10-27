@@ -1,0 +1,11 @@
+description = "file_glob: writing a .css file needs the frontend skill first; the written file follows it"
+prompt = "Create the file styles/app.css containing a single rule that sets the body margin to 0. Use the Write tool."
+allowed_tools = ["Write", "Skill"]
+
+[expect]
+skills_invoked = ["frontend-style"]
+audit = [
+  { rule = "css-style", verdict = "deny", tool = "Write" },
+  { rule = "css-style", verdict = "allow", satisfied_by = "skill-load" },
+]
+shell = ["grep -q 'PROBE-CSS' styles/app.css"]

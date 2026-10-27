@@ -15,8 +15,9 @@ var mcpVerbClasses = []struct {
 }{
 	{"", []string{"get", "list", "read", "search", "fetch", "query", "find", "view", "download", "export", "describe", "count"}},
 	{"delete", []string{"delete", "remove", "trash", "archive", "destroy", "unshare", "cancel"}},
-	// Drafts and comments are prose that leaves the agent: they count as sends.
-	{"send", []string{"send", "reply", "forward", "post", "publish", "schedule", "draft", "comment", "message", "respond"}},
+	// Drafts and comments are prose that leaves the agent: they count as sends. "message" is
+	// deliberately absent: it is the object of label_message and read_message, not a verb.
+	{"send", []string{"send", "reply", "forward", "post", "publish", "schedule", "draft", "comment", "respond"}},
 	{"update", []string{"update", "edit", "modify", "patch", "set", "rename", "move", "label", "unlabel", "mark", "unmark", "resolve", "untrash", "restore", "apply", "merge", "submit", "share"}},
 	{"create", []string{"create", "add", "insert", "new", "upload", "save", "duplicate", "spawn", "generate"}},
 }

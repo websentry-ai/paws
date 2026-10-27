@@ -129,3 +129,56 @@ func TestRequireSkillReasonTellsAgentToRetry(t *testing.T) {
 		t.Errorf("require-skill should tell the agent to retry after invoking the skill: %q", got)
 	}
 }
+
+// lnAdvised is the attachment Claude Code writes when a hook's additionalContext reaches the agent.
+const lnAdvised = `{"type":"attachment","isSidechain":false,"attachment":{"type":"hook_additional_context","content":["paws (use-agent-browser): Prefer the agent-browser skill."],"hookName":"PreToolUse:mcp__playwright__browser_click","hookEvent":"PreToolUse"}}`
+
+func TestAdviseOncePerWindow(t *testing.T) {
+	DryRun = true
+	defer func() { DryRun = false }()
+
+	rules := []*rule.Rule{mustRule(t, "---\nname: use-agent-browser\nevent: pre-tool\nmatcher:\n  tool: mcp__playwright__*\naction:\n  type: advise\n  message: Prefer the agent-browser skill.\n---\n")}
+	ev := Event{Kind: rule.KindTool, Tool: "mcp__playwright__browser_click", Target: "{}"}
+
+	first := ev
+	first.Transcript = write(t, lnAssistant)
+	d := Decide(first, rules)
+	if d.Verdict != Allow || d.Context != "paws (use-agent-browser): Prefer the agent-browser skill." {
+		t.Fatalf("first advise should allow with tagged context, got %+v", d)
+	}
+
+	again := ev
+	again.Transcript = write(t, lnAdvised, lnAssistant)
+	if d := Decide(again, rules); d.Verdict != Allow || d.Context != "" {
+		t.Errorf("advice already in the window should not repeat, got %+v", d)
+	}
+
+	compacted := ev
+	compacted.Transcript = write(t, lnAdvised, lnCompact, lnAssistant)
+	if d := Decide(compacted, rules); d.Context == "" {
+		t.Errorf("a compaction should make the advice repeat, got %+v", d)
+	}
+}
+
+func TestRequireSkillOnSessionStartAddsContext(t *testing.T) {
+	DryRun = true
+	defer func() { DryRun = false }()
+
+	rules := []*rule.Rule{mustRule(t, "---\nname: s\nevent: session-start\naction:\n  type: require-skill\n  skill: release-checklist\n---\n")}
+	ev := Event{Kind: rule.KindSession, Target: "startup"}
+	d := Decide(ev, rules)
+	if d.Verdict != Allow || !strings.Contains(d.Context, `"release-checklist" skill`) {
+		t.Fatalf("session-start require-skill should allow with context naming the skill, got %+v", d)
+	}
+
+	loaded := ev
+	loaded.Transcript = write(t, lnSkillOK, lnAssistant)
+	if d := Decide(loaded, rules); d.Context != "" {
+		t.Errorf("a loaded skill needs no reminder, got %+v", d)
+	}
+
+	// Tool rules never fire on session events and vice versa.
+	if d := Decide(Event{Kind: rule.KindTool, Tool: "Bash", Target: "ls"}, rules); d.Context != "" || d.Verdict != Allow {
+		t.Errorf("session rule fired on a tool call: %+v", d)
+	}
+}

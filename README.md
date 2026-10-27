@@ -75,12 +75,20 @@ review `.claude/settings.json` like you review `.paws/`.
 | `pre-push` | `pre-tool`, plus the Bash command must match `git push` |
 | `pre-commit` | `pre-tool`, plus the Bash command must match `git commit` |
 | `user-prompt` | the submitted prompt text, not a tool call |
+| `session-start` | a session starting; `command_regex` matches the source (`startup`, `resume`, `clear`, `compact`) |
 
 ## Matcher
 
 `tool:` — a tool name (`Bash`, `Read`, `Write`, `Edit`, `Grep`, `Glob`,
-`WebFetch`, `WebSearch`, `mcp__<server>__<tool>`), an `A|B` list, or
-omitted/`"*"` (quoted) for any.
+`WebFetch`, `WebSearch`, `mcp__<server>__<tool>`), a `prefix*` pattern
+(`mcp__slack__*`), an `A|B` list of either, or omitted/`"*"` (quoted) for any.
+
+`mcp_action:` — `send`, `create`, `update` or `delete` (or an `A|B` list):
+any MCP tool whose own name says it does that, on any server. Reads never
+match; drafts and comments count as `send`.
+
+`file_glob:` — `**`, `*`, `?`, `{a,b}` over the absolute `file_path` of
+Read/Write/Edit. A relative glob (`src/**/*.ts`) matches at any directory.
 
 `command_regex:` — matched against the Bash command, file path, URL, or
 prompt text, depending on the event. It's a regex over literal text, not a
@@ -92,10 +100,11 @@ command is chained after `cd x &&`, `;`, or `|`.
 | action | effect |
 |---|---|
 | `block` | hard deny, no retry path |
-| `require-skill` | deny; clears once the agent invokes `skill:` (checked against its session transcript, last 20 turns) and retries the exact same command |
+| `require-skill` | deny; clears once the agent invokes `skill:` (checked against its session transcript, last 20 turns) and retries the exact same command. On `session-start` it adds context naming the skill instead |
 | `warn` | Claude Code shows an interactive approval prompt; proceeds only if the human says yes. Not supported on `user-prompt` |
 | `audit` | allowed silently; recorded to `~/.paws/audit.log`. Agent sees nothing — pure observation |
 | `prompt-inject` | `user-prompt` rules only — appends `message:` to the prompt. Not recorded to `~/.paws/audit.log` |
+| `advise` | allows the call and attaches `message:` as context, once per 20-turn window (again after a compaction) |
 | `exec-script` | delegates to `script:` (relative path inside the rule's own directory); exit 2 denies, stderr is the reason, anything else allows |
 
 When multiple rules match, the most restrictive wins: `block`/`require-skill`

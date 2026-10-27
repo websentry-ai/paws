@@ -38,6 +38,22 @@ func TestMCPActionClassifiesRealToolNames(t *testing.T) {
 		// browsers: navigation is not an action class
 		"mcp__playwright__browser_click":  "",
 		"mcp__claude-in-chrome__navigate": "",
+		// review findings: leftmost verb wins, objects don't promote
+		"mcp__plugin_slack_slack__slack_create_list":         "create",
+		"mcp__plugin_slack_slack__slack_update_list":         "update",
+		"mcp__plugin_slack_slack__slack_add_list_record":     "create",
+		"mcp__claude_ai_Notion__notion-create-view":          "create",
+		"mcp__claude_ai_Gmail__create_label":                 "create",
+		"mcp__gitlab__create_merge_request":                  "create",
+		"mcp__context7__resolve-library-id":                  "",
+		"mcp__filesystem__write_file":                        "create",
+		"mcp__github__push_files":                            "update",
+		"mcp__claude_ai_Notion__notion-set-comment-reaction": "update",
+		"mcp__claude_ai_Google_Calendar__respond_to_event":   "",
+		"mcp__x__create_schedule":                            "create",
+		"mcp__fetch__http_post":                              "create",
+		"mcp__claude_ai_Gmail__update_draft":                 "send",
+		"mcp__x__post_message":                               "send",
 		// not MCP
 		"Bash":          "",
 		"mcp__noserver": "",
@@ -96,6 +112,7 @@ func TestFileGlob(t *testing.T) {
 		{"secrets/**", "/repo/secrets/prod/key.pem", true},
 		{"a?c.md", "/r/abc.md", true},
 		{"a?c.md", "/r/a/c.md", false},
+		{"docs/café/*.md", "/r/docs/café/a.md", true},
 	}
 	for _, c := range cases {
 		re, err := globRegexp(c.glob)
@@ -117,6 +134,10 @@ func TestFileGlobOnlyMatchesFileTools(t *testing.T) {
 	r := mustRule(t, "---\nname: x\nevent: pre-tool\nmatcher:\n  file_glob: \"**/*.tsx\"\naction:\n  type: audit\n---\n")
 	if !r.Matches("Edit", "/repo/src/App.tsx") || !r.Matches("Write", "/repo/App.tsx") {
 		t.Error("file_glob should match Edit and Write on a .tsx path")
+	}
+	nb := mustRule(t, "---\nname: nb\nevent: pre-tool\nmatcher:\n  file_glob: \"**/*.ipynb\"\naction:\n  type: audit\n---\n")
+	if !nb.Matches("NotebookEdit", "/repo/analysis.ipynb") {
+		t.Error("file_glob should match NotebookEdit on its notebook_path")
 	}
 	if r.Matches("Bash", "cat /repo/src/App.tsx") || r.Matches("Grep", "/repo/App.tsx") {
 		t.Error("file_glob must not match tools without a file_path target")

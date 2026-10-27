@@ -50,7 +50,7 @@ func globRegexp(glob string) (*regexp.Regexp, error) {
 		case c == ',' && inBrace:
 			b.WriteString("|")
 		default:
-			b.WriteString(regexp.QuoteMeta(string(c)))
+			b.WriteString(regexp.QuoteMeta(glob[i : i+1])) // byte-wise: keeps UTF-8 sequences intact
 		}
 	}
 	if inBrace {

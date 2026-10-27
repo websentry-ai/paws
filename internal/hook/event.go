@@ -58,6 +58,10 @@ func (in *Input) Command() string {
 		if p, ok := ti["file_path"].(string); ok {
 			return p
 		}
+	case "NotebookEdit":
+		if p, ok := ti["notebook_path"].(string); ok {
+			return p
+		}
 	case "Grep", "Glob":
 		if p, ok := ti["pattern"].(string); ok {
 			return p

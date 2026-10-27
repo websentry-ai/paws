@@ -14,8 +14,8 @@ var (
 	gitPushRe   = regexp.MustCompile(gitAnchor + `git` + gitFlags + `\s+push\b`)
 )
 
-// fileTools carry a file_path target, the only tools a file_glob can match.
-var fileTools = map[string]bool{"Read": true, "Write": true, "Edit": true}
+// fileTools carry a file path target (file_path, notebook_path), the only tools a file_glob can match.
+var fileTools = map[string]bool{"Read": true, "Write": true, "Edit": true, "NotebookEdit": true}
 
 // Matches reports whether this rule applies to a call by tool, against target (the extracted command or prompt).
 func (r *Rule) Matches(tool, target string) bool {

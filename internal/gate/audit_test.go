@@ -67,3 +67,14 @@ func TestLogAuditHonorsPawsHome(t *testing.T) {
 		t.Errorf("expected audit log under $PAWS_HOME: %v", err)
 	}
 }
+
+func TestAuditMarksContextAdded(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	r := mustRule(t, "---\nname: s\nevent: session-start\naction:\n  type: require-skill\n  skill: k\n---\n")
+	Decide(Event{Kind: rule.KindSession, Target: "startup"}, []*rule.Rule{r})
+	data, _ := os.ReadFile(filepath.Join(home, ".paws", "audit.log"))
+	if !strings.Contains(string(data), `"context_added":true`) {
+		t.Errorf("session-start require-skill should audit context_added, got %s", data)
+	}
+}

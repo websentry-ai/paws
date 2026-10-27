@@ -23,6 +23,9 @@ swaps it for all of them.
 
 From source: `go build -o paws ./cmd/paws && ./paws init`.
 
+Upgrading from 0.1: re-run `paws init` once. 0.2 registers a SessionStart
+hook as well, and `session-start` rules never fire without it.
+
 `--global` registers in `~/.claude/settings.json` instead (every repo on the
 machine); `--settings <path>` targets an explicit file. `paws uninstall`
 takes the same flags and removes the entry; it leaves `~/.paws/bin/paws` for

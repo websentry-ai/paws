@@ -44,6 +44,9 @@ func logAudit(ev Event, r *rule.Rule, oc outcome) {
 	if oc.satisfiedBy != "" {
 		rec["satisfied_by"] = oc.satisfiedBy
 	}
+	if oc.digestErr != "" {
+		rec["digest_error"] = oc.digestErr
+	}
 	if oc.context != "" {
 		rec["context_added"] = true // session-start require-skill and advise: allowed, but the agent got text
 	}

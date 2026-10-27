@@ -6,6 +6,7 @@ import (
 	"errors"
 	"io"
 	"os"
+	"regexp"
 	"strings"
 )
 
@@ -73,6 +74,35 @@ func ContextDelivered(path, marker string, window int) bool {
 			}
 		}
 		return false
+	})
+}
+
+// hookDenyPrefix is how Claude Code records a PreToolUse deny in toolUseResult:
+// "Error: PreToolUse:<Tool> hook error: <reason>". A failed command is recorded as
+// "Error: Exit code N\n<output>", so anchoring here keeps tool output from forging a deny.
+var hookDenyPrefix = regexp.MustCompile(`^Error: PreToolUse:\S+ hook error: `)
+
+// DenyDelivered reports whether a paws deny whose reason starts with marker reached the
+// agent within the last `window` turns.
+func DenyDelivered(path, marker string, window int) bool {
+	if marker == "" {
+		return false
+	}
+	return scanWindow(path, window, func(e transcriptEntry) bool {
+		if e.Type != "user" || len(e.ToolUseResult) == 0 || e.ToolUseResult[0] != '"' {
+			return false
+		}
+		var result string
+		if json.Unmarshal(e.ToolUseResult, &result) != nil {
+			return false
+		}
+		loc := hookDenyPrefix.FindStringIndex(result)
+		if loc == nil {
+			return false
+		}
+		// paws joins retryable denies with blank lines, so the marker opens the reason or a paragraph.
+		reason := result[loc[1]:]
+		return strings.HasPrefix(reason, marker) || strings.Contains(reason, "\n\n"+marker)
 	})
 }
 

@@ -3,7 +3,10 @@ package gate
 import (
 	"encoding/json"
 	"fmt"
+	"os"
+	"path/filepath"
 	"strings"
+	"unicode/utf8"
 
 	"github.com/websentry-ai/paws/internal/rule"
 )
@@ -27,6 +30,9 @@ const DefaultSkillWindow = 20
 
 // skillLoadSatisfied tags an audit record whose allow came from a cleared require-skill gate.
 const skillLoadSatisfied = "skill-load"
+
+// digestSatisfied tags an audit record whose require-skill passed because its digest was delivered this window.
+const digestSatisfied = "digest-delivered"
 
 // adviceSatisfied tags an audit record whose advise was skipped: the agent already has it this window.
 const adviceSatisfied = "advice-delivered"
@@ -55,6 +61,7 @@ type outcome struct {
 	context     string
 	fired       bool   // did the rule act — i.e. worth auditing
 	satisfiedBy string // non-empty when a gate that would have denied was cleared instead
+	digestErr   string // why an on_miss digest could not be used (fell back to load-required)
 }
 
 // Decide filters rules to those matching the event and resolves them.
@@ -71,7 +78,7 @@ func Decide(ev Event, rules []*rule.Rule) Decision {
 // resolve collapses matched rules into one decision: deny > ask > allow wins, context concatenates, fired rules are audited.
 func resolve(ev Event, matched []*rule.Rule) Decision {
 	top := Decision{Verdict: Allow}
-	var contexts []string
+	var contexts, retryReasons []string
 	for _, r := range matched {
 		oc := evaluate(r, ev)
 		if oc.fired {
@@ -80,12 +87,36 @@ func resolve(ev Event, matched []*rule.Rule) Decision {
 		if oc.context != "" {
 			contexts = append(contexts, oc.context)
 		}
+		if oc.verdict == DenyRetry {
+			retryReasons = append(retryReasons, oc.reason)
+		}
 		if oc.verdict > top.Verdict {
 			top.Verdict, top.Reason = oc.verdict, oc.reason
 		}
 	}
-	top.Context = strings.Join(contexts, "\n")
+	// Every retryable deny reaches the agent at once (each skill or digest it needs), so the
+	// next attempt clears them all instead of discovering them one deny at a time.
+	if top.Verdict == DenyRetry {
+		top.Reason = strings.Join(retryReasons, "\n\n")
+	}
+	top.Reason = capText(top.Reason)
+	top.Context = capText(strings.Join(contexts, "\n"))
 	return top
+}
+
+// maxHookText keeps a reason or context under Claude Code's 10,000-character hook output cap,
+// past which it shows a file preview instead of the text.
+const maxHookText = 9500
+
+func capText(s string) string {
+	if len(s) <= maxHookText {
+		return s
+	}
+	cut := maxHookText
+	for cut > 0 && !utf8.RuneStart(s[cut]) {
+		cut--
+	}
+	return s[:cut] + "\n[paws: truncated; run `paws explain` for the full text]"
 }
 
 // evaluate resolves a matched rule to an outcome. Only exec-script runs a subprocess.
@@ -98,11 +129,22 @@ func evaluate(r *rule.Rule, ev Event) outcome {
 		if SkillLoaded(ev.Transcript, a.Skill, DefaultSkillWindow) {
 			return outcome{verdict: Allow, satisfiedBy: skillLoadSatisfied, fired: true}
 		}
+		digest, digestErr := loadDigest(r)
+		if digest != "" && DenyDelivered(ev.Transcript, digestMarker(r), DefaultSkillWindow) {
+			// The digest already rode in a deny this window: the agent has the rules, let the retry through.
+			return outcome{verdict: Allow, satisfiedBy: digestSatisfied, fired: true}
+		}
 		if ev.Kind == rule.KindSession {
-			// A session start can't be denied: name the skill as context instead.
+			// A session start can't be denied: name the skill (or hand over its digest) as context instead.
+			if digest != "" {
+				return outcome{verdict: Allow, context: digestMarker(r) + " " + digest, fired: true}
+			}
 			return outcome{verdict: Allow, context: msgOr(a.Message, sessionSkillContext(a)), fired: true}
 		}
-		return outcome{verdict: DenyRetry, reason: msgOr(a.DenyMessage, skillReason(a)), fired: true}
+		if digest != "" {
+			return outcome{verdict: DenyRetry, reason: digestReason(r, digest), fired: true}
+		}
+		return outcome{verdict: DenyRetry, reason: msgOr(a.DenyMessage, skillReason(a)), fired: true, digestErr: digestErr}
 	case "advise":
 		marker := adviseMarker(r)
 		if ContextDelivered(ev.Transcript, marker, DefaultSkillWindow) {
@@ -120,6 +162,34 @@ func evaluate(r *rule.Rule, ev Event) outcome {
 		return runScript(r, ev)
 	}
 	return outcome{}
+}
+
+// loadDigest returns the rule's digest when on_miss is digest. On a missing, unreadable or
+// oversize file it returns "" and the reason, so the caller falls back to load-required and
+// the audit log says why.
+func loadDigest(r *rule.Rule) (string, string) {
+	if r.Action.OnMiss != rule.OnMissDigest || r.Action.Digest == "" {
+		return "", ""
+	}
+	// rule.Parse rejects absolute and escaping paths, so this stays inside the rule's directory.
+	data, err := os.ReadFile(filepath.Join(filepath.Dir(r.SourcePath), r.Action.Digest))
+	if err != nil {
+		return "", err.Error()
+	}
+	if len(data) > rule.MaxDigest {
+		return "", fmt.Sprintf("digest is %d bytes, over the %d-byte limit", len(data), rule.MaxDigest)
+	}
+	return strings.TrimSpace(string(data)), ""
+}
+
+// digestMarker tags a digest deny so the transcript shows the agent already received it.
+func digestMarker(r *rule.Rule) string {
+	return fmt.Sprintf("paws digest (%s):", r.Name)
+}
+
+func digestReason(r *rule.Rule, digest string) string {
+	return fmt.Sprintf("%s This action requires the %q skill. Its rules follow; apply them, then retry the command (re-formed to follow them if needed).\n\n%s",
+		digestMarker(r), r.Action.Skill, digest)
 }
 
 // adviseMarker tags advise context so the transcript shows which rule already advised this window.

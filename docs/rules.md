@@ -101,6 +101,24 @@ The repo root is the nearest directory with `.git` above the agent's cwd.
 skill and tells the agent to invoke it and retry the same command. A
 compaction resets the 20-turn window, so the next gated call denies once more.
 
+### on_miss: digest
+
+For a skill the user may not have installed, ship a digest beside the rule:
+
+```yaml
+action:
+  type: require-skill
+  skill: aws-s3
+  on_miss: digest               # default: load-required
+  digest: digests/aws-s3.md     # relative to the rule file, at most 7,000 bytes
+```
+
+The deny then carries the digest. Once that deny is in the transcript window,
+the retry passes without the skill (audit `satisfied_by: digest-delivered`).
+A loaded skill still passes first. A missing or oversize digest falls back to
+the plain load-required deny, and the audit record carries `digest_error`.
+Delivery is keyed by rule name: two rules with the same name share it.
+
 When several rules match, the most restrictive wins: `block` > unresolved
 `require-skill` / `exec-script` deny > `warn` > allow. Context from every
 matching rule is joined.

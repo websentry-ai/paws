@@ -124,3 +124,18 @@ func mustWrite(t *testing.T, p, content string) {
 		t.Fatal(err)
 	}
 }
+
+func TestPawsDirsHonorsPawsHome(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	custom := filepath.Join(t.TempDir(), "paws-home")
+	mustMkdir(t, custom)
+	t.Setenv("PAWS_HOME", custom)
+
+	repo := filepath.Join(t.TempDir(), "repo")
+	mustMkdir(t, filepath.Join(repo, ".git"))
+
+	dirs := pawsDirs(repo)
+	if len(dirs) != 1 || dirs[0] != custom {
+		t.Errorf("expected only $PAWS_HOME %s, got %v", custom, dirs)
+	}
+}

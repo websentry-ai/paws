@@ -21,7 +21,19 @@ type FileError struct {
 	Err  error
 }
 
-// Collect gathers rules from every .paws dir in scope for cwd, up to the repo root (or $HOME), plus ~/.paws.
+// UserDir is the per-user paws directory: $PAWS_HOME when set, else ~/.paws. "" if neither resolves.
+func UserDir() string {
+	if d := os.Getenv("PAWS_HOME"); d != "" {
+		return d
+	}
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return ""
+	}
+	return filepath.Join(home, ".paws")
+}
+
+// Collect gathers rules from every .paws dir in scope for cwd, up to the repo root (or $HOME), plus UserDir.
 func Collect(cwd string) Result {
 	var res Result
 	for _, dir := range pawsDirs(cwd) {
@@ -36,8 +48,7 @@ func pawsDirs(cwd string) []string {
 	seen := map[string]bool{}
 	home, _ := os.UserHomeDir()
 
-	add := func(base string) {
-		p := filepath.Join(base, ".paws")
+	addDir := func(p string) {
 		if seen[p] {
 			return
 		}
@@ -46,6 +57,7 @@ func pawsDirs(cwd string) []string {
 			dirs = append(dirs, p)
 		}
 	}
+	add := func(base string) { addDir(filepath.Join(base, ".paws")) }
 
 	// Without a repo root or $HOME as an ancestor, trust only cwd itself —
 	// never shared parents like /tmp or /.
@@ -72,8 +84,8 @@ func pawsDirs(cwd string) []string {
 		}
 		cur = parent
 	}
-	if home != "" {
-		add(home)
+	if u := UserDir(); u != "" {
+		addDir(u)
 	}
 	return dirs
 }

@@ -5,3 +5,4 @@
 /testproject/
 
 .DS_Store
+/.verify-artifacts/

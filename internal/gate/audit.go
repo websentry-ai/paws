@@ -13,11 +13,11 @@ import (
 var DryRun bool
 
 func auditPath() string {
-	home, err := os.UserHomeDir()
-	if err != nil {
+	dir := UserDir()
+	if dir == "" {
 		return ""
 	}
-	return filepath.Join(home, ".paws", "audit.log")
+	return filepath.Join(dir, "audit.log")
 }
 
 // logAudit appends a JSONL record of a fired rule. Best-effort, never blocks.

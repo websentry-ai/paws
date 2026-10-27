@@ -17,7 +17,11 @@ func TestToEventKind(t *testing.T) {
 	if ev := ToEvent(in, nil); ev.Kind != rule.KindPrompt || ev.Target != "hi" {
 		t.Errorf("UserPromptSubmit should map to KindPrompt with the prompt text, got %+v", ev)
 	}
-	in = &Input{HookEventName: "SessionStart"}
+	in = &Input{HookEventName: "SessionStart", Source: "compact"}
+	if ev := ToEvent(in, nil); ev.Kind != rule.KindSession || ev.Target != "compact" {
+		t.Errorf("SessionStart should map to KindSession with the source, got %+v", ev)
+	}
+	in = &Input{HookEventName: "Stop"}
 	if ev := ToEvent(in, nil); ev.Kind != "" {
 		t.Errorf("unmapped events should have no Kind, got %+v", ev)
 	}

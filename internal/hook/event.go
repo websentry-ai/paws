@@ -15,6 +15,7 @@ type Input struct {
 	ToolName       string         `json:"tool_name"`
 	ToolInput      map[string]any `json:"tool_input"`
 	Prompt         string         `json:"prompt,omitempty"` // UserPromptSubmit only
+	Source         string         `json:"source,omitempty"` // SessionStart only: startup|resume|clear|compact
 	AgentID        string         `json:"agent_id,omitempty"`
 	AgentType      string         `json:"agent_type,omitempty"`
 }
@@ -36,8 +37,11 @@ type SpecificOutput struct {
 
 // MatchTarget is the string a rule's regex runs against for this event.
 func (in *Input) MatchTarget() string {
-	if in.HookEventName == "UserPromptSubmit" {
+	switch in.HookEventName {
+	case "UserPromptSubmit":
 		return in.Prompt
+	case "SessionStart":
+		return in.Source
 	}
 	return in.Command()
 }

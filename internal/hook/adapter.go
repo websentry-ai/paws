@@ -11,7 +11,7 @@ import (
 const Agent = "claude-code"
 
 // RegisteredEvents are the Claude Code hook events `paws init` subscribes to.
-var RegisteredEvents = []string{"PreToolUse", "UserPromptSubmit"}
+var RegisteredEvents = []string{"PreToolUse", "UserPromptSubmit", "SessionStart"}
 
 // ToEvent normalizes a Claude Code hook event into the engine's terms; raw passes through untouched for exec-scripts.
 func ToEvent(in *Input, raw []byte) gate.Event {
@@ -30,6 +30,8 @@ func ToEvent(in *Input, raw []byte) gate.Event {
 		ev.Kind = rule.KindTool
 	case "UserPromptSubmit":
 		ev.Kind = rule.KindPrompt
+	case "SessionStart":
+		ev.Kind = rule.KindSession
 	}
 	return ev
 }
@@ -68,6 +70,8 @@ func EventName(e string) string {
 		return "PreToolUse"
 	case "user-prompt":
 		return "UserPromptSubmit"
+	case "session-start":
+		return "SessionStart"
 	}
 	return e
 }

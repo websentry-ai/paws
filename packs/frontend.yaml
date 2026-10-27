@@ -1,0 +1,10 @@
+name: frontend
+description: Load a design skill before components and stylesheets change, so the UI has a deliberate visual direction.
+tags: [frontend]
+pick_one:
+  - name: design
+    description: Which frontend design skill to use.
+    default: frontend-design
+    options:
+      frontend-design: [frontend/frontend-design-ui.md]
+      ui-ux-pro-max: [frontend/ui-ux-pro-max-ui.md]

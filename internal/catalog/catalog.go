@@ -185,8 +185,12 @@ func Validate(root string) (*Catalog, []Problem) {
 				}
 			}
 		}
-		if b.Action.Digest != "" && !isRegular(filepath.Join(dir, b.Action.Digest)) {
-			add(path, "digest file %s not found", b.Action.Digest)
+		if b.Action.Digest != "" {
+			if st, err := os.Stat(filepath.Join(dir, b.Action.Digest)); err != nil || !st.Mode().IsRegular() {
+				add(path, "digest file %s not found", b.Action.Digest)
+			} else if st.Size() > rule.MaxDigest {
+				add(path, "digest file %s is %d bytes, over the %d-byte limit", b.Action.Digest, st.Size(), rule.MaxDigest)
+			}
 		}
 		if b.Action.Type == "exec-script" && !isRegular(filepath.Join(dir, b.Action.Script)) {
 			add(path, "script %s not found", b.Action.Script)

@@ -115,6 +115,9 @@ func TestValidateProblems(t *testing.T) {
 		{"missing digest file", func(t *testing.T, root string) {
 			os.Remove(filepath.Join(root, "catalog/aws/digests/aws-s3.md"))
 		}, "digest file digests/aws-s3.md not found"},
+		{"oversize digest", func(t *testing.T, root string) {
+			write(t, filepath.Join(root, "catalog/aws/digests/aws-s3.md"), strings.Repeat("x", 7001))
+		}, "over the 7000-byte limit"},
 		{"pack name mismatch", func(t *testing.T, root string) {
 			write(t, filepath.Join(root, "packs/aws.yaml"), "name: amazon\ndescription: x\nbindings: [aws/s3-create.md]\n")
 		}, `must match its file name "aws"`},

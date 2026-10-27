@@ -41,6 +41,10 @@ const (
 	OnMissDigest       = "digest"        // the binding's compiled digest rides in the deny
 )
 
+// MaxDigest is the largest digest, in bytes, that rides in a deny. Claude Code caps hook
+// output at 10,000 characters; the deny's own wording needs the rest.
+const MaxDigest = 7000
+
 // Action is what paws does when a rule matches.
 type Action struct {
 	Type        string `yaml:"type"`

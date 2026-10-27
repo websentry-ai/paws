@@ -110,13 +110,14 @@ action:
   type: require-skill
   skill: aws-s3
   on_miss: digest               # default: load-required
-  digest: digests/aws-s3.md     # relative to the rule file, at most 7,000 characters
+  digest: digests/aws-s3.md     # relative to the rule file, at most 7,000 bytes
 ```
 
 The deny then carries the digest. Once that deny is in the transcript window,
 the retry passes without the skill (audit `satisfied_by: digest-delivered`).
 A loaded skill still passes first. A missing or oversize digest falls back to
-the plain load-required deny.
+the plain load-required deny, and the audit record carries `digest_error`.
+Delivery is keyed by rule name: two rules with the same name share it.
 
 When several rules match, the most restrictive wins: `block` > unresolved
 `require-skill` / `exec-script` deny > `warn` > allow. Context from every

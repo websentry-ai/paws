@@ -3,7 +3,7 @@ name: grill-before-plan
 event: pre-tool
 matcher:
   tool: Write
-  file_glob: '{PLAN*.md,SPEC*.md,plan*.md,spec*.md,docs/plans/**}'
+  file_glob: '{PLAN.md,SPEC.md,PLAN-*.md,SPEC-*.md,plan.md,spec.md,plan-*.md,spec-*.md,docs/plans/**}'
 action:
   type: require-skill
   skill: grilling

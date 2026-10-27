@@ -2,7 +2,7 @@
 name: agent-browser-mcp
 event: pre-tool
 matcher:
-  tool: mcp__playwright__*|mcp__claude-in-chrome__*|mcp__plugin_playwright_playwright__*
+  tool: mcp__playwright__browser_navigate|mcp__plugin_playwright_playwright__browser_navigate|mcp__claude-in-chrome__navigate
 action:
   type: require-skill
   skill: agent-browser
@@ -18,4 +18,4 @@ provenance:
   fetched: 2026-10-27
 tags: [practice, browser]
 ---
-Loads agent-browser before the first Playwright or Chrome MCP call, so the agent weighs the faster agent-browser CLI first; it is require-skill, not advise, because only require-skill installs the skill with the pack, and once it is loaded the MCP calls pass.
+Loads agent-browser when the agent opens a page with Playwright or Chrome MCP (navigation only, so clicks and reads in an open page don't re-trigger it), so it weighs the faster agent-browser CLI first. require-skill, not advise, because only require-skill installs the skill with the pack.

@@ -6,5 +6,5 @@ pick_one:
     description: Which planning skill to use.
     default: brainstorming
     options:
-      brainstorming: [planning/brainstorm-before-plan.md]
+      brainstorming: [planning/brainstorm-before-plan.md, planning/writing-plans-before-plan.md]
       grilling: [planning/grill-before-plan.md]

@@ -44,3 +44,13 @@ func TestSummarize(t *testing.T) {
 		t.Errorf("totals wrong: %+v", st)
 	}
 }
+
+func TestSummarizeSurvivesHugeLine(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "audit.log")
+	huge := `{"event":"pre-tool","rule":"big","verdict":"allow","target":"` + strings.Repeat("x", 2<<20) + `"}`
+	os.WriteFile(path, []byte(huge+"\n"+`{"event":"turn_end"}`+"\n"), 0o600)
+	st := summarize([]string{path}, nil)
+	if st.Turns != 1 || len(st.Rules) != 1 {
+		t.Errorf("records after a huge line must still count: %+v", st)
+	}
+}

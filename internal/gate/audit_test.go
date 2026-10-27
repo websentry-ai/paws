@@ -110,3 +110,30 @@ func TestAuditRotates(t *testing.T) {
 		t.Errorf("current log should have restarted small, is %d bytes", st.Size())
 	}
 }
+
+func TestAuditCapsTarget(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	r := mustRule(t, "---\nname: a\nevent: pre-tool\naction:\n  type: audit\n---\n")
+	logAudit(Event{Tool: "Bash", Target: strings.Repeat("x", 10000)}, r, outcome{verdict: Allow, fired: true})
+	data, _ := os.ReadFile(filepath.Join(home, ".paws", "audit.log"))
+	if len(data) > maxTarget+500 || !strings.Contains(string(data), "[truncated]") {
+		t.Errorf("target should be capped, record is %d bytes", len(data))
+	}
+}
+
+func TestRotationSkipsWhenAnotherProcessRotated(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	old := maxAuditBytes
+	maxAuditBytes = 10
+	defer func() { maxAuditBytes = old }()
+	log := filepath.Join(home, ".paws", "audit.log")
+	os.MkdirAll(filepath.Dir(log), 0o700)
+	os.WriteFile(log+".1", []byte("precious rotated history\n"), 0o600)
+	// A small fresh log (another process just rotated) must not be rotated over the history.
+	LogTelemetry("turn_end", Event{Session: "s"}, nil)
+	if got, _ := os.ReadFile(log + ".1"); string(got) != "precious rotated history\n" {
+		t.Errorf("audit.log.1 was clobbered: %q", got)
+	}
+}

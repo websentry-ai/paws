@@ -5,6 +5,7 @@ import (
 	"os"
 	"path/filepath"
 	"time"
+	"unicode/utf8"
 
 	"github.com/websentry-ai/paws/internal/rule"
 )
@@ -34,7 +35,7 @@ func logAudit(ev Event, r *rule.Rule, oc outcome) {
 		"agent":   ev.Agent,
 		"event":   r.Event,
 		"tool":    ev.Tool,
-		"target":  redact(ev.Target),
+		"target":  capTarget(redact(ev.Target)),
 		"rule":    r.Name,
 		"action":  r.Action.Type,
 		"verdict": verdictName(oc.verdict),
@@ -57,6 +58,20 @@ func logAudit(ev Event, r *rule.Rule, oc outcome) {
 		rec["agent_type"] = ev.AgentType
 	}
 	appendAudit(path, rec)
+}
+
+// maxTarget bounds the matched text kept per record; a heredoc can be megabytes.
+const maxTarget = 2000
+
+func capTarget(s string) string {
+	if len(s) <= maxTarget {
+		return s
+	}
+	cut := maxTarget
+	for cut > 0 && !utf8.RuneStart(s[cut]) {
+		cut--
+	}
+	return s[:cut] + "…[truncated]"
 }
 
 // AuditSchema versions the record shape: v2 adds turn_end, tool_result and skill_invoked.
@@ -92,12 +107,21 @@ func appendAudit(path string, rec map[string]any) {
 	if err != nil || os.MkdirAll(filepath.Dir(path), 0o700) != nil {
 		return
 	}
-	if st, err := os.Stat(path); err == nil && st.Size() > maxAuditBytes {
-		os.Rename(path, path+".1")
-	}
 	f, err := os.OpenFile(path, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o600)
 	if err != nil {
 		return
+	}
+	if st, err := f.Stat(); err == nil && st.Size() > maxAuditBytes {
+		// Parallel tool calls run several paws at once. Only the process whose open file is
+		// still the one at path rotates it; the others see a new file (or none) and just reopen,
+		// so a second rename can never clobber audit.log.1.
+		if cur, err := os.Stat(path); err == nil && os.SameFile(st, cur) {
+			os.Rename(path, path+".1")
+		}
+		f.Close()
+		if f, err = os.OpenFile(path, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o600); err != nil {
+			return
+		}
 	}
 	defer f.Close()
 	f.Chmod(0o600) // O_CREATE only sets mode on first creation, not on an existing looser file.

@@ -88,3 +88,17 @@ func TestRenderSessionStartContext(t *testing.T) {
 		t.Errorf("SessionStart context should render as additionalContext only, got %+v", out.SpecificOutput)
 	}
 }
+
+func TestTelemetryHooksAreAsync(t *testing.T) {
+	for _, ev := range []string{"PostToolUse", "Stop"} {
+		e := SettingsEntry(ev, "'/x/paws' gate")
+		inner := e["hooks"].([]any)[0].(map[string]any)
+		if inner["async"] != true {
+			t.Errorf("%s hook should be async, got %v", ev, inner)
+		}
+	}
+	pre := SettingsEntry("PreToolUse", "'/x/paws' gate")["hooks"].([]any)[0].(map[string]any)
+	if _, ok := pre["async"]; ok {
+		t.Error("PreToolUse decides; it must not be async")
+	}
+}

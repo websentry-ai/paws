@@ -57,11 +57,14 @@ func summarize(paths []string, inScope []string) Stats {
 		if err != nil {
 			continue
 		}
-		sc := bufio.NewScanner(f)
-		sc.Buffer(make([]byte, 0, 64*1024), 1<<20)
-		for sc.Scan() {
+		rd := bufio.NewReader(f)
+		for {
+			line, err := rd.ReadBytes('\n') // any length: one huge record must not end the count
+			if len(line) == 0 && err != nil {
+				break
+			}
 			var r auditRecord
-			if json.Unmarshal(sc.Bytes(), &r) != nil {
+			if json.Unmarshal(line, &r) != nil {
 				continue
 			}
 			if r.Session != "" {
@@ -131,7 +134,8 @@ func StatsCmd(args []string) int {
 	var names []string
 	seen := map[string]bool{}
 	for _, r := range gate.Collect(cwd).Rules {
-		if !seen[r.Name] {
+		// prompt-inject writes no audit record by design, so it would always look dormant.
+		if !seen[r.Name] && r.Action.Type != "prompt-inject" {
 			seen[r.Name] = true
 			names = append(names, r.Name)
 		}

@@ -80,6 +80,10 @@ func EventName(e string) string {
 // SettingsEntry is the hooks-array element `paws init` writes; Claude Code timeouts are seconds, matcher is tool-events-only.
 func SettingsEntry(event, command string) map[string]any {
 	inner := []any{map[string]any{"type": "command", "command": command, "timeout": 15}}
+	if event == "PostToolUse" || event == "Stop" {
+		// Telemetry only: nothing waits on the answer, so the agent never pays for it.
+		inner[0].(map[string]any)["async"] = true
+	}
 	if event == "PreToolUse" || event == "PostToolUse" {
 		return map[string]any{"matcher": "*", "hooks": inner}
 	}

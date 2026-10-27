@@ -29,7 +29,7 @@ prompt, with secrets redacted), `source` (the rule file), and when relevant:
 | `event` | Written on | Extra fields |
 |---|---|---|
 | `skill_invoked` | PreToolUse on the Skill tool | `skill` |
-| `tool_result` | PostToolUse (a tool ran; denied calls never run) | `tool` |
+| `tool_result` | PostToolUse: a tool call that ran and succeeded (denied and failed calls write none) | `tool` |
 | `turn_end` | Stop (the agent finished its turn) | — |
 
 ## paws stats
@@ -43,4 +43,8 @@ Per rule: `fires` (all records), `denied`, `already-loaded` (passed via
 skill-load in a session where the rule had not denied first: the agent had
 the skill on its own), `loaded-after-deny`, and `delivered` (digest, advice
 or session context). It also lists rules in scope that never fired, skill
-invocations, and session, turn and tool-call totals.
+invocations, and session, turn and successful tool-call totals. `prompt-inject`
+rules never write records, so they are not listed as dormant.
+
+The PostToolUse and Stop hooks are registered `async`: Claude Code does not
+wait for them. Matched targets are capped at 2,000 bytes per record.

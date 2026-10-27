@@ -68,6 +68,7 @@ prompt = "what the user asks Claude"
 model = "sonnet"                       # optional, default sonnet
 allowed_tools = ["Bash(git:*)", "Skill"]
 setup = ["git commit -q --allow-empty -m base"]   # optional, run before paws init
+from_catalog = ["writing/humanizer-commit.md"]     # optional: copy real catalog/ bindings into .paws/
 init_args = []                         # optional extra args for `paws init`
 timeout = 300
 

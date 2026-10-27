@@ -1,0 +1,6 @@
+name: writing
+description: Load humanizer before PR bodies and commit messages go out, so they read like a person wrote them.
+tags: [writing]
+bindings:
+  - writing/humanizer-pr.md
+  - writing/humanizer-commit.md

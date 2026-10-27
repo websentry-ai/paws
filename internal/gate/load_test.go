@@ -165,3 +165,24 @@ func TestRelativePawsHomeIgnored(t *testing.T) {
 		t.Errorf("relative PAWS_HOME should fall back to %s, got %s", want, got)
 	}
 }
+
+func TestLoadSkipsSkillsDigestsAndReadmes(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	dir := filepath.Join(t.TempDir(), ".paws")
+	for path, body := range map[string]string{
+		"aws/s3.md":                  "---\nname: s3\nevent: pre-tool\naction:\n  type: block\n---\n",
+		"aws/digests/aws-s3.md":      "Block public access.\n",
+		"aws/skills/aws-s3/SKILL.md": "---\nname: aws-s3\n---\n",
+		"README.md":                  "# my rules\n",
+	} {
+		mustMkdir(t, filepath.Dir(filepath.Join(dir, path)))
+		if err := os.WriteFile(filepath.Join(dir, path), []byte(body), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	var res Result
+	loadDir(dir, &res)
+	if len(res.Errs) != 0 || len(res.Rules) != 1 {
+		t.Errorf("want 1 rule and no errors, got %d rules, errs %v", len(res.Rules), res.Errs)
+	}
+}

@@ -112,7 +112,10 @@ func loadDir(dir string, res *Result) {
 		root = resolved
 	}
 	_ = filepath.WalkDir(root, func(path string, d fs.DirEntry, err error) error {
-		if err != nil || d.IsDir() || filepath.Ext(path) != ".md" {
+		if err != nil || d.IsDir() {
+			return nil
+		}
+		if rel, _ := filepath.Rel(root, path); !rule.IsRuleFile(rel) {
 			return nil
 		}
 		data, err := os.ReadFile(path)

@@ -102,6 +102,11 @@ func Resolve(c *catalog.Catalog, name string, picks map[string]string, choose fu
 	if p, ok := c.Packs[name]; ok {
 		bindings := append([]string{}, p.Bindings...)
 		chosen := map[string]string{}
+		for g := range picks {
+			if !hasGroup(p, g) {
+				return "", nil, nil, fmt.Errorf("pack %s has no pick_one group %q", name, g)
+			}
+		}
 		for _, g := range p.PickOne {
 			opt, ok := picks[g.Name]
 			if !ok && choose != nil {
@@ -121,9 +126,31 @@ func Resolve(c *catalog.Catalog, name string, picks map[string]string, choose fu
 	}
 	rel := strings.TrimSuffix(name, ".md") + ".md"
 	if _, ok := c.Bindings[rel]; ok {
+		if len(picks) > 0 {
+			return "", nil, nil, fmt.Errorf("--pick applies to packs, not the single binding %s", name)
+		}
 		return strings.TrimSuffix(rel, ".md"), []string{rel}, nil, nil
 	}
 	return "", nil, nil, fmt.Errorf("no pack or binding named %q (try `paws search`)", name)
+}
+
+func hasGroup(p *catalog.Pack, name string) bool {
+	for _, g := range p.PickOne {
+		if g.Name == name {
+			return true
+		}
+	}
+	return false
+}
+
+// InstallDir is where an install's bindings live. Packs take <packs>/<pack>; a single binding
+// (category/name) goes under <packs>/_bindings so it can never share a directory with a pack
+// named like its category. Pack names can't start with "_".
+func InstallDir(t Target, name string) string {
+	if strings.Contains(name, "/") {
+		return filepath.Join(t.PacksDir, "_bindings", filepath.FromSlash(name))
+	}
+	return filepath.Join(t.PacksDir, name)
 }
 
 func optionNames(g catalog.PickOne) []string {
@@ -150,6 +177,15 @@ func Add(c *catalog.Catalog, name string, bindings []string, picks map[string]st
 		return nil, err
 	}
 	res := &Result{Pack: name, Bindings: bindings}
+	fresh := map[string]bool{} // skills this call created where nothing was before
+	ok := false
+	defer func() {
+		if !ok { // a later step failed: take back the skills this call created
+			for s := range fresh {
+				removeSkill(t.SkillsDir, s)
+			}
+		}
+	}()
 
 	// Skills first: a binding must never be live before the skill it requires can load.
 	done := map[string]bool{}
@@ -159,18 +195,23 @@ func Add(c *catalog.Catalog, name string, bindings []string, picks map[string]st
 			continue
 		}
 		done[b.Action.Skill] = true
-		ok, err := installBindingSkill(c, b, t.SkillsDir)
+		existed := exists(filepath.Join(t.SkillsDir, b.Action.Skill))
+		installed, err := installBindingSkill(c, b, t.SkillsDir)
 		if err != nil {
 			return nil, fmt.Errorf("skill %s: %w", b.Action.Skill, err)
 		}
-		if ok {
+		if installed {
+			if !existed {
+				fresh[b.Action.Skill] = true
+			}
 			res.Installed = append(res.Installed, b.Action.Skill)
 		} else {
 			res.Kept = append(res.Kept, b.Action.Skill)
 		}
 	}
 
-	stage := filepath.Join(t.PacksDir, "."+filepath.Base(name)+".new")
+	dest := InstallDir(t, name)
+	stage := filepath.Join(filepath.Dir(dest), "."+filepath.Base(dest)+".new")
 	os.RemoveAll(stage)
 	defer os.RemoveAll(stage)
 	for _, rel := range bindings {
@@ -195,7 +236,6 @@ func Add(c *catalog.Catalog, name string, bindings []string, picks map[string]st
 			}
 		}
 	}
-	dest := filepath.Join(t.PacksDir, filepath.FromSlash(name))
 	if err := os.RemoveAll(dest); err != nil {
 		return nil, err
 	}
@@ -208,15 +248,47 @@ func Add(c *catalog.Catalog, name string, bindings []string, picks map[string]st
 
 	// A skill another pack also installed is reinstalled (it is paws-owned), so every pack that
 	// needs it lists it and Remove keeps it until the last one goes.
+	var dropped []string // skills an earlier install of this pack needed and this one doesn't
+	if prev := st.Packs[name]; prev != nil {
+		for _, sk := range prev.Skills {
+			if !done[sk] {
+				dropped = append(dropped, sk)
+			}
+		}
+	}
 	st.Packs[name] = &Installed{Bindings: bindings, Picks: picks, Skills: res.Installed, At: time.Now().UTC().Format(time.RFC3339)}
-	return res, st.save(t.StateFile)
+	if err := st.save(t.StateFile); err != nil {
+		return nil, err
+	}
+	ok = true
+	for _, sk := range dropped {
+		if !st.needs(sk) {
+			removeSkill(t.SkillsDir, sk)
+		}
+	}
+	return res, nil
+}
+
+// needs reports whether any installed pack lists skill.
+func (s *State) needs(skill string) bool {
+	for _, p := range s.Packs {
+		for _, sk := range p.Skills {
+			if sk == skill {
+				return true
+			}
+		}
+	}
+	return false
 }
 
 // installBindingSkill installs the skill a require-skill binding names, from upstream at the
 // pinned ref (hash-checked) or from the catalog's own skills/ directory.
 func installBindingSkill(c *catalog.Catalog, b *catalog.Binding, skillsDir string) (bool, error) {
-	if dest := filepath.Join(skillsDir, b.Action.Skill); exists(dest) && !pawsOwned(dest) {
-		return false, nil // the user's own copy wins; nothing to fetch
+	if !catalog.ValidSkillName(b.Action.Skill) {
+		return false, fmt.Errorf("invalid skill name %q", b.Action.Skill)
+	}
+	if dest := filepath.Join(skillsDir, b.Action.Skill); exists(dest) && !replaceable(dest) {
+		return false, nil // the user's own (or edited) copy wins; nothing to fetch
 	}
 	u := b.Upstream
 	if u.Repo == "" {
@@ -248,31 +320,23 @@ func Remove(name string, t Target) (removedSkills []string, err error) {
 	if !ok {
 		return nil, fmt.Errorf("pack %q is not installed", name)
 	}
-	if err := os.RemoveAll(filepath.Join(t.PacksDir, filepath.FromSlash(name))); err != nil {
+	if err := os.RemoveAll(InstallDir(t, name)); err != nil {
 		return nil, err
 	}
 	delete(st.Packs, name)
-	still := map[string]bool{}
-	for _, other := range st.Packs {
-		for _, s := range other.Skills {
-			still[s] = true
-		}
-	}
 	for _, s := range inst.Skills {
-		if still[s] {
+		if st.needs(s) {
 			continue
 		}
-		if err := removeSkill(t.SkillsDir, s); err != nil {
+		removed, err := removeSkill(t.SkillsDir, s)
+		if err != nil {
 			return removedSkills, err
 		}
-		removedSkills = append(removedSkills, s)
+		if removed {
+			removedSkills = append(removedSkills, s)
+		}
 	}
 	return removedSkills, st.save(t.StateFile)
-}
-
-func exists(p string) bool {
-	_, err := os.Stat(p)
-	return err == nil
 }
 
 // subFS roots the catalog FS at dir, failing if dir is not there.

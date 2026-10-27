@@ -38,6 +38,11 @@ func parsePackFlags(args []string, allowed ...string) (packFlags, error) {
 			f.args = append(f.args, a)
 			continue
 		}
+		if flag, val, ok := strings.Cut(a, "="); ok && strings.HasPrefix(a, "--") {
+			// --pick=g=o and --catalog=dir: split once and reuse the two-arg path below.
+			args = append(args[:i+1], append([]string{val}, args[i+1:]...)...)
+			a = flag
+		}
 		if !ok[a] {
 			return f, fmt.Errorf("unknown flag %q", a)
 		}
@@ -70,10 +75,12 @@ func parsePackFlags(args []string, allowed ...string) (packFlags, error) {
 func loadCatalog(dir string) (*catalog.Catalog, error) {
 	var c *catalog.Catalog
 	var probs []catalog.Problem
+	// Full validation either way: names become paths and refs reach git, so a catalog that
+	// fails any check installs nothing.
 	if dir == "" {
-		c, probs = catalog.LoadFS(paws.Catalog, "embedded")
+		c, probs = catalog.ValidateFS(paws.Catalog, "embedded")
 	} else {
-		c, probs = catalog.Load(dir)
+		c, probs = catalog.Validate(dir)
 	}
 	if len(probs) > 0 {
 		for _, p := range probs {
@@ -119,7 +126,7 @@ func Add(args []string) int {
 			fmt.Fprintf(os.Stderr, "paws: add %s: %v\n", name, err)
 			return 1
 		}
-		fmt.Printf("Added %s (%d binding(s)) to %s\n", res.Pack, len(res.Bindings), filepath.Join(t.PacksDir, res.Pack))
+		fmt.Printf("Added %s (%d binding(s)) to %s\n", res.Pack, len(res.Bindings), pack.InstallDir(t, res.Pack))
 		for _, s := range res.Installed {
 			fmt.Printf("  skill %s installed in %s\n", s, t.SkillsDir)
 		}
@@ -155,10 +162,15 @@ func askPick(g catalog.PickOne) string {
 // hookRegistered reports whether this repo's or the global settings run paws.
 func hookRegistered() bool {
 	cwd, _ := os.Getwd()
-	home, _ := os.UserHomeDir()
+	claude := os.Getenv("CLAUDE_CONFIG_DIR")
+	if claude == "" {
+		home, _ := os.UserHomeDir()
+		claude = filepath.Join(home, ".claude")
+	}
 	for _, p := range []string{
 		filepath.Join(projectRoot(cwd), ".claude", "settings.json"),
-		filepath.Join(home, ".claude", "settings.json"),
+		filepath.Join(projectRoot(cwd), ".claude", "settings.local.json"),
+		filepath.Join(claude, "settings.json"),
 	} {
 		data, err := os.ReadFile(p)
 		if err == nil && strings.Contains(string(data), strings.TrimSpace(pawsMarker)) {
@@ -224,7 +236,7 @@ func List(args []string) int {
 			inst := st.Packs[n]
 			fmt.Printf("%s  (%s, %s)\n", n, scope, inst.At)
 			for _, rel := range inst.Bindings {
-				name := ruleName(filepath.Join(t.PacksDir, filepath.FromSlash(n), filepath.FromSlash(rel)))
+				name := ruleName(filepath.Join(pack.InstallDir(t, n), filepath.FromSlash(rel)))
 				fmt.Printf("  %-28s fired %d\n", name, fires[name])
 			}
 		}
@@ -389,8 +401,52 @@ func sortedKeys[V any](m map[string]V) []string {
 	return keys
 }
 
-var contentHashLine = regexp.MustCompile(`(?m)^(\s*)content_hash:.*$`)
-var refLine = regexp.MustCompile(`(?m)^(\s*)ref:.*$`)
+var contentHashLine = regexp.MustCompile(`^(\s+)content_hash:.*$`)
+var refLine = regexp.MustCompile(`^(\s+)ref:.*$`)
+
+// setContentHash writes hash into the upstream: block of a binding's frontmatter, replacing an
+// existing content_hash or adding one after ref. Nothing outside that block is touched.
+func setContentHash(data, hash string) (string, bool) {
+	lines := strings.Split(data, "\n")
+	if len(lines) == 0 || strings.TrimSpace(lines[0]) != "---" {
+		return data, false
+	}
+	start, end := -1, len(lines)
+	for i := 1; i < len(lines); i++ {
+		if strings.TrimRight(lines[i], " \t\r") == "---" {
+			if end == len(lines) {
+				end = i
+			}
+			break
+		}
+		if strings.TrimRight(lines[i], " \t\r") == "upstream:" {
+			start = i
+		}
+	}
+	if start < 0 {
+		return data, false
+	}
+	blockEnd := start + 1 // first line after the indented block
+	for blockEnd < end && (strings.HasPrefix(lines[blockEnd], " ") || strings.HasPrefix(lines[blockEnd], "\t")) {
+		blockEnd++
+	}
+	refAt := -1
+	for i := start + 1; i < blockEnd; i++ {
+		if m := contentHashLine.FindStringSubmatch(lines[i]); m != nil {
+			lines[i] = m[1] + "content_hash: " + hash
+			return strings.Join(lines, "\n"), true
+		}
+		if refLine.MatchString(lines[i]) {
+			refAt = i
+		}
+	}
+	if refAt < 0 {
+		return data, false
+	}
+	indent := refLine.FindStringSubmatch(lines[refAt])[1]
+	lines = append(lines[:refAt+1], append([]string{indent + "content_hash: " + hash}, lines[refAt+1:]...)...)
+	return strings.Join(lines, "\n"), true
+}
 
 // Pin fetches every upstream skill a catalog directory references and writes its content
 // hash into the binding: `paws pin [root]`. For catalog maintainers.
@@ -433,11 +489,11 @@ func Pin(args []string) int {
 			failed++
 			continue
 		}
-		var out string
-		if contentHashLine.Match(data) {
-			out = contentHashLine.ReplaceAllString(string(data), "${1}content_hash: "+hash)
-		} else {
-			out = refLine.ReplaceAllString(string(data), "$0\n${1}content_hash: "+hash)
+		out, ok := setContentHash(string(data), hash)
+		if !ok {
+			fmt.Fprintf(os.Stderr, "paws: %s: no upstream.ref line to pin beside\n", rel)
+			failed++
+			continue
 		}
 		if out != string(data) {
 			if err := os.WriteFile(path, []byte(out), 0o644); err != nil {

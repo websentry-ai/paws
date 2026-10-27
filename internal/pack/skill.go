@@ -15,6 +15,8 @@ import (
 	"strings"
 
 	"gopkg.in/yaml.v3"
+
+	"github.com/websentry-ai/paws/internal/catalog"
 )
 
 // markerFile sits in every skill directory paws installed. paws only ever replaces or
@@ -25,17 +27,21 @@ type marker struct {
 	Skill  string `json:"skill"`
 	Source string `json:"source"` // repo@ref, or catalog:<path>
 	Hash   string `json:"hash,omitempty"`
+	// Installed is the hash of what paws wrote (after placeholders). A directory whose content
+	// no longer matches was edited by the user and is left alone.
+	Installed string `json:"installed"`
 }
 
-// Fetch checks out repo at ref into dest (an empty directory). Tests replace it.
+// Fetch checks out repo (a host path, validated by the catalog) at ref (a commit SHA) into
+// dest, an empty directory. Tests replace it.
 var Fetch = func(repo, ref, dest string) error {
-	url := repo
-	if !strings.Contains(repo, "://") && !filepath.IsAbs(repo) {
-		url = "https://" + repo
+	if !catalog.RepoRe.MatchString(repo) || !catalog.RefRe.MatchString(ref) {
+		return fmt.Errorf("refusing to fetch %q at %q: want github.com/owner/repo and a commit SHA", repo, ref)
 	}
 	for _, args := range [][]string{
 		{"init", "-q"},
-		{"fetch", "-q", "--depth", "1", url, ref},
+		// "--" ends options: nothing in the catalog can become a git flag.
+		{"fetch", "-q", "--depth", "1", "--", "https://" + repo, ref},
 		{"-c", "advice.detachedHead=false", "checkout", "-q", "FETCH_HEAD"},
 	} {
 		cmd := exec.Command("git", args...)
@@ -101,6 +107,13 @@ func FetchUpstream(repo, ref, skillPath string) (dir, tmp, hash string, err erro
 		return "", "", "", err
 	}
 	dir = filepath.Join(tmp, filepath.FromSlash(path.Dir(skillPath)))
+	// The skill directory must resolve inside the checkout: no symlinked parent leading out.
+	realTmp, _ := filepath.EvalSymlinks(tmp)
+	realDir, err := filepath.EvalSymlinks(dir)
+	if err != nil || (realDir != realTmp && !strings.HasPrefix(realDir, realTmp+string(filepath.Separator))) {
+		os.RemoveAll(tmp)
+		return "", "", "", fmt.Errorf("skill path %s does not resolve inside the checkout", skillPath)
+	}
 	hash, err = HashSkill(os.DirFS(dir))
 	if err != nil {
 		os.RemoveAll(tmp)
@@ -128,11 +141,15 @@ func placeholders(fsys fs.FS) (map[string]string, error) {
 }
 
 // installSkill copies the skill in src to <skillsDir>/<name>, filling {{PLACEHOLDER}}s in .md
-// files. It refuses to touch an existing directory paws did not install and returns
-// installed=false then. The swap goes through a sibling temp dir so a failure leaves the old copy.
+// files. It leaves an existing directory alone, returning installed=false, unless paws installed
+// it and nobody edited it since. The swap goes through a sibling temp dir so a failure leaves
+// the old copy.
 func installSkill(src fs.FS, skillsDir, name string, m marker) (installed bool, err error) {
+	if !catalog.ValidSkillName(name) {
+		return false, fmt.Errorf("invalid skill name %q", name)
+	}
 	dest := filepath.Join(skillsDir, name)
-	if _, err := os.Stat(dest); err == nil && !pawsOwned(dest) {
+	if exists(dest) && !replaceable(dest) {
 		return false, nil
 	}
 	vals, err := placeholders(src)
@@ -165,9 +182,16 @@ func installSkill(src fs.FS, skillsDir, name string, m marker) (installed bool, 
 		if err := os.MkdirAll(filepath.Dir(out), 0o755); err != nil {
 			return false, err
 		}
-		if err := os.WriteFile(out, data, 0o644); err != nil {
+		mode := os.FileMode(0o644)
+		if st, err := fs.Stat(src, f); err == nil && st.Mode().Perm()&0o111 != 0 {
+			mode = 0o755 // upstream scripts stay runnable
+		}
+		if err := os.WriteFile(out, data, mode); err != nil {
 			return false, err
 		}
+	}
+	if m.Installed, err = HashSkill(os.DirFS(stage)); err != nil {
+		return false, err
 	}
 	mb, _ := json.MarshalIndent(m, "", "  ")
 	if err := os.WriteFile(filepath.Join(stage, markerFile), mb, 0o644); err != nil {
@@ -188,13 +212,37 @@ func pawsOwned(dir string) bool {
 	return err == nil
 }
 
-// removeSkill deletes a skill directory only if paws installed it.
-func removeSkill(skillsDir, name string) error {
-	dir := filepath.Join(skillsDir, name)
-	if !pawsOwned(dir) {
-		return nil
+// replaceable reports whether paws may overwrite or delete a skill directory: it installed it
+// and the content still hashes to what it wrote. A user's edits make it theirs.
+func replaceable(dir string) bool {
+	data, err := os.ReadFile(filepath.Join(dir, markerFile))
+	if err != nil {
+		return false
 	}
-	return os.RemoveAll(dir)
+	var m marker
+	if json.Unmarshal(data, &m) != nil || m.Installed == "" {
+		return false
+	}
+	now, err := HashSkill(os.DirFS(dir))
+	return err == nil && now == m.Installed
+}
+
+// removeSkill deletes a skill directory only if paws installed it and it is unedited; it
+// reports whether it removed it.
+func removeSkill(skillsDir, name string) (bool, error) {
+	if !catalog.ValidSkillName(name) {
+		return false, fmt.Errorf("invalid skill name %q", name)
+	}
+	dir := filepath.Join(skillsDir, name)
+	if !replaceable(dir) {
+		return false, nil
+	}
+	return true, os.RemoveAll(dir)
+}
+
+func exists(p string) bool {
+	_, err := os.Stat(p)
+	return err == nil
 }
 
 // copyFile copies one file out of fsys, creating parent directories.

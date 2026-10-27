@@ -25,6 +25,8 @@ func upstreamRepo(t *testing.T) string {
 	write(t, filepath.Join(dir, "SKILL.md"), "---\nname: humanizer\n---\nWrite like a person.\n")
 	write(t, filepath.Join(dir, "references", "patterns.md"), "patterns\n")
 	write(t, filepath.Join(dir, ".github", "ci.yml"), "ignored\n")
+	write(t, filepath.Join(dir, "scripts", "run.sh"), "#!/bin/sh\n")
+	os.Chmod(filepath.Join(dir, "scripts", "run.sh"), 0o755)
 	return dir
 }
 
@@ -42,7 +44,8 @@ func copyTree(src, dest string) error {
 		if err != nil {
 			return err
 		}
-		return os.WriteFile(out, data, 0o644)
+		st, _ := d.Info()
+		return os.WriteFile(out, data, st.Mode().Perm())
 	})
 }
 
@@ -63,7 +66,7 @@ func fakeFetch(t *testing.T, repos map[string]string) {
 // local skill, placeholders and a digest, an exec-script binding, and a pack with a pick_one group.
 func testCatalog(t *testing.T, hash string) *catalog.Catalog {
 	root := t.TempDir()
-	up := "upstream:\n  repo: github.com/example/humanizer\n  path: SKILL.md\n  ref: abc123\n  content_hash: " + hash + "\n"
+	up := "upstream:\n  repo: github.com/example/humanizer\n  path: SKILL.md\n  ref: 0123456789abcdef0123456789abcdef01234567\n  content_hash: " + hash + "\n"
 	write(t, filepath.Join(root, "catalog/writing/humanizer-pr.md"), "---\nname: humanizer-pr\nevent: pre-tool\nmatcher:\n  tool: Bash\n  command_regex: gh pr create\naction:\n  type: require-skill\n  skill: humanizer\n"+up+"tags: [writing]\n---\nHumanize PRs.\n")
 	write(t, filepath.Join(root, "catalog/writing/plain-pr.md"), "---\nname: plain-pr\nevent: pre-tool\nmatcher:\n  tool: Bash\n  command_regex: gh pr create\naction:\n  type: audit\ntags: [writing]\n---\n")
 	write(t, filepath.Join(root, "catalog/aws/s3.md"), "---\nname: aws-s3\nevent: pre-tool\nmatcher:\n  tool: Bash\n  command_regex: aws s3 mb\naction:\n  type: require-skill\n  skill: aws-s3\n  on_miss: digest\n  digest: digests/aws-s3.md\ntags: [org, aws]\n---\n")
@@ -245,5 +248,91 @@ func TestReAddReplacesPack(t *testing.T) {
 	}
 	if _, err := os.Stat(filepath.Join(tg.PacksDir, "writing", "writing", "plain-pr.md")); err != nil {
 		t.Errorf("new pick missing: %v", err)
+	}
+}
+
+func TestPackAndSameNamedCategoryDontCollide(t *testing.T) {
+	repo, hash := goodHash(t)
+	fakeFetch(t, map[string]string{"github.com/example/humanizer": repo})
+	c := testCatalog(t, hash)
+	tg := ProjectTarget(t.TempDir())
+	add(t, c, "writing/humanizer-pr", nil, tg)
+	add(t, c, "writing", nil, tg)
+	if _, err := os.Stat(filepath.Join(tg.PacksDir, "_bindings", "writing", "humanizer-pr", "writing", "humanizer-pr.md")); err != nil {
+		t.Errorf("the single binding must survive adding the pack named like its category: %v", err)
+	}
+	if _, err := Remove("writing", tg); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(filepath.Join(tg.PacksDir, "_bindings", "writing", "humanizer-pr")); err != nil {
+		t.Errorf("removing the pack must not remove the single binding: %v", err)
+	}
+}
+
+func TestEditedSkillIsKept(t *testing.T) {
+	repo, hash := goodHash(t)
+	fakeFetch(t, map[string]string{"github.com/example/humanizer": repo})
+	c := testCatalog(t, hash)
+	tg := ProjectTarget(t.TempDir())
+	add(t, c, "writing", nil, tg)
+	skill := filepath.Join(tg.SkillsDir, "humanizer", "SKILL.md")
+	if err := os.WriteFile(skill, []byte("my tweaks\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if res := add(t, c, "writing", nil, tg); len(res.Kept) != 1 {
+		t.Errorf("an edited paws skill should be kept on re-add, got %+v", res)
+	}
+	if _, err := Remove("writing", tg); err != nil {
+		t.Fatal(err)
+	}
+	if data, _ := os.ReadFile(skill); string(data) != "my tweaks\n" {
+		t.Error("remove deleted a skill the user edited")
+	}
+}
+
+func TestRePickRemovesOrphanedSkill(t *testing.T) {
+	repo, hash := goodHash(t)
+	fakeFetch(t, map[string]string{"github.com/example/humanizer": repo})
+	c := testCatalog(t, hash)
+	tg := ProjectTarget(t.TempDir())
+	add(t, c, "writing", nil, tg)
+	add(t, c, "writing", map[string]string{"prose": "plain"}, tg)
+	if _, err := os.Stat(filepath.Join(tg.SkillsDir, "humanizer")); err == nil {
+		t.Error("switching the pick away from humanizer should remove the skill nothing needs")
+	}
+}
+
+func TestUnknownPickGroupFails(t *testing.T) {
+	_, hash := goodHash(t)
+	c := testCatalog(t, hash)
+	if _, _, _, err := Resolve(c, "writing", map[string]string{"proze": "plain"}, nil); err == nil {
+		t.Error("a misspelled pick group must fail")
+	}
+}
+
+func TestUpstreamExecBitKept(t *testing.T) {
+	repo, hash := goodHash(t)
+	fakeFetch(t, map[string]string{"github.com/example/humanizer": repo})
+	c := testCatalog(t, hash)
+	tg := ProjectTarget(t.TempDir())
+	add(t, c, "writing", nil, tg)
+	st, err := os.Stat(filepath.Join(tg.SkillsDir, "humanizer", "scripts", "run.sh"))
+	if err != nil || st.Mode().Perm()&0o100 == 0 {
+		t.Errorf("upstream script should stay executable: %v %v", st, err)
+	}
+}
+
+func TestFetchRefusesUnsafeInputs(t *testing.T) {
+	sha := "0123456789abcdef0123456789abcdef01234567"
+	for _, c := range [][2]string{
+		{"github.com/a/b", "--upload-pack=touch /tmp/x"},
+		{"github.com/a/b", "main"},
+		{"/tmp/evil", sha},
+		{"file:///tmp/evil", sha},
+		{"ext::sh -c touch% /tmp/x", sha},
+	} {
+		if err := Fetch(c[0], c[1], t.TempDir()); err == nil || !strings.Contains(err.Error(), "refusing to fetch") {
+			t.Errorf("Fetch(%q, %q) should refuse, got %v", c[0], c[1], err)
+		}
 	}
 }

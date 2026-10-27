@@ -94,14 +94,21 @@ reads a checkout instead) and:
    `catalog/<category>/skills/<skill>/` with `{{NAME}}` placeholders filled
    from that directory's `config.yaml` (`placeholders: {NAME: default}`);
 2. copies the bindings (with their digests and scripts) to
-   `<packs dir>/<pack>/<catalog-relative path>`;
+   `<packs dir>/<pack>/<catalog-relative path>` (a single binding,
+   `paws add writing/humanizer-pr`, goes under `<packs dir>/_bindings/`);
 3. records the pack, its picks and the skills it installed in `installed.yaml`.
 
 User mode: `~/.paws/packs`, `~/.claude/skills`, `~/.paws/installed.yaml`.
 `--project`: `.paws/packs`, `.claude/skills`, `.paws/installed.yaml` in the repo.
 
-A skill directory paws installed carries `.paws-skill.json`. paws never
-replaces or removes a skill directory without it.
+A skill directory paws installed carries `.paws-skill.json` with the hash of
+what it wrote. paws replaces or removes a skill directory only when that
+marker is there and the content still matches it: your own skills and your
+edits to installed ones are left alone.
+
+`upstream.repo` is a host path (`github.com/owner/repo`, fetched over https)
+and `upstream.ref` a full commit SHA; `paws validate` rejects anything else,
+and `paws add` validates whatever catalog it reads before installing.
 
 The content hash is sha256 over each file's path and bytes, in path order,
 skipping any path segment that starts with `.`. `paws pin .` fetches every

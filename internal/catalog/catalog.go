@@ -78,7 +78,15 @@ func (p Problem) String() string { return p.Path + ": " + p.Msg }
 var (
 	contentHashRe = regexp.MustCompile(`^sha256:[0-9a-f]{64}$`)
 	skillNameRe   = regexp.MustCompile(`^[a-z0-9][a-z0-9-]*$`) // also a directory name under skills/
+	packNameRe    = skillNameRe                                 // also a directory name under packs/
+	// RepoRe is a bare host path (github.com/owner/repo): fetched over https only, never a local path or URL.
+	RepoRe = regexp.MustCompile(`^[a-z0-9][a-z0-9.-]*\.[a-z]{2,}(/[A-Za-z0-9][A-Za-z0-9._-]*)+$`)
+	// RefRe is a full commit SHA: the pin is a commit, never a branch or tag that can move.
+	RefRe = regexp.MustCompile(`^[0-9a-f]{40}$`)
 )
+
+// ValidSkillName reports whether s can name a skill directory.
+func ValidSkillName(s string) bool { return skillNameRe.MatchString(s) }
 
 // isRegular reports whether name exists in fsys and is a regular file.
 func isRegular(fsys fs.FS, name string) bool {
@@ -187,6 +195,12 @@ func ValidateFS(fsys fs.FS, display string) (*Catalog, []Problem) {
 		if u.Repo != "" && (u.Path == "" || u.Ref == "") {
 			add(p, "upstream needs repo, path and ref together")
 		}
+		if u.Repo != "" && !RepoRe.MatchString(u.Repo) {
+			add(p, "upstream.repo must be a host path like github.com/owner/repo, got %q", u.Repo)
+		}
+		if u.Ref != "" && !RefRe.MatchString(u.Ref) {
+			add(p, "upstream.ref must be a full 40-character commit SHA, got %q", u.Ref)
+		}
 		if u.Repo != "" && !contentHashRe.MatchString(u.ContentHash) {
 			add(p, "upstream.content_hash must be sha256:<64 hex> (pin it with `paws pin`), got %q", u.ContentHash)
 		}
@@ -223,6 +237,9 @@ func ValidateFS(fsys fs.FS, display string) (*Catalog, []Problem) {
 		want := strings.TrimSuffix(path.Base(p.Path), ".yaml")
 		if p.Name != want {
 			add(p.Path, "pack name %q must match its file name %q", p.Name, want)
+		}
+		if !packNameRe.MatchString(p.Name) {
+			add(p.Path, "pack name %q must be lowercase letters, digits and dashes", p.Name)
 		}
 		if p.Description == "" {
 			add(p.Path, "pack needs a description")

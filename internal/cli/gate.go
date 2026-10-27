@@ -34,9 +34,25 @@ func Gate() (code int) {
 	if in.CWD == "" {
 		in.CWD, _ = os.Getwd()
 	}
+	ev := hook.ToEvent(&in, data)
+	// Telemetry-only events: count and leave. No rules run after a tool or at turn end.
+	switch in.HookEventName {
+	case "Stop":
+		gate.LogTelemetry("turn_end", ev, nil)
+		return allow()
+	case "PostToolUse":
+		gate.LogTelemetry("tool_result", ev, map[string]any{"tool": in.ToolName})
+		return allow()
+	case "PreToolUse":
+		if in.ToolName == "Skill" {
+			if s, _ := in.ToolInput["skill"].(string); s != "" {
+				gate.LogTelemetry("skill_invoked", ev, map[string]any{"skill": s})
+			}
+		}
+	}
 	cwd := in.CWD
 	res := gate.Collect(cwd)
-	out := hook.Render(in.HookEventName, gate.Decide(hook.ToEvent(&in, data), res.Rules))
+	out := hook.Render(in.HookEventName, gate.Decide(ev, res.Rules))
 	if n := len(res.Errs); n > 0 {
 		out.SystemMessage = fmt.Sprintf("paws: %d rule file(s) failed to parse (run `paws explain` for details)", n)
 	}

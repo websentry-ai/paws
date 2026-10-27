@@ -14,3 +14,4 @@ One file per user-facing feature. Each names the cases that prove it.
 | when: conditions | [when.md](when.md) | `when-dependency-hit`, `when-dependency-miss`, `when-no-edit-tdd` |
 | on_miss digest | [digest.md](digest.md) | `digest-tag` |
 | packs and skill install | [packs.md](packs.md) | `launch-journey` |
+| local telemetry | [telemetry.md](telemetry.md) | `require-skill-commit` |

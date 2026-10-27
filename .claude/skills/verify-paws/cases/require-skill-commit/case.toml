@@ -7,7 +7,10 @@ skills_invoked = ["house-style"]
 tool_result_contains = ["house-style"]
 audit = [
   { rule = "commit-house-style", verdict = "deny" },
+  { event = "skill_invoked", skill = "house-style" },
   { rule = "commit-house-style", verdict = "allow", satisfied_by = "skill-load" },
+  { event = "tool_result", tool = "Bash" },
+  { event = "turn_end" },
 ]
 audit_max = [{ rule = "commit-house-style", verdict = "deny", max = 1 }]
 shell = ["git log -1 --format=%s | grep -q '^PROBE-7Q: '"]

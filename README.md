@@ -39,8 +39,11 @@ Ensures every AWS resource carries Owner/Environment/ManagedBy tags.
 
 Rules take effect immediately — no restart, no re-init. paws reads
 `.paws/**/*.md` from cwd up to the repo root (or `$HOME`), plus `~/.paws`,
-fresh on every tool call. `$PAWS_HOME` replaces `~/.paws` (user rules and the
-audit log) when set.
+fresh on every tool call. `$PAWS_HOME`, when set to an absolute path, replaces
+`~/.paws` (user rules and the audit log). Claude Code passes a settings
+file's `env` to hooks, so a repo whose `.claude/settings.json` sets
+`PAWS_HOME` can move your user rules and audit log for sessions in that repo;
+review `.claude/settings.json` like you review `.paws/`.
 
 ## Events
 

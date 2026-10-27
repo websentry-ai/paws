@@ -21,10 +21,11 @@ type FileError struct {
 	Err  error
 }
 
-// UserDir is the per-user paws directory: $PAWS_HOME when set, else ~/.paws. "" if neither resolves.
+// UserDir is the per-user paws directory: $PAWS_HOME when set to an absolute path, else ~/.paws.
+// A relative PAWS_HOME is ignored: it would resolve against each tool call's cwd. "" if nothing resolves.
 func UserDir() string {
-	if d := os.Getenv("PAWS_HOME"); d != "" {
-		return d
+	if d := os.Getenv("PAWS_HOME"); d != "" && filepath.IsAbs(d) {
+		return filepath.Clean(d)
 	}
 	home, err := os.UserHomeDir()
 	if err != nil {
@@ -57,7 +58,15 @@ func pawsDirs(cwd string) []string {
 			dirs = append(dirs, p)
 		}
 	}
-	add := func(base string) { addDir(filepath.Join(base, ".paws")) }
+	user := UserDir()
+	add := func(base string) {
+		p := filepath.Join(base, ".paws")
+		// ~/.paws is the user dir, not a project dir: when PAWS_HOME replaces it, it must not load.
+		if home != "" && p == filepath.Join(home, ".paws") && p != user {
+			return
+		}
+		addDir(p)
+	}
 
 	// Without a repo root or $HOME as an ancestor, trust only cwd itself —
 	// never shared parents like /tmp or /.
@@ -84,8 +93,8 @@ func pawsDirs(cwd string) []string {
 		}
 		cur = parent
 	}
-	if u := UserDir(); u != "" {
-		addDir(u)
+	if user != "" {
+		addDir(user)
 	}
 	return dirs
 }

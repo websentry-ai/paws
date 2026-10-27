@@ -43,7 +43,8 @@ What one case does, in order:
 4. Runs `setup` commands, then `paws init <init_args>` (writes `.claude/settings.json`).
 5. Runs `claude -p <prompt> --setting-sources project --allowedTools <allowed_tools>
    --output-format stream-json --verbose` with `PAWS_HOME` set and every
-   `CLAUDE_CODE_*` variable stripped.
+   parent session's markers (`CLAUDECODE`, `CLAUDE_CODE_SESSION_ID`, ...) stripped.
+   Auth and provider variables pass through.
 
 Isolation rules, all enforced by the driver:
 
@@ -109,7 +110,8 @@ Make every case prove behaviour, not just a hook return value:
 | `settings.json` | the `.claude/settings.json` that `paws init` wrote |
 | `git-log.txt` | the scratch repo's commits after the run |
 
-Exit code: 0 PASS, 1 FAIL, 2 INDETERMINATE (agent never produced a result,
+Exit code: 0 PASS, 1 FAIL (including a case with no or unknown `[expect]` keys),
+2 INDETERMINATE (agent never produced a result,
 setup or `paws init` failed, or timeout).
 
 ## Cleanup

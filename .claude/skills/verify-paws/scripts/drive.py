@@ -41,9 +41,23 @@ ARTIFACTS = REPO / ".verify-artifacts"
 PASS, FAIL, INDETERMINATE = 0, 1, 2
 
 
+# Markers that tie a process to the running Claude Code session. Auth and provider
+# variables (CLAUDE_CODE_USE_BEDROCK, CLAUDE_CODE_OAUTH_TOKEN, ...) are kept.
+SESSION_MARKERS = {
+    "CLAUDECODE", "CLAUDE_CODE_ENTRYPOINT", "CLAUDE_CODE_SSE_PORT", "CLAUDE_CODE_EXECPATH",
+    "CLAUDE_CODE_SESSION_ID", "CLAUDE_CODE_CHILD_SESSION", "CLAUDE_CODE_SESSION_ATTENDED",
+    "CLAUDE_CODE_BRIDGE_SESSION_ID", "CLAUDE_CODE_MESSAGING_SOCKET", "CLAUDE_CODE_MESSAGING_TOKEN",
+}
+
+EXPECT_KEYS = {
+    "skills_invoked", "skills_not_invoked", "tool_result_contains", "tool_result_absent",
+    "audit", "audit_absent", "audit_max", "final_contains", "shell",
+}
+
+
 def agent_env(extra: dict[str, str]) -> dict[str, str]:
-    # Strip this session's Claude Code variables so the child is a fresh, top-level session.
-    env = {k: v for k, v in os.environ.items() if not k.startswith("CLAUDE_CODE_") and k != "CLAUDECODE"}
+    # The child must be a fresh, top-level session, not a child of this one.
+    env = {k: v for k, v in os.environ.items() if k not in SESSION_MARKERS}
     env.update(extra)
     return env
 
@@ -189,9 +203,23 @@ def grade(expect: dict, events: list[dict], audit: list[dict], project: Path) ->
 
 def run_case(case: Path, run_dir: Path, paws_bin: Path, model: str | None, keep: bool) -> int:
     spec = tomllib.loads((case / "case.toml").read_text())
+    unknown = set(spec.get("expect", {})) - EXPECT_KEYS
+    if unknown:
+        print(f"  unknown [expect] keys: {sorted(unknown)}")
+        return FAIL
     evidence = run_dir / case.name
     evidence.mkdir(parents=True)
     scratch = Path(tempfile.mkdtemp(prefix=f"paws-verify-{case.name}-"))
+    try:
+        return drive_case(case, spec, evidence, scratch, paws_bin, model)
+    finally:
+        if keep:
+            print(f"  scratch kept at {scratch}")
+        else:
+            shutil.rmtree(scratch, ignore_errors=True)
+
+
+def drive_case(case: Path, spec: dict, evidence: Path, scratch: Path, paws_bin: Path, model: str | None) -> int:
     project, paws_home = scratch / "proj", scratch / "paws-home"
     paws_home.mkdir()
 
@@ -228,7 +256,10 @@ def run_case(case: Path, run_dir: Path, paws_bin: Path, model: str | None, keep:
         (evidence / "stream.jsonl").write_text(r.stdout)
         (evidence / "stderr.txt").write_text(r.stderr)
     except subprocess.TimeoutExpired as e:
-        (evidence / "stream.jsonl").write_text((e.stdout or b"").decode() if isinstance(e.stdout, bytes) else (e.stdout or ""))
+        def text(v: bytes | str | None) -> str:
+            return v.decode(errors="replace") if isinstance(v, bytes) else (v or "")
+        (evidence / "stream.jsonl").write_text(text(e.stdout))
+        (evidence / "stderr.txt").write_text(text(e.stderr))
         print(f"  agent timed out after {spec.get('timeout', 300)}s")
         return INDETERMINATE
     elapsed = round(time.time() - started, 1)
@@ -244,16 +275,14 @@ def run_case(case: Path, run_dir: Path, paws_bin: Path, model: str | None, keep:
         return INDETERMINATE
 
     checks = grade(spec.get("expect", {}), events, audit, project)
+    if not checks:
+        checks = [{"check": "case declares at least one expectation", "pass": False, "detail": "empty [expect]"}]
     verdict = PASS if all(c["pass"] for c in checks) else FAIL
     (evidence / "result.json").write_text(json.dumps(
         {"case": case.name, "verdict": ["PASS", "FAIL", "INDETERMINATE"][verdict], "seconds": elapsed,
          "tools": [f"{e['name']}" for e in events if e["kind"] == "tool_use"], "checks": checks}, indent=2))
     for c in checks:
         print(f"  {'ok ' if c['pass'] else 'BAD'} {c['check']}" + ("" if c["pass"] else f"  [{c['detail']}]"))
-    if keep:
-        print(f"  scratch kept at {scratch}")
-    else:
-        shutil.rmtree(scratch, ignore_errors=True)
     return verdict
 
 
@@ -262,7 +291,7 @@ def cmd_run(args: argparse.Namespace) -> int:
     if not names:
         print("name at least one case, or pass --all")
         return FAIL
-    run_dir = ARTIFACTS / time.strftime("%Y%m%d-%H%M%S")
+    run_dir = ARTIFACTS / f"{time.strftime('%Y%m%d-%H%M%S')}-{os.getpid()}"
     paws_bin = build_paws(run_dir / "bin")
     worst = PASS
     for name in names:

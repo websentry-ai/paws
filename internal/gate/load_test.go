@@ -139,3 +139,29 @@ func TestPawsDirsHonorsPawsHome(t *testing.T) {
 		t.Errorf("expected only $PAWS_HOME %s, got %v", custom, dirs)
 	}
 }
+
+func TestPawsHomeReplacesHomeOutsideRepo(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	mustMkdir(t, filepath.Join(home, ".paws"))
+	custom := filepath.Join(t.TempDir(), "paws-home")
+	mustMkdir(t, custom)
+	t.Setenv("PAWS_HOME", custom)
+
+	cwd := filepath.Join(home, "scratch") // no .git: the walk stops at $HOME
+	mustMkdir(t, cwd)
+
+	dirs := pawsDirs(cwd)
+	if len(dirs) != 1 || dirs[0] != custom {
+		t.Errorf("~/.paws must not load when PAWS_HOME replaces it, got %v", dirs)
+	}
+}
+
+func TestRelativePawsHomeIgnored(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	t.Setenv("PAWS_HOME", "relative/paws")
+	if got, want := UserDir(), filepath.Join(home, ".paws"); got != want {
+		t.Errorf("relative PAWS_HOME should fall back to %s, got %s", want, got)
+	}
+}

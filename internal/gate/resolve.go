@@ -1,7 +1,6 @@
 package gate
 
 import (
-	"encoding/json"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -14,15 +13,14 @@ import (
 // Event is an agent-normalized pending action; adapters build it from native hook JSON.
 type Event struct {
 	Agent      string // which agent produced it, e.g. "claude-code"
-	Kind       string // rule.KindTool or rule.KindPrompt
+	Kind       string // rule.KindTool or rule.KindSession
 	Tool       string
-	Target     string // the string rules match against (command, path, or prompt)
+	Target     string // the string rules match against (command, path, or session source)
 	Session    string
 	Transcript string // path to the session log, when the agent supplies one
 	Cwd        string // the agent's working directory; repo conditions resolve from it
 	AgentID    string // set when the call comes from a subagent rather than the main thread
 	AgentType  string
-	Raw        json.RawMessage // original agent event, passed through to exec-scripts
 }
 
 // DefaultSkillWindow is how many of the agent's own turns back a skill load still counts for.
@@ -34,24 +32,19 @@ const skillLoadSatisfied = "skill-load"
 // digestSatisfied tags an audit record whose require-skill passed because its digest was delivered this window.
 const digestSatisfied = "digest-delivered"
 
-// adviceSatisfied tags an audit record whose advise was skipped: the agent already has it this window.
-const adviceSatisfied = "advice-delivered"
-
-// Verdict ranks how a matched rule wants the call handled; higher wins on conflict.
+// Verdict is how the matched rules want the call handled.
 type Verdict int
 
 const (
-	Allow     Verdict = iota // audit
-	Ask                      // warn
-	DenyRetry                // require-skill / exec-script deny (has a retry path)
-	Deny                     // block (hard)
+	Allow Verdict = iota
+	Deny          // a required skill isn't loaded; the agent loads it and retries
 )
 
 // Decision is the engine's merged answer for one event.
 type Decision struct {
 	Verdict Verdict
-	Reason  string // agent-facing message for ask/deny
-	Context string // advisory text to surface to the agent
+	Reason  string // agent-facing message for a deny
+	Context string // text added to the agent's context (session start)
 }
 
 // outcome is one matched rule's evaluated result.
@@ -75,10 +68,10 @@ func Decide(ev Event, rules []*rule.Rule) Decision {
 	return resolve(ev, matched)
 }
 
-// resolve collapses matched rules into one decision: deny > ask > allow wins, context concatenates, fired rules are audited.
+// resolve collapses matched rules into one decision: any deny wins, context concatenates, fired rules are audited.
 func resolve(ev Event, matched []*rule.Rule) Decision {
 	top := Decision{Verdict: Allow}
-	var contexts, retryReasons []string
+	var contexts, reasons []string
 	for _, r := range matched {
 		oc := evaluate(r, ev)
 		if oc.fired {
@@ -87,19 +80,14 @@ func resolve(ev Event, matched []*rule.Rule) Decision {
 		if oc.context != "" {
 			contexts = append(contexts, oc.context)
 		}
-		if oc.verdict == DenyRetry {
-			retryReasons = append(retryReasons, oc.reason)
-		}
-		if oc.verdict > top.Verdict {
-			top.Verdict, top.Reason = oc.verdict, oc.reason
+		if oc.verdict == Deny {
+			top.Verdict = Deny
+			reasons = append(reasons, oc.reason)
 		}
 	}
-	// Every retryable deny reaches the agent at once (each skill or digest it needs), so the
+	// Every deny reaches the agent at once (each skill or digest it needs), so the
 	// next attempt clears them all instead of discovering them one deny at a time.
-	if top.Verdict == DenyRetry {
-		top.Reason = strings.Join(retryReasons, "\n\n")
-	}
-	top.Reason = capText(top.Reason)
+	top.Reason = capText(strings.Join(reasons, "\n\n"))
 	top.Context = capText(strings.Join(contexts, "\n"))
 	return top
 }
@@ -119,53 +107,31 @@ func capText(s string) string {
 	return s[:cut] + "\n[paws: truncated; run `paws explain` for the full text]"
 }
 
-// evaluate resolves a matched rule to an outcome. Only exec-script runs a subprocess.
+// evaluate resolves a matched rule to an outcome.
 func evaluate(r *rule.Rule, ev Event) outcome {
 	a := r.Action
-	switch a.Type {
-	case "block":
-		reason := fmt.Sprintf("Blocked by paws rule %q.", r.Name)
-		if a.DenyMessage != "" {
-			reason = fmt.Sprintf("Blocked by paws rule %q: %s", r.Name, a.DenyMessage)
-		}
-		return outcome{verdict: Deny, reason: reason, fired: true}
-	case "require-skill":
-		if SkillLoaded(ev.Transcript, a.Skill, DefaultSkillWindow) {
-			return outcome{verdict: Allow, satisfiedBy: skillLoadSatisfied, fired: true}
-		}
-		digest, digestErr := loadDigest(r)
-		if digest != "" && DenyDelivered(ev.Transcript, digestMarker(r), DefaultSkillWindow) {
-			// The digest already rode in a deny this window: the agent has the rules, let the retry through.
-			return outcome{verdict: Allow, satisfiedBy: digestSatisfied, fired: true}
-		}
-		if ev.Kind == rule.KindSession {
-			// A session start can't be denied: name the skill (or hand over its digest) as context instead.
-			if digest != "" {
-				return outcome{verdict: Allow, context: digestMarker(r) + " " + digest, fired: true}
-			}
-			return outcome{verdict: Allow, context: msgOr(a.Message, sessionSkillContext(a)), fired: true}
-		}
-		if digest != "" {
-			return outcome{verdict: DenyRetry, reason: digestReason(r, digest), fired: true}
-		}
-		return outcome{verdict: DenyRetry, reason: msgOr(a.DenyMessage, skillReason(a)), fired: true, digestErr: digestErr}
-	case "advise":
-		marker := adviseMarker(r)
-		if ContextDelivered(ev.Transcript, marker, DefaultSkillWindow) {
-			return outcome{verdict: Allow, satisfiedBy: adviceSatisfied, fired: true}
-		}
-		return outcome{verdict: Allow, context: marker + " " + a.Message, fired: true}
-	case "warn":
-		return outcome{verdict: Ask, reason: msgOr(a.DenyMessage, fmt.Sprintf("paws rule %q requires approval before this runs.", r.Name)), fired: true}
-	case "audit":
-		return outcome{verdict: Allow, fired: true} // logged, agent sees nothing
-	case "prompt-inject":
-		// Deliberately not fired: this is a context nudge, not a policy event — nothing to audit.
-		return outcome{verdict: Allow, context: a.Message}
-	case "exec-script":
-		return runScript(r, ev)
+	if a.Type != rule.ActionRequireSkill {
+		return outcome{}
 	}
-	return outcome{}
+	if SkillLoaded(ev.Transcript, a.Skill, DefaultSkillWindow) {
+		return outcome{verdict: Allow, satisfiedBy: skillLoadSatisfied, fired: true}
+	}
+	digest, digestErr := loadDigest(r)
+	if digest != "" && DenyDelivered(ev.Transcript, digestMarker(r), DefaultSkillWindow) {
+		// The digest already rode in a deny this window: the agent has the rules, let the retry through.
+		return outcome{verdict: Allow, satisfiedBy: digestSatisfied, fired: true}
+	}
+	if ev.Kind == rule.KindSession {
+		// A session start can't be denied: name the skill (or hand over its digest) as context instead.
+		if digest != "" {
+			return outcome{verdict: Allow, context: digestMarker(r) + " " + digest, fired: true}
+		}
+		return outcome{verdict: Allow, context: msgOr(a.Message, sessionSkillContext(a)), fired: true}
+	}
+	if digest != "" {
+		return outcome{verdict: Deny, reason: digestReason(r, digest), fired: true}
+	}
+	return outcome{verdict: Deny, reason: msgOr(a.DenyMessage, skillReason(a)), fired: true, digestErr: digestErr}
 }
 
 // loadDigest returns the rule's digest when on_miss is digest. On a missing, unreadable or
@@ -194,11 +160,6 @@ func digestMarker(r *rule.Rule) string {
 func digestReason(r *rule.Rule, digest string) string {
 	return fmt.Sprintf("%s This action requires the %q skill. Its rules follow; apply them, then retry the command (re-formed to follow them if needed).\n\n%s",
 		digestMarker(r), r.Action.Skill, digest)
-}
-
-// adviseMarker tags advise context so the transcript shows which rule already advised this window.
-func adviseMarker(r *rule.Rule) string {
-	return fmt.Sprintf("paws (%s):", r.Name)
 }
 
 func sessionSkillContext(a rule.Action) string {

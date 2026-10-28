@@ -10,7 +10,7 @@ import (
 	"github.com/websentry-ai/paws/internal/rule"
 )
 
-// DryRun suppresses side effects (audit writes, exec-script) for `paws explain`.
+// DryRun suppresses side effects (audit writes) for `paws explain`.
 var DryRun bool
 
 func auditPath() string {
@@ -49,7 +49,7 @@ func logAudit(ev Event, r *rule.Rule, oc outcome) {
 		rec["digest_error"] = oc.digestErr
 	}
 	if oc.context != "" {
-		rec["context_added"] = true // session-start require-skill and advise: allowed, but the agent got text
+		rec["context_added"] = true // session-start require-skill: allowed, but the agent got text
 	}
 	if ev.AgentID != "" {
 		rec["agent_id"] = ev.AgentID
@@ -132,12 +132,8 @@ func appendAudit(path string, rec map[string]any) {
 func AuditPath() string { return auditPath() }
 
 func verdictName(v Verdict) string {
-	switch v {
-	case Deny, DenyRetry:
+	if v == Deny {
 		return "deny"
-	case Ask:
-		return "ask"
-	default:
-		return "allow"
 	}
+	return "allow"
 }

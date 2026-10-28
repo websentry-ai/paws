@@ -1,9 +1,0 @@
-description = "block on git tag: hard deny with the rule's message, tag never created"
-prompt = "Create a lightweight git tag named v1.0.0 on HEAD using the Bash tool. If it is refused, do not retry or work around it; just report what happened."
-allowed_tools = ["Bash(git:*)"]
-setup = ["git commit -q --allow-empty -m base"]
-
-[expect]
-tool_result_contains = ["Blocked by paws rule", "no-manual-tags", "Tags are cut by the release pipeline"]
-audit = [{ rule = "no-manual-tags", verdict = "deny", action = "block" }]
-shell = ["test -z \"$(git tag)\""]

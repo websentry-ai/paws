@@ -1,0 +1,15 @@
+description = "paws skill: 'load prod-db before psql against prod' is scoped to the prod host"
+prompt = 'Before the agent runs psql against our production database, make it load the prod-db skill. Prod is db.prod.internal. psql against localhost is fine. Set that up with paws.'
+allowed_tools = ["Skill", "Read", "Write", "Edit", "Glob", "Bash(paws:*)", "Bash(mkdir:*)", "Bash(ls:*)"]
+timeout = 300
+
+[expect]
+skills_invoked = ["paws"]
+tool_result_contains = ["decision:"]
+shell = [
+  "paws explain 'psql -h db.prod.internal -U app app' | grep -q 'DENY.*prod-db'",
+  "paws explain 'psql postgres://app@db.prod.internal:5432/app' | grep -q '^  DENY'",
+  "paws explain 'PGPASSWORD=x psql -h db.prod.internal -c \"select 1\"' | grep -q '^  DENY'",
+  "paws explain 'psql -h localhost -U app app' | grep -q 'allow (no matching gate)'",
+  "paws explain 'psql' | grep -q 'allow (no matching gate)'",
+]

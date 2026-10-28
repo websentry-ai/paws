@@ -13,7 +13,7 @@ func TestLogAuditWritesJSONL(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("HOME", home)
 
-	r := mustRule(t, "---\nname: audited\nevent: pre-tool\naction:\n  type: audit\n---\n")
+	r := mustRule(t, "---\nname: audited\nevent: pre-tool\naction:\n  type: require-skill\n  skill: s\n---\n")
 	logAudit(Event{Agent: "claude-code", Tool: "Bash", Target: "ls"}, r, outcome{verdict: Allow, fired: true})
 
 	data, err := os.ReadFile(filepath.Join(home, ".paws", "audit.log"))
@@ -32,7 +32,7 @@ func TestLogAuditDryRunWritesNothing(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("HOME", home)
 
-	r := mustRule(t, "---\nname: audited\nevent: pre-tool\naction:\n  type: audit\n---\n")
+	r := mustRule(t, "---\nname: audited\nevent: pre-tool\naction:\n  type: require-skill\n  skill: s\n---\n")
 	logAudit(Event{}, r, outcome{verdict: Allow, fired: true})
 
 	if _, err := os.Stat(filepath.Join(home, ".paws", "audit.log")); !os.IsNotExist(err) {
@@ -40,18 +40,18 @@ func TestLogAuditDryRunWritesNothing(t *testing.T) {
 	}
 }
 
-func TestDecideAuditFiresAndStaysInvisible(t *testing.T) {
+func TestDecideLogsADeny(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("HOME", home)
 
-	r := mustRule(t, "---\nname: a\nevent: pre-tool\naction:\n  type: audit\n---\n")
+	r := mustRule(t, "---\nname: a\nevent: pre-tool\naction:\n  type: require-skill\n  skill: s\n---\n")
 	ev := Event{Kind: rule.KindTool, Tool: "Bash", Target: "ls", Agent: "claude-code"}
-	d := Decide(ev, []*rule.Rule{r})
-	if d.Verdict != Allow || d.Context != "" {
-		t.Fatalf("audit must resolve to a silent allow, got %+v", d)
+	if d := Decide(ev, []*rule.Rule{r}); d.Verdict != Deny {
+		t.Fatalf("an unloaded skill must deny, got %+v", d)
 	}
-	if _, err := os.Stat(filepath.Join(home, ".paws", "audit.log")); err != nil {
-		t.Error("audit rule should still have logged despite the silent decision")
+	data, err := os.ReadFile(filepath.Join(home, ".paws", "audit.log"))
+	if err != nil || !strings.Contains(string(data), `"verdict":"deny"`) || !strings.Contains(string(data), `"action":"require-skill"`) {
+		t.Errorf("the deny should be in the audit log: %s %v", data, err)
 	}
 }
 
@@ -60,7 +60,7 @@ func TestLogAuditHonorsPawsHome(t *testing.T) {
 	custom := filepath.Join(t.TempDir(), "paws-home")
 	t.Setenv("PAWS_HOME", custom)
 
-	r := mustRule(t, "---\nname: audited\nevent: pre-tool\naction:\n  type: audit\n---\n")
+	r := mustRule(t, "---\nname: audited\nevent: pre-tool\naction:\n  type: require-skill\n  skill: s\n---\n")
 	logAudit(Event{Agent: "claude-code", Tool: "Bash", Target: "ls"}, r, outcome{verdict: Allow, fired: true})
 
 	if _, err := os.Stat(filepath.Join(custom, "audit.log")); err != nil {
@@ -114,7 +114,7 @@ func TestAuditRotates(t *testing.T) {
 func TestAuditCapsTarget(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("HOME", home)
-	r := mustRule(t, "---\nname: a\nevent: pre-tool\naction:\n  type: audit\n---\n")
+	r := mustRule(t, "---\nname: a\nevent: pre-tool\naction:\n  type: require-skill\n  skill: s\n---\n")
 	logAudit(Event{Tool: "Bash", Target: strings.Repeat("x", 10000)}, r, outcome{verdict: Allow, fired: true})
 	data, _ := os.ReadFile(filepath.Join(home, ".paws", "audit.log"))
 	if len(data) > maxTarget+500 || !strings.Contains(string(data), "[truncated]") {

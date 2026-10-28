@@ -15,17 +15,19 @@ import (
 // Rule kinds: which class of agent event a rule applies to.
 const (
 	KindTool    = "tool"    // a pending tool call
-	KindPrompt  = "prompt"  // a submitted user prompt
 	KindSession = "session" // a session starting (startup, resume, clear, compact)
 )
 
-var validActions = map[string]bool{
-	"block": true, "require-skill": true, "warn": true, "audit": true,
-	"prompt-inject": true, "exec-script": true, "advise": true,
+// ActionRequireSkill is the one action paws runs: the bound skill is loaded before the call goes through.
+const ActionRequireSkill = "require-skill"
+
+// removedActions and removedEvents parsed in 0.1 and earlier 0.2 builds; a rule using one is
+// skipped with a message saying so, never mistaken for a typo.
+var removedActions = map[string]bool{
+	"block": true, "warn": true, "audit": true, "exec-script": true, "prompt-inject": true, "advise": true,
 }
 
-// sessionActions are the actions that make sense when nothing can be denied: a session is starting.
-var sessionActions = map[string]bool{"require-skill": true, "advise": true, "audit": true}
+var removedEvents = map[string]bool{"user-prompt": true}
 
 // Matcher decides whether a rule applies to a pending call.
 type Matcher struct {
@@ -50,8 +52,7 @@ type Action struct {
 	Type        string `yaml:"type"`
 	Skill       string `yaml:"skill"`
 	DenyMessage string `yaml:"deny_message"`
-	Message     string `yaml:"message"`
-	Script      string `yaml:"script"`
+	Message     string `yaml:"message"` // session-start context in place of the default
 	OnMiss      string `yaml:"on_miss"`
 	Digest      string `yaml:"digest"` // path to the digest file, relative to the rule's directory
 }
@@ -97,8 +98,6 @@ func Kind(e string) string {
 	switch e {
 	case "pre-tool", "pre-commit", "pre-push":
 		return KindTool
-	case "user-prompt":
-		return KindPrompt
 	case "session-start":
 		return KindSession
 	}
@@ -117,13 +116,19 @@ func Parse(data []byte, path string) (*Rule, error) {
 	}
 	r.SourcePath = path
 	r.Body = body(data)
+	if removedEvents[r.Event] {
+		return nil, fmt.Errorf("event %q is no longer supported (paws gates tool calls and session start)", r.Event)
+	}
 	if Kind(r.Event) == "" {
 		return nil, fmt.Errorf("missing or unknown event %q", r.Event)
 	}
-	if !validActions[r.Action.Type] {
-		return nil, fmt.Errorf("missing or unknown action.type %q", r.Action.Type)
+	if removedActions[r.Action.Type] {
+		return nil, fmt.Errorf("action %q is no longer supported (paws supports require-skill only)", r.Action.Type)
 	}
-	if r.Action.Type == "require-skill" && r.Action.Skill == "" {
+	if r.Action.Type != ActionRequireSkill {
+		return nil, fmt.Errorf("missing or unknown action.type %q (want require-skill)", r.Action.Type)
+	}
+	if r.Action.Skill == "" {
 		return nil, fmt.Errorf("require-skill needs a skill")
 	}
 	switch r.Action.OnMiss {
@@ -135,39 +140,14 @@ func Parse(data []byte, path string) (*Rule, error) {
 	default:
 		return nil, fmt.Errorf("unknown action.on_miss %q (want %s or %s)", r.Action.OnMiss, OnMissLoadRequired, OnMissDigest)
 	}
-	if r.Action.OnMiss != "" && r.Action.Type != "require-skill" {
-		return nil, fmt.Errorf("on_miss only applies to require-skill")
-	}
 	if r.Action.Digest != "" {
 		if err := RelativeInside(r.Action.Digest); err != nil {
 			return nil, fmt.Errorf("digest %w", err)
 		}
 	}
-	if r.Action.Type == "exec-script" {
-		if r.Action.Script == "" {
-			return nil, fmt.Errorf("exec-script needs a script path")
-		}
-		// Scripts run with full shell trust, same as the rule file itself — but the
-		// path must stay inside the rule's own directory tree, not point anywhere
-		// on disk, so `paws explain`/review of a .paws/ dir sees everything it runs.
-		if err := RelativeInside(r.Action.Script); err != nil {
-			return nil, fmt.Errorf("exec-script script %w", err)
-		}
-	}
 	if Kind(r.Event) == KindSession {
-		if !sessionActions[r.Action.Type] {
-			return nil, fmt.Errorf("session-start supports require-skill, advise and audit, not %s", r.Action.Type)
-		}
 		if r.Matcher.Tool != "" || r.Matcher.FileGlob != "" || r.Matcher.MCPAction != "" {
 			return nil, fmt.Errorf("session-start has no tool call; only matcher.command_regex (against the start source) applies")
-		}
-	}
-	if r.Action.Type == "advise" {
-		if Kind(r.Event) == KindPrompt {
-			return nil, fmt.Errorf("advise is for tool and session events (use prompt-inject on user-prompt)")
-		}
-		if r.Action.Message == "" {
-			return nil, fmt.Errorf("advise needs a message")
 		}
 	}
 	if r.Matcher.MCPAction != "" {
@@ -187,20 +167,6 @@ func Parse(data []byte, path string) (*Rule, error) {
 	for _, c := range r.When {
 		if c.Kind == WhenNewFile && Kind(r.Event) != KindTool {
 			return nil, fmt.Errorf("when: new-file needs a tool event")
-		}
-	}
-	if r.Action.Type == "warn" && Kind(r.Event) == KindPrompt {
-		return nil, fmt.Errorf("warn is not supported on user-prompt (use block, audit, or prompt-inject)")
-	}
-	if r.Action.Type == "audit" && r.Action.Message != "" {
-		return nil, fmt.Errorf("audit is silent by design and does not support message: (use prompt-inject to surface text to the agent)")
-	}
-	if r.Action.Type == "prompt-inject" {
-		if Kind(r.Event) != KindPrompt {
-			return nil, fmt.Errorf("prompt-inject requires event: user-prompt")
-		}
-		if r.Action.Message == "" {
-			return nil, fmt.Errorf("prompt-inject needs a message")
 		}
 	}
 	if (r.Event == "pre-commit" || r.Event == "pre-push") && !matchTool(r.Matcher.Tool, "Bash") {

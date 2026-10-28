@@ -1,10 +1,19 @@
-description = "when agent-count>1 blocks the third subagent spawn in one prompt, not the first two"
-prompt = "Use the Agent tool three times, strictly one after another: start the next subagent only after the previous one has returned. Subagent N (N = 1, 2, 3) must create the file agent-N.txt containing the number N, using the Write tool, and then finish. If a subagent launch is refused, do not retry it and do not create its file yourself; just report what happened."
-allowed_tools = ["Agent", "Task", "Write"]
+description = "when agent-count>1 gates the third subagent spawn in one prompt, not the first two; the skill loads and the retry passes"
+prompt = "Use the Agent tool three times, strictly one after another: start the next subagent only after the previous one has returned. Subagent N (N = 1, 2, 3) must create the file agent-N.txt containing the number N, using the Write tool, and then finish. If a launch is refused, follow what the refusal says, then launch that subagent again."
+allowed_tools = ["Agent", "Task", "Write", "Skill"]
 timeout = 420
 
 [expect]
-tool_result_contains = ["Blocked by paws rule", "fan-out-limit"]
-audit = [{ rule = "fan-out-limit", verdict = "deny" }]
+skills_invoked = ["fanout-review-7k"]
+tool_result_contains = ["fanout-review-7k"]
+audit = [
+  { rule = "fan-out-limit", verdict = "deny" },
+  { rule = "fan-out-limit", verdict = "allow", satisfied_by = "skill-load" },
+]
 audit_max = [{ rule = "fan-out-limit", verdict = "deny", max = 1 }]
-shell = ["test -f agent-1.txt", "test -f agent-2.txt", "test ! -f agent-3.txt"]
+shell = [
+  "test -f agent-1.txt",
+  "test -f agent-2.txt",
+  "grep -q FANOUT-OK agent-3.txt",
+  "! grep -q FANOUT-OK agent-1.txt",
+]

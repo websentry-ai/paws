@@ -23,9 +23,9 @@ func TestCommandExtraction(t *testing.T) {
 	}
 }
 
-func TestMatchTargetPrompt(t *testing.T) {
-	in := &Input{HookEventName: "UserPromptSubmit", Prompt: "deploy now", ToolInput: map[string]any{}}
-	if got := in.MatchTarget(); got != "deploy now" {
-		t.Errorf("prompt event should target prompt text, got %q", got)
+func TestMatchTargetSessionSource(t *testing.T) {
+	in := &Input{HookEventName: "SessionStart", Source: "resume", ToolInput: map[string]any{}}
+	if got := in.MatchTarget(); got != "resume" {
+		t.Errorf("session event should target the start source, got %q", got)
 	}
 }

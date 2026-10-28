@@ -73,7 +73,7 @@ func TestHasDependency(t *testing.T) {
 func TestWhenRepoConditionsResolveFromCwd(t *testing.T) {
 	root := repoWith(t, map[string]string{"package.json": `{"dependencies":{"next":"14"}}`, "next.config.js": "", "src/app/page.tsx": ""})
 	sub := filepath.Join(root, "src", "app")
-	r := mustRule(t, "---\nname: n\nevent: pre-tool\nwhen:\n  - dependency:next\n  - repo-marker:next.config.js\naction:\n  type: audit\n---\n")
+	r := mustRule(t, "---\nname: n\nevent: pre-tool\nwhen:\n  - dependency:next\n  - repo-marker:next.config.js\naction:\n  type: require-skill\n  skill: s\n---\n")
 	ev := Event{Kind: rule.KindTool, Tool: "Bash", Target: "ls", Cwd: sub}
 	if !Applies(r, ev) {
 		t.Error("both repo conditions hold from a subdirectory")
@@ -86,7 +86,7 @@ func TestWhenRepoConditionsResolveFromCwd(t *testing.T) {
 
 func TestWhenNewFile(t *testing.T) {
 	root := repoWith(t, map[string]string{"exists.go": "package x"})
-	r := mustRule(t, "---\nname: n\nevent: pre-tool\nmatcher:\n  tool: Write\nwhen: new-file\naction:\n  type: audit\n---\n")
+	r := mustRule(t, "---\nname: n\nevent: pre-tool\nmatcher:\n  tool: Write\nwhen: new-file\naction:\n  type: require-skill\n  skill: s\n---\n")
 	if !Applies(r, Event{Kind: rule.KindTool, Tool: "Write", Target: filepath.Join(root, "new.go"), Cwd: root}) {
 		t.Error("a missing target is a new file")
 	}
@@ -110,7 +110,7 @@ const (
 )
 
 func TestWhenNoEditMatching(t *testing.T) {
-	r := mustRule(t, "---\nname: tdd\nevent: pre-tool\nmatcher:\n  file_glob: \"src/**\"\nwhen: no-edit-matching:**/*_test.go\naction:\n  type: audit\n---\n")
+	r := mustRule(t, "---\nname: tdd\nevent: pre-tool\nmatcher:\n  file_glob: \"src/**\"\nwhen: no-edit-matching:**/*_test.go\naction:\n  type: require-skill\n  skill: s\n---\n")
 	ev := Event{Kind: rule.KindTool, Tool: "Edit", Target: "/r/src/a.go"}
 	ev.Transcript = write(t, lnAssistant)
 	if !Applies(r, ev) {
@@ -131,7 +131,7 @@ func TestWhenNoEditMatching(t *testing.T) {
 }
 
 func TestWhenAgentCount(t *testing.T) {
-	r := mustRule(t, "---\nname: par\nevent: pre-tool\nmatcher:\n  tool: Agent\nwhen: agent-count>1\naction:\n  type: audit\n---\n")
+	r := mustRule(t, "---\nname: par\nevent: pre-tool\nmatcher:\n  tool: Agent\nwhen: agent-count>1\naction:\n  type: require-skill\n  skill: s\n---\n")
 	ev := Event{Kind: rule.KindTool, Tool: "Agent", Target: "x"}
 	ev.Transcript = write(t, lnUserTyped, lnAgent, lnToolRes)
 	if !Applies(r, ev) {
@@ -145,12 +145,12 @@ func TestWhenAgentCount(t *testing.T) {
 
 func TestWhenParseErrors(t *testing.T) {
 	for name, md := range map[string]string{
-		"unknown":            "---\nname: x\nevent: pre-tool\nwhen: phase-of-moon\naction:\n  type: audit\n---\n",
-		"empty dependency":   "---\nname: x\nevent: pre-tool\nwhen: \"dependency:\"\naction:\n  type: audit\n---\n",
-		"marker traversal":   "---\nname: x\nevent: pre-tool\nwhen: repo-marker:../x\naction:\n  type: audit\n---\n",
-		"new-file on prompt": "---\nname: x\nevent: user-prompt\nwhen: new-file\naction:\n  type: audit\n---\n",
-		"bad glob":           "---\nname: x\nevent: pre-tool\nwhen: \"no-edit-matching:{a\"\naction:\n  type: audit\n---\n",
-		"map not list":       "---\nname: x\nevent: pre-tool\nwhen:\n  a: b\naction:\n  type: audit\n---\n",
+		"unknown":            "---\nname: x\nevent: pre-tool\nwhen: phase-of-moon\naction:\n  type: require-skill\n  skill: s\n---\n",
+		"empty dependency":   "---\nname: x\nevent: pre-tool\nwhen: \"dependency:\"\naction:\n  type: require-skill\n  skill: s\n---\n",
+		"marker traversal":   "---\nname: x\nevent: pre-tool\nwhen: repo-marker:../x\naction:\n  type: require-skill\n  skill: s\n---\n",
+		"new-file on prompt": "---\nname: x\nevent: user-prompt\nwhen: new-file\naction:\n  type: require-skill\n  skill: s\n---\n",
+		"bad glob":           "---\nname: x\nevent: pre-tool\nwhen: \"no-edit-matching:{a\"\naction:\n  type: require-skill\n  skill: s\n---\n",
+		"map not list":       "---\nname: x\nevent: pre-tool\nwhen:\n  a: b\naction:\n  type: require-skill\n  skill: s\n---\n",
 	} {
 		if _, err := rule.Parse([]byte(md), "t.md"); err == nil {
 			t.Errorf("%s: should fail to parse", name)
@@ -159,7 +159,7 @@ func TestWhenParseErrors(t *testing.T) {
 }
 
 func TestAgentCountIgnoresHarnessUserRecords(t *testing.T) {
-	r := mustRule(t, "---\nname: par\nevent: pre-tool\nmatcher:\n  tool: Agent\nwhen: agent-count>1\naction:\n  type: audit\n---\n")
+	r := mustRule(t, "---\nname: par\nevent: pre-tool\nmatcher:\n  tool: Agent\nwhen: agent-count>1\naction:\n  type: require-skill\n  skill: s\n---\n")
 	lnCmdOut := `{"type":"user","isSidechain":false,"message":{"role":"user","content":"<local-command-stdout>ok</local-command-stdout>"}}`
 	lnSummary := `{"type":"user","isSidechain":false,"isCompactSummary":true,"message":{"role":"user","content":"This session is being continued..."}}`
 	lnNotify := `{"type":"user","isSidechain":false,"message":{"role":"user","content":[{"type":"text","text":"<task-notification>done</task-notification>"}]}}`

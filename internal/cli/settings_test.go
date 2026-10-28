@@ -77,6 +77,28 @@ func TestEnsureHooksRepointsMovedBinary(t *testing.T) {
 	}
 }
 
+// Earlier builds registered UserPromptSubmit; re-running init drops the paws entry there and keeps others.
+func TestEnsureHooksDropsRetiredEvents(t *testing.T) {
+	paws, _ := json.Marshal(map[string]any{"hooks": []any{map[string]any{"type": "command", "command": pawsCmd}}})
+	other := `{"hooks":[{"type":"command","command":"/x/other.sh"}]}`
+	doc := settingsDoc{"hooks": json.RawMessage(`{"UserPromptSubmit":[` + string(paws) + `,` + other + `]}`)}
+	if changed, err := ensureHooks(doc, pawsCmd); err != nil || !changed {
+		t.Fatalf("ensureHooks: %v %v", changed, err)
+	}
+	hooks, _ := hooksBlock(doc)
+	var up []json.RawMessage
+	json.Unmarshal(hooks["UserPromptSubmit"], &up)
+	if len(up) != 1 || containsCommand(up, pawsCmd) || !containsCommand(up, "/x/other.sh") {
+		t.Fatalf("want only the other UserPromptSubmit hook left, got %s", hooks["UserPromptSubmit"])
+	}
+
+	doc = settingsDoc{"hooks": json.RawMessage(`{"UserPromptSubmit":[` + string(paws) + `]}`)}
+	ensureHooks(doc, pawsCmd)
+	if hooks, _ := hooksBlock(doc); hooks["UserPromptSubmit"] != nil {
+		t.Errorf("an emptied retired event should be removed, got %s", hooks["UserPromptSubmit"])
+	}
+}
+
 func TestIsPawsCommandRejectsLookalikes(t *testing.T) {
 	lookalikes := []string{
 		`'/opt/paws' gate`,                   // right shape, no marker — pre-fix this matched via basename

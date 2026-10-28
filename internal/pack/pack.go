@@ -221,17 +221,9 @@ func Add(c *catalog.Catalog, name string, bindings []string, picks map[string]st
 		if b.Action.Digest != "" {
 			files = append(files, path.Join(dir, filepath.ToSlash(b.Action.Digest)))
 		}
-		if b.Action.Type == "exec-script" {
-			files = append(files, path.Join(dir, filepath.ToSlash(b.Action.Script)))
-		}
 		for _, f := range files {
 			dest := filepath.Join(stage, filepath.FromSlash(f))
 			if err := copyFile(c.FS, catalog.BindingPath(f), dest); err != nil {
-				return nil, err
-			}
-		}
-		if b.Action.Type == "exec-script" {
-			if err := os.Chmod(filepath.Join(stage, filepath.FromSlash(path.Join(dir, b.Action.Script))), 0o755); err != nil {
 				return nil, err
 			}
 		}

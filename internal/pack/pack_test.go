@@ -63,20 +63,19 @@ func fakeFetch(t *testing.T, repos map[string]string) {
 }
 
 // testCatalog builds a catalog with an upstream binding (pinned to hash), an org binding with a
-// local skill, placeholders and a digest, an exec-script binding, and a pack with a pick_one group.
+// local skill, placeholders and a digest, and a pack with a pick_one group.
 func testCatalog(t *testing.T, hash string) *catalog.Catalog {
 	root := t.TempDir()
 	up := "upstream:\n  repo: github.com/example/humanizer\n  path: SKILL.md\n  ref: 0123456789abcdef0123456789abcdef01234567\n  content_hash: " + hash + "\n"
 	write(t, filepath.Join(root, "catalog/writing/humanizer-pr.md"), "---\nname: humanizer-pr\nevent: pre-tool\nmatcher:\n  tool: Bash\n  command_regex: gh pr create\naction:\n  type: require-skill\n  skill: humanizer\n"+up+"tags: [writing]\n---\nHumanize PRs.\n")
-	write(t, filepath.Join(root, "catalog/writing/plain-pr.md"), "---\nname: plain-pr\nevent: pre-tool\nmatcher:\n  tool: Bash\n  command_regex: gh pr create\naction:\n  type: audit\ntags: [writing]\n---\n")
+	write(t, filepath.Join(root, "catalog/writing/plain-pr.md"), "---\nname: plain-pr\nevent: pre-tool\nmatcher:\n  tool: Bash\n  command_regex: gh pr create\naction:\n  type: require-skill\n  skill: plain\ntags: [writing]\n---\n")
+	write(t, filepath.Join(root, "catalog/writing/skills/plain/SKILL.md"), "---\nname: plain\n---\nWrite plainly.\n")
 	write(t, filepath.Join(root, "catalog/aws/s3.md"), "---\nname: aws-s3\nevent: pre-tool\nmatcher:\n  tool: Bash\n  command_regex: aws s3 mb\naction:\n  type: require-skill\n  skill: aws-s3\n  on_miss: digest\n  digest: digests/aws-s3.md\ntags: [org, aws]\n---\n")
 	write(t, filepath.Join(root, "catalog/aws/digests/aws-s3.md"), "Block public access.\n")
 	write(t, filepath.Join(root, "catalog/aws/skills/aws-s3/SKILL.md"), "---\nname: aws-s3\n---\nPrefix buckets with {{BUCKET_PREFIX}}.\n")
 	write(t, filepath.Join(root, "catalog/aws/skills/aws-s3/config.yaml"), "placeholders:\n  BUCKET_PREFIX: acme-\n")
-	write(t, filepath.Join(root, "catalog/shell/rm.md"), "---\nname: rm-guard\nevent: pre-tool\nmatcher:\n  tool: Bash\naction:\n  type: exec-script\n  script: rm.sh\ntags: [safety]\n---\n")
-	write(t, filepath.Join(root, "catalog/shell/rm.sh"), "#!/bin/sh\nexit 0\n")
 	write(t, filepath.Join(root, "packs/writing.yaml"), "name: writing\ndescription: d\npick_one:\n  - name: prose\n    default: humanizer\n    options:\n      humanizer: [writing/humanizer-pr.md]\n      plain: [writing/plain-pr.md]\n")
-	write(t, filepath.Join(root, "packs/aws.yaml"), "name: aws\ndescription: d\nbindings: [aws/s3.md, shell/rm.md]\n")
+	write(t, filepath.Join(root, "packs/aws.yaml"), "name: aws\ndescription: d\nbindings: [aws/s3.md]\n")
 	c, probs := catalog.Validate(root)
 	if len(probs) > 0 {
 		t.Fatalf("test catalog invalid: %v", probs)
@@ -177,7 +176,7 @@ func TestAddKeepsUsersOwnSkill(t *testing.T) {
 	}
 }
 
-func TestAddOrgSkillFillsPlaceholdersAndCopiesDigestAndScript(t *testing.T) {
+func TestAddOrgSkillFillsPlaceholdersAndCopiesDigest(t *testing.T) {
 	_, hash := goodHash(t)
 	c := testCatalog(t, hash)
 	tg := ProjectTarget(t.TempDir())
@@ -189,10 +188,6 @@ func TestAddOrgSkillFillsPlaceholdersAndCopiesDigestAndScript(t *testing.T) {
 	}
 	if _, err := os.Stat(filepath.Join(tg.PacksDir, "aws", "aws", "digests", "aws-s3.md")); err != nil {
 		t.Errorf("digest not copied beside its binding: %v", err)
-	}
-	st, err := os.Stat(filepath.Join(tg.PacksDir, "aws", "shell", "rm.sh"))
-	if err != nil || st.Mode().Perm()&0o100 == 0 {
-		t.Errorf("exec-script must be installed executable: %v %v", st, err)
 	}
 }
 

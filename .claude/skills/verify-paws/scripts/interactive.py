@@ -5,8 +5,8 @@
     interactive.py run <case> [<case> ...] [--model sonnet] [--keep]
     interactive.py run --all
 
-For what headless can't show: `warn` (Claude Code asks the human) and the TUI's
-own rendering of paws denies. Cases live under ../cases-interactive/ and use the
+For what headless can't show: the TUI's own rendering of paws denies and the
+skill load that follows. Cases live under ../cases-interactive/ and use the
 same layout and [expect] keys as drive.py, plus:
 
     answer = "yes" | "no"        how to answer each permission prompt (default: fail on one)

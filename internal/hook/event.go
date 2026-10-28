@@ -14,7 +14,6 @@ type Input struct {
 	HookEventName  string         `json:"hook_event_name"`
 	ToolName       string         `json:"tool_name"`
 	ToolInput      map[string]any `json:"tool_input"`
-	Prompt         string         `json:"prompt,omitempty"` // UserPromptSubmit only
 	Source         string         `json:"source,omitempty"` // SessionStart only: startup|resume|clear|compact
 	AgentID        string         `json:"agent_id,omitempty"`
 	AgentType      string         `json:"agent_type,omitempty"`
@@ -22,25 +21,20 @@ type Input struct {
 
 // Output is the decision a hook prints on stdout; the zero value marshals to "{}" (allow).
 type Output struct {
-	Decision       string          `json:"decision,omitempty"`
-	Reason         string          `json:"reason,omitempty"`
 	SystemMessage  string          `json:"systemMessage,omitempty"`
 	SpecificOutput *SpecificOutput `json:"hookSpecificOutput,omitempty"`
 }
 
 type SpecificOutput struct {
 	HookEventName            string `json:"hookEventName"`
-	PermissionDecision       string `json:"permissionDecision,omitempty"` // allow|deny|ask
+	PermissionDecision       string `json:"permissionDecision,omitempty"` // paws only sends deny
 	PermissionDecisionReason string `json:"permissionDecisionReason,omitempty"`
 	AdditionalContext        string `json:"additionalContext,omitempty"`
 }
 
 // MatchTarget is the string a rule's regex runs against for this event.
 func (in *Input) MatchTarget() string {
-	switch in.HookEventName {
-	case "UserPromptSubmit":
-		return in.Prompt
-	case "SessionStart":
+	if in.HookEventName == "SessionStart" {
 		return in.Source
 	}
 	return in.Command()

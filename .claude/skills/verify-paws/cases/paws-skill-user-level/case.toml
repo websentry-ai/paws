@@ -1,5 +1,5 @@
 description = "paws skill: 'for all my repos' puts the rule in the user dir (PAWS_HOME), not the repo"
-prompt = "For all my repos, not just this one, block git push --force. Set that up with paws."
+prompt = "For all my repos, not just this one, make the agent load the force-push skill before git push --force. Set that up with paws."
 allowed_tools = ["Skill", "Read", "Write", "Edit", "Glob", "Bash(paws:*)", "Bash(mkdir:*)", "Bash(ls:*)"]
 timeout = 300
 

@@ -34,7 +34,7 @@ func Gate() (code int) {
 	if in.CWD == "" {
 		in.CWD, _ = os.Getwd()
 	}
-	ev := hook.ToEvent(&in, data)
+	ev := hook.ToEvent(&in)
 	// Telemetry-only events: count and leave. No rules run after a tool or at turn end.
 	switch in.HookEventName {
 	case "Stop":

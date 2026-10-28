@@ -1,0 +1,14 @@
+description = "paws skill: 'load style-guide before .tsx edits and writes' spares reads and other files"
+prompt = 'Before the agent edits or writes any .tsx file, make it load the style-guide skill. Reading .tsx files is fine. Set that up with paws.'
+allowed_tools = ["Skill", "Read", "Write", "Edit", "Glob", "Bash(paws:*)", "Bash(mkdir:*)", "Bash(ls:*)"]
+timeout = 300
+
+[expect]
+skills_invoked = ["paws"]
+tool_result_contains = ["decision:"]
+shell = [
+  "paws explain --tool Edit src/App.tsx | grep -q 'DENY.*style-guide'",
+  "paws explain --tool Write src/components/Button.tsx | grep -q '^  DENY'",
+  "paws explain --tool Read src/App.tsx | grep -q 'allow (no matching gate)'",
+  "paws explain --tool Edit src/app.ts | grep -q 'allow (no matching gate)'",
+]

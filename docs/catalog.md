@@ -60,7 +60,7 @@ Rules for a valid binding (`paws validate` checks each one):
 - An upstream binding has `upstream.content_hash`: `sha256:` and 64 hex digits.
 - A `require-skill` binding has an `upstream`, or a local skill at
   `catalog/<category>/skills/<skill>/SKILL.md`.
-- `action.digest` and an `exec-script` script exist relative to the binding.
+- `action.digest` exists relative to the binding.
 
 ## Pack manifest
 

@@ -5,7 +5,7 @@
 - `event: session-start` fires on SessionStart (registered by `paws init`).
 - `matcher.command_regex` matches the start source: `startup`, `resume`, `clear` or `compact`.
 - `require-skill` adds context naming the skill (a start cannot be denied); nothing when already loaded.
-- `advise` and `audit` also work; other actions and tool matchers are rejected at parse time.
+- Tool matchers are rejected at parse time.
 
 ## How to get to it (user POV)
 

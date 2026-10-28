@@ -127,6 +127,9 @@ func BenchmarkSkillLoaded(b *testing.B) {
 	}
 }
 
+// lnAdvised is the attachment Claude Code writes when a hook's additionalContext reaches the agent.
+const lnAdvised = `{"type":"attachment","isSidechain":false,"attachment":{"type":"hook_additional_context","content":["paws (use-agent-browser): Prefer the agent-browser skill."],"hookName":"PreToolUse:mcp__playwright__browser_click","hookEvent":"PreToolUse"}}`
+
 func TestContextDelivered(t *testing.T) {
 	lnOther := `{"type":"attachment","isSidechain":false,"attachment":{"type":"hook_additional_context","content":["paws (other-rule): x"]}}`
 	cases := []struct {

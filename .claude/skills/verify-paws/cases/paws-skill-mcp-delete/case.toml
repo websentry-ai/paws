@@ -1,0 +1,15 @@
+description = 'paws skill: mcp__linear__* + mcp_action delete gates Linear deletes only'
+prompt = 'Before the agent deletes anything through the Linear MCP server (its tools are named mcp__linear__...), make it load the linear-hygiene skill. Other Linear calls are fine. Repo rule, via paws.'
+allowed_tools = ["Skill", "Read", "Write", "Edit", "Glob", "Bash(paws:*)", "Bash(mkdir:*)", "Bash(ls:*)"]
+timeout = 300
+
+[expect]
+skills_invoked = ["paws"]
+tool_result_contains = ["decision:"]
+shell = [
+  "paws explain --tool mcp__linear__delete_issue '{}' | grep -q 'DENY.*linear-hygiene'",
+  "paws explain --tool mcp__linear__delete_comment '{}' | grep -q '^  DENY'",
+  "paws explain --tool mcp__linear__list_issues '{}' | grep -q 'allow (no matching gate)'",
+  "paws explain --tool mcp__linear__save_issue '{}' | grep -q 'allow (no matching gate)'",
+  "paws explain --tool mcp__github__delete_file '{}' | grep -q 'allow (no matching gate)'",
+]

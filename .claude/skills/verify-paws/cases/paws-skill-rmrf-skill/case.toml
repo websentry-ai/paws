@@ -1,0 +1,18 @@
+description = "paws skill: 'load safe-delete before rm -rf' catches flag variants and spares plain rm"
+prompt = 'Before the agent runs rm -rf in this repo, make it load the safe-delete skill first. Set that up with paws.'
+allowed_tools = ["Skill", "Read", "Write", "Edit", "Glob", "Bash(paws:*)", "Bash(mkdir:*)", "Bash(ls:*)"]
+timeout = 300
+
+[expect]
+skills_invoked = ["paws"]
+tool_result_contains = ["decision:"]
+shell = [
+  "paws explain 'rm -rf build' | grep -q '→.*action=require-skill'",
+  "paws explain 'rm -rf build' | grep -q 'DENY.*safe-delete'",
+  "paws explain 'rm -fr build' | grep -q '^  DENY'",
+  "paws explain 'rm -Rf build' | grep -q '^  DENY'",
+  "paws explain 'sudo rm -rf /tmp/x' | grep -q '^  DENY'",
+  "paws explain 'cd build && rm -rf node_modules' | grep -q '^  DENY'",
+  "paws explain 'rm file.txt' | grep -q 'allow (no matching gate)'",
+  "paws explain 'echo rm -rf' | grep -q 'allow (no matching gate)'",
+]

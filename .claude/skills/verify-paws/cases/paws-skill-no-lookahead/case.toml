@@ -1,5 +1,5 @@
-description = "paws skill: 'block --force but not --force-with-lease' is written without lookahead"
-prompt = "Block git push --force, but --force-with-lease is fine. Repo rule, via paws."
+description = "paws skill: 'gate --force but not --force-with-lease' is written without lookahead"
+prompt = "Before the agent runs git push --force, make it load the force-push skill; --force-with-lease is fine. Repo rule, via paws."
 allowed_tools = ["Skill", "Read", "Write", "Edit", "Glob", "Bash(paws:*)", "Bash(mkdir:*)", "Bash(ls:*)"]
 timeout = 300
 
@@ -7,7 +7,7 @@ timeout = 300
 skills_invoked = ["paws"]
 tool_result_contains = ["decision:"]
 shell = [
-  "paws explain 'git push --force' | grep -q '^  DENY'",
+  "paws explain 'git push --force' | grep -q 'DENY.*force-push'",
   "paws explain 'git push --force origin main' | grep -q '^  DENY'",
   "paws explain 'git push -f origin main' | grep -q '^  DENY'",
   "paws explain 'cd app && git push --force' | grep -q '^  DENY'",

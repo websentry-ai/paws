@@ -1,6 +1,6 @@
 ---
 name: verify-paws
-description: Verify paws end to end by driving a real headless Claude Code session against a freshly built paws binary, then grading the agent's tool calls, the paws audit log and the repo's side effects. Use after any change to rules, matchers, actions, the hook adapter, init, or packs, and before merging a paws PR.
+description: Verify paws end to end by driving a real Claude Code session (headless, or the interactive TUI in tmux) against a freshly built paws binary, then grading the agent's tool calls, the paws audit log and the repo's side effects. Use after any change to rules, matchers, actions, the transcript scanner, the hook adapter, init, or packs, and before merging a paws PR.
 ---
 
 # Verify paws
@@ -21,6 +21,9 @@ python3 .claude/skills/verify-paws/scripts/drive.py run block-tag --keep   # kee
 ```
 
 A case finishes when `claude -p` exits (end of turn). Default timeout 300 s.
+
+`followups` in a case resume the same session for more prompts
+(`claude -p --resume <session>`), e.g. `"/compact"` and then a second task.
 
 `--npm` tests the ship path instead of `go build`: it builds a GoReleaser
 snapshot at `npm/package.json`'s version, packs `npm/`, serves the archives on
@@ -85,7 +88,8 @@ env = { AWS_CONFIG_FILE = "/dev/null" }            # optional: extra env; {proje
 # cases/<name>/bin/ (optional): fake commands put first on PATH. Use them for anything that
 # would reach a real account (aws, gcloud, kubectl); the real CLI must never run in a case.
 init_args = []                         # optional extra args for `paws init`
-timeout = 300
+timeout = 300                          # per prompt
+followups = ["/compact", "commit again"]   # optional: more prompts, same session
 # cases/<name>/mcp.json (optional): an --mcp-config file; {project} and {fixtures}
 # expand to absolute paths. fixtures/fakechat_mcp.py is a stdio MCP server whose
 # send_message appends to the JSONL file given as its argument.
@@ -115,6 +119,32 @@ Make every case prove behaviour, not just a hook return value:
   never runs.
 - If the agent needs information to recover from a deny (a ticket number),
   put it in the prompt. A good agent asks rather than inventing one.
+
+## Interactive TUI
+
+`scripts/interactive.py` drives the real `claude` TUI in a private tmux server
+for what headless can't show: `warn` approval prompts and how denies render.
+Cases live in `cases-interactive/`, with the same layout, isolation and
+`[expect]` keys (minus `final_contains`), plus:
+
+```toml
+answer = "yes"                         # or "no": how to answer each permission prompt;
+                                       # unset fails the case if a prompt appears
+[expect]
+screen_contains = ["WRN-4F"]           # seen on screen at some point
+screen_absent = []
+prompts = 1                            # permission prompts answered
+```
+
+```bash
+python3 .claude/skills/verify-paws/scripts/interactive.py run --all
+```
+
+It accepts the workspace trust dialog, types the prompt, answers prompts, and
+stops when the TUI is idle for 8 s, then sends `/exit`. Skills and tool results
+are graded from the session transcript Claude Code writes under
+`~/.claude/projects/` (read only). Evidence adds `screens.txt` (every distinct
+screen) and `transcript.jsonl`. It needs `tmux`.
 
 ## Evidence
 

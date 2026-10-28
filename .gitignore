@@ -10,3 +10,4 @@
 # goreleaser output
 /dist/
 /npm/vendor/
+__pycache__/

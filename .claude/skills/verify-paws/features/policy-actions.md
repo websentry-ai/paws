@@ -18,10 +18,19 @@ A rule in `.paws/` with `action.type` set to `block`, `warn` or `audit`.
 - `run audit-status`: `git status` runs, the audit log has an `allow` record
   for the rule, and no tool result carries a paws message.
 
+## Driving it with interactive.py
+
+`warn` needs a human, so it runs in the real TUI (`scripts/interactive.py`):
+
+- `run warn-approve`: the approval prompt shows the rule's `WRN-4F` message;
+  answering Yes runs the (fake) `psql`, and the audit has an `ask` record.
+- `run warn-decline`: same prompt; answering No means `psql` never runs.
+
+`Bash(psql:*)` is in the case's allowed tools, so the only thing that can raise
+the prompt is paws.
+
 ## Gotchas
 
-- `warn` has no live case. In `claude -p` there is no human to answer the
-  approval prompt, so a live run proves nothing about the interactive path.
-  The `ask` output is covered by `internal/hook/adapter_test.go`.
+- `claude -p` has no human to answer `warn`; only the interactive cases prove it.
 - Do not assert that the word "paws" is absent from tool results: `git status`
   prints the untracked `.paws/` directory.

@@ -1,0 +1,18 @@
+description = "a compaction resets activation: the next gated commit after /compact denies once more"
+prompt = "Create an empty git commit in this repo with the message 'initial'. Use the Bash tool."
+followups = ["/compact", "Create another empty git commit with the message 'second'. Use the Bash tool."]
+allowed_tools = ["Bash(git:*)", "Skill"]
+timeout = 300
+
+[expect]
+audit = [
+  { rule = "commit-crew-roster", verdict = "deny" },
+  { rule = "commit-crew-roster", verdict = "allow", satisfied_by = "skill-load" },
+  { rule = "commit-crew-roster", verdict = "deny" },
+  { rule = "commit-crew-roster", verdict = "allow", satisfied_by = "skill-load" },
+]
+audit_max = [{ rule = "commit-crew-roster", verdict = "deny", max = 2 }]
+shell = [
+  "test $(git log --format=%s | grep -c '^CRW-9D: ') -eq 2",
+  "git log -1 --format=%s | grep -q second",
+]

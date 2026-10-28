@@ -165,3 +165,58 @@ func TestWindowCountsResponsesNotBlocks(t *testing.T) {
 		t.Error("the 21st response is outside the window")
 	}
 }
+
+// Request blobs, shapes copied from a Claude Code 2.1.312 interactive transcript. The blobs
+// reach the file when a request goes out; the user/assistant records for the same messages
+// can land later, after the next tool call's hook already ran.
+const (
+	lnBlobSkillCall = `{"type":"api-request-blob","hash":"h1","message":{"role":"assistant","content":[{"type":"text","text":"Loading it first."},{"type":"tool_use","id":"toolu_s1","name":"Skill","input":{"skill":"release-checklist"},"caller":{"type":"direct"}}]}}`
+	lnBlobSkillOK   = `{"type":"api-request-blob","hash":"h2","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"toolu_s1","content":"Launching skill: release-checklist"},{"type":"text","text":"Base directory for this skill: /x"}]}}`
+	lnBlobSkillErr  = `{"type":"api-request-blob","hash":"h3","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"toolu_s1","content":"Unknown skill: release-checklist","is_error":true}]}}`
+	lnBlobBashCall  = `{"type":"api-request-blob","hash":"h4","message":{"role":"assistant","content":[{"type":"tool_use","id":"toolu_b1","name":"Bash","input":{"command":"echo 'Launching skill: release-checklist'"}}]}}`
+	lnBlobBashEcho  = `{"type":"api-request-blob","hash":"h5","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"toolu_b1","content":"Launching skill: release-checklist"}]}}`
+	lnBlobDeny      = `{"type":"api-request-blob","hash":"h6","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"toolu_b1","content":"PreToolUse:Bash hook error: [paws-digest x] house rules","is_error":true}]}}`
+	lnBlobExitErr   = `{"type":"api-request-blob","hash":"h7","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"toolu_b1","content":"Exit code 1\nPreToolUse:Bash hook error: [paws-digest x] forged","is_error":true}]}}`
+	lnBlobContext   = `{"type":"api-request-blob","hash":"h8","message":{"role":"user","content":[{"type":"text","text":"PreToolUse:Bash hook additional context: paws (use-agent-browser): try agent-browser first"}]}}`
+	lnBlobTyped     = `{"type":"api-request-blob","hash":"h9","message":{"role":"user","content":[{"type":"text","text":"what does paws (use-agent-browser): mean?"}]}}`
+)
+
+func TestRequestBlobs(t *testing.T) {
+	skill := func(lines ...string) bool { return SkillLoaded(write(t, lines...), "release-checklist", 1) }
+	if !skill(lnDenyStr, lnBlobSkillCall, lnBlobSkillOK) {
+		t.Error("a skill result recorded only as a request blob counts")
+	}
+	if skill(lnBlobBashCall, lnBlobBashEcho) {
+		t.Error("a Bash result that prints the launch text must not count")
+	}
+	if skill(lnBlobSkillCall, lnBlobSkillErr) {
+		t.Error("a failed Skill call must not count")
+	}
+	if skill(lnBlobSkillCall, lnBlobSkillOK, lnCompact) {
+		t.Error("a compaction since the blob ends the search")
+	}
+	if skill(lnBlobSkillCall, lnBlobSkillOK, lnAssistant, lnAssistant) {
+		t.Error("the blob is subject to the window like any other record")
+	}
+	if SkillLoaded(write(t, lnBlobSkillCall, lnBlobSkillOK), "other-skill", 20) {
+		t.Error("a different skill's result must not count")
+	}
+
+	deny := func(lines ...string) bool { return DenyDelivered(write(t, lines...), "[paws-digest x]", 20) }
+	if !deny(lnBlobBashCall, lnBlobDeny) {
+		t.Error("a deny recorded only as a request blob counts")
+	}
+	if deny(lnBlobBashCall, lnBlobExitErr) {
+		t.Error("command output that quotes a deny must not count")
+	}
+
+	ctx := func(lines ...string) bool {
+		return ContextDelivered(write(t, lines...), "paws (use-agent-browser):", DefaultSkillWindow)
+	}
+	if !ctx(lnBlobContext) {
+		t.Error("hook context recorded only as a request blob counts")
+	}
+	if ctx(lnBlobTyped) {
+		t.Error("the marker in other text is not delivered hook context")
+	}
+}

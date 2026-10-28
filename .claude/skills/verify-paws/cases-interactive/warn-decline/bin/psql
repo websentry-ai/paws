@@ -1,0 +1,4 @@
+#!/bin/sh
+# Fake psql: logs its arguments, never connects anywhere.
+printf '%s\n' "$*" >> "$PSQL_LOG"
+printf ' ?column? \n----------\n        1\n(1 row)\n'

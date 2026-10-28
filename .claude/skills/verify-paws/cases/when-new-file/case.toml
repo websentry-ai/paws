@@ -1,0 +1,19 @@
+description = "when new-file gates a Write that creates a file, not an Edit of an existing one"
+prompt = "In app/existing.py, add a function `def mean(xs): return sum(xs) / len(xs)` below total, using the Edit tool. Then create a new file app/stats.py containing `def mode(xs): return max(set(xs), key=xs.count)` using the Write tool. Do nothing else."
+setup = ["git add -A", "git commit -q -m base"]
+allowed_tools = ["Read", "Edit", "Write", "Skill"]
+
+[expect]
+skills_invoked = ["module-banner"]
+audit = [
+  { rule = "new-module", verdict = "deny", tool = "Write" },
+  { rule = "new-module", verdict = "allow", satisfied_by = "skill-load" },
+]
+audit_absent = [{ rule = "new-module", tool = "Edit" }]
+audit_max = [{ rule = "new-module", verdict = "deny", max = 1 }]
+shell = [
+  "grep -q 'def mean' app/existing.py",
+  "! grep -q 'NB-58X' app/existing.py",
+  "head -1 app/stats.py | grep -qx '# NB-58X module'",
+  "grep -q 'def mode' app/stats.py",
+]

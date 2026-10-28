@@ -1,0 +1,14 @@
+description = "require-skill in the interactive TUI: the deny renders, the agent loads the skill, the retry passes"
+prompt = "Create an empty git commit in this repo with the message 'initial'. Use the Bash tool."
+allowed_tools = ["Bash(git:*)", "Skill"]
+
+[expect]
+screen_contains = ["requires the \"crew-roster\" skill", "Successfully loaded skill"]
+prompts = 0
+skills_invoked = ["crew-roster"]
+audit = [
+  { rule = "commit-crew-roster", verdict = "deny" },
+  { rule = "commit-crew-roster", verdict = "allow", satisfied_by = "skill-load" },
+]
+audit_max = [{ rule = "commit-crew-roster", verdict = "deny", max = 1 }]
+shell = ["git log -1 --format=%s | grep -q '^CRW-9D: '"]

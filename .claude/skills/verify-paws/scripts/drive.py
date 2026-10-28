@@ -49,7 +49,8 @@ SESSION_MARKERS = {
     "CLAUDE_CODE_BRIDGE_SESSION_ID", "CLAUDE_CODE_MESSAGING_SOCKET", "CLAUDE_CODE_MESSAGING_TOKEN",
 }
 
-NEVER_EDIT = ["Edit(~/.paws/**)", "Write(~/.paws/**)", "Edit(~/.claude/**)", "Write(~/.claude/**)"]
+# Edit rules cover every file-writing tool (Claude Code warns that Write(...) rules never match).
+NEVER_EDIT = ["Edit(~/.paws/**)", "Edit(~/.claude/**)"]
 
 EXPECT_KEYS = {
     "skills_invoked", "skills_not_invoked", "tool_result_contains", "tool_result_absent",
@@ -134,6 +135,17 @@ def parse_stream(path: Path) -> list[dict]:
             elif t == "text":
                 events.append({"kind": "text", "text": block.get("text", "")})
     return events
+
+
+def session_id(stream: str) -> str | None:
+    for line in stream.splitlines():
+        try:
+            msg = json.loads(line)
+        except json.JSONDecodeError:
+            continue
+        if msg.get("session_id"):
+            return msg["session_id"]
+    return None
 
 
 def read_audit(path: Path) -> list[dict]:
@@ -221,7 +233,8 @@ def run_case(case: Path, run_dir: Path, installer: "Installer", model: str | Non
             shutil.rmtree(scratch, ignore_errors=True)
 
 
-def drive_case(case: Path, spec: dict, evidence: Path, scratch: Path, installer: "Installer", model: str | None) -> int:
+def prepare(case: Path, spec: dict, evidence: Path, scratch: Path, installer: "Installer") -> tuple[Path, Path, dict[str, str]] | int:
+    """Build the scratch repo, PAWS_HOME and env, then paws init (and paws add). An int is a verdict."""
     project, paws_home = scratch / "proj", scratch / "paws-home"
     paws_home.mkdir()
 
@@ -288,8 +301,16 @@ def drive_case(case: Path, spec: dict, evidence: Path, scratch: Path, installer:
             print(f"  paws add failed: {r.stdout}{r.stderr}")
             return FAIL
     shutil.copy(project / ".claude" / "settings.json", evidence / "settings.json")
+    return project, paws_home, env
 
-    args = ["claude", "-p", spec["prompt"], "--model", model or spec.get("model", "sonnet"),
+
+def drive_case(case: Path, spec: dict, evidence: Path, scratch: Path, installer: "Installer", model: str | None) -> int:
+    prepared = prepare(case, spec, evidence, scratch, installer)
+    if isinstance(prepared, int):
+        return prepared
+    project, paws_home, env = prepared
+
+    args = ["claude", "--model", model or spec.get("model", "sonnet"),
             "--setting-sources", "project", "--output-format", "stream-json", "--verbose"]
     if spec.get("allowed_tools"):
         args += ["--allowedTools", *spec["allowed_tools"]]
@@ -302,17 +323,25 @@ def drive_case(case: Path, spec: dict, evidence: Path, scratch: Path, installer:
         (scratch / "mcp.json").write_text(cfg)
         args += ["--mcp-config", str(scratch / "mcp.json"), "--strict-mcp-config"]
     started = time.time()
-    try:
-        r = sh(args, project, env, timeout=spec.get("timeout", 300))
-        (evidence / "stream.jsonl").write_text(r.stdout)
-        (evidence / "stderr.txt").write_text(r.stderr)
-    except subprocess.TimeoutExpired as e:
-        def text(v: bytes | str | None) -> str:
-            return v.decode(errors="replace") if isinstance(v, bytes) else (v or "")
-        (evidence / "stream.jsonl").write_text(text(e.stdout))
-        (evidence / "stderr.txt").write_text(text(e.stderr))
-        print(f"  agent timed out after {spec.get('timeout', 300)}s")
-        return INDETERMINATE
+    # followups resume the same session, one prompt each (e.g. "/compact", then a second task).
+    stream, stderr, session = "", "", None
+    for i, prompt in enumerate([spec["prompt"], *spec.get("followups", [])]):
+        resume = ["--resume", session] if i else []
+        try:
+            r = sh([*args, "-p", prompt, *resume], project, env, timeout=spec.get("timeout", 300))
+            stream, stderr = stream + r.stdout, stderr + r.stderr
+        except subprocess.TimeoutExpired as e:
+            def text(v: bytes | str | None) -> str:
+                return v.decode(errors="replace") if isinstance(v, bytes) else (v or "")
+            (evidence / "stream.jsonl").write_text(stream + text(e.stdout))
+            (evidence / "stderr.txt").write_text(stderr + text(e.stderr))
+            print(f"  agent timed out after {spec.get('timeout', 300)}s")
+            return INDETERMINATE
+        session = session_id(r.stdout)
+        if not session:
+            break
+    (evidence / "stream.jsonl").write_text(stream)
+    (evidence / "stderr.txt").write_text(stderr)
     elapsed = round(time.time() - started, 1)
 
     events = parse_stream(evidence / "stream.jsonl")
@@ -321,7 +350,7 @@ def drive_case(case: Path, spec: dict, evidence: Path, scratch: Path, installer:
     (evidence / "events.json").write_text(json.dumps(events, indent=2))
     (evidence / "git-log.txt").write_text(sh("git log --format='%h %s' 2>/dev/null", project).stdout)
 
-    if not any(e["kind"] == "result" for e in events):
+    if sum(e["kind"] == "result" for e in events) < 1 + len(spec.get("followups", [])):
         print(f"  agent produced no result; see {evidence / 'stderr.txt'}")
         return INDETERMINATE
 

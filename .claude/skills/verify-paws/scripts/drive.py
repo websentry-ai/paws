@@ -25,6 +25,7 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import re
 import shutil
 import subprocess
 import sys
@@ -53,7 +54,7 @@ NEVER_EDIT = ["Edit(~/.paws/**)", "Write(~/.paws/**)", "Edit(~/.claude/**)", "Wr
 
 EXPECT_KEYS = {
     "skills_invoked", "skills_not_invoked", "tool_result_contains", "tool_result_absent",
-    "audit", "audit_absent", "audit_max", "final_contains", "shell",
+    "audit", "audit_absent", "audit_max", "final_contains", "final_matches", "shell",
 }
 
 
@@ -194,9 +195,12 @@ def grade(expect: dict, events: list[dict], audit: list[dict], project: Path, en
     final = next((e["text"] for e in reversed(events) if e["kind"] == "result"), "")
     for text in expect.get("final_contains", []):
         check(f"final reply contains: {text!r}", text in final)
+    for pattern in expect.get("final_matches", []):
+        check(f"final reply matches: {pattern!r}", re.search(pattern, final, re.I | re.S) is not None, final[:300])
 
     for cmd in expect.get("shell", []):
-        r = sh(cmd, project, env)  # same env as the agent: paws on PATH, the scratch PAWS_HOME
+        # Same env as the agent (paws on PATH, the scratch PAWS_HOME), plus the fixtures dir.
+        r = sh(cmd, project, {**(env or os.environ), "VERIFY_FIXTURES": str(SKILL_DIR / "fixtures")})
         check(f"shell: {cmd}", r.returncode == 0, (r.stdout + r.stderr).strip()[:300])
     return checks
 

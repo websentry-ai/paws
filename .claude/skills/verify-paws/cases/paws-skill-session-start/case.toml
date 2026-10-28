@@ -1,0 +1,14 @@
+description = "paws skill: a session-start require-skill fires on startup, clear and compact"
+prompt = "Load the karpathy-guidelines skill at the start of every session in this repo, including after /clear and after compaction. Use paws."
+allowed_tools = ["Skill", "Read", "Write", "Edit", "Glob", "Bash(paws:*)", "Bash(mkdir:*)", "Bash(ls:*)"]
+timeout = 300
+
+[expect]
+skills_invoked = ["paws"]
+tool_result_contains = ["decision:"]
+shell = [
+  "paws explain --event session-start startup | grep -q 'karpathy-guidelines'",
+  "paws explain --event session-start clear | grep -q 'karpathy-guidelines'",
+  "paws explain --event session-start compact | grep -q 'karpathy-guidelines'",
+  "paws explain 'git status' | grep -q 'allow (no matching gate)'",
+]

@@ -1,0 +1,14 @@
+description = "paws skill: Write|Edit + file_glob gates changes under migrations/, not reads"
+prompt = "Before the agent writes or edits anything under migrations/, it must load the db-migrations skill. Reading those files is fine. Repo rule, via paws."
+allowed_tools = ["Skill", "Read", "Write", "Edit", "Glob", "Bash(paws:*)", "Bash(mkdir:*)", "Bash(ls:*)"]
+timeout = 300
+
+[expect]
+skills_invoked = ["paws"]
+tool_result_contains = ["decision:"]
+shell = [
+  "paws explain --tool Edit migrations/001_init.sql | grep -q 'DENY.*db-migrations'",
+  "paws explain --tool Write migrations/002_users.sql | grep -q '^  DENY'",
+  "paws explain --tool Read migrations/001_init.sql | grep -q 'allow (no matching gate)'",
+  "paws explain --tool Edit src/app.py | grep -q 'allow (no matching gate)'",
+]

@@ -1,0 +1,16 @@
+description = "paws skill: extending a rule edits the existing file instead of adding a duplicate"
+prompt = "Our humanizer paws rule should also cover gh pr edit and gh issue create."
+allowed_tools = ["Skill", "Read", "Write", "Edit", "Glob", "Bash(paws:*)", "Bash(mkdir:*)", "Bash(ls:*)"]
+timeout = 300
+
+[expect]
+skills_invoked = ["paws"]
+tool_result_contains = ["decision:"]
+shell = [
+  "[ $(grep -rl 'skill: humanizer' .paws | wc -l) -eq 1 ]",
+  "paws explain 'gh pr create --fill' | grep -q 'DENY.*humanizer'",
+  "paws explain 'gh pr edit 12 --body x' | grep -q '^  DENY'",
+  "paws explain 'gh issue create -t x' | grep -q '^  DENY'",
+  "paws explain 'gh pr list' | grep -q 'allow (no matching gate)'",
+  "paws explain 'gh issue list' | grep -q 'allow (no matching gate)'",
+]

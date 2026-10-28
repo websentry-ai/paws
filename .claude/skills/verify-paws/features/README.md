@@ -15,4 +15,4 @@ One file per user-facing feature. Each names the cases that prove it.
 | on_miss digest | [digest.md](digest.md) | `digest-tag`, `aws-s3-digest`, `secret-scan-commit` |
 | packs and skill install | [packs.md](packs.md) | `launch-journey`, `practice-testing-pack` |
 | local telemetry | [telemetry.md](telemetry.md) | `require-skill-commit` |
-| paws skill | [paws-skill.md](paws-skill.md) | `paws-skill-writes-rule`, `paws-skill-*` (8 more) |
+| paws skill | [paws-skill.md](paws-skill.md) | `paws-skill-writes-rule`, `paws-skill-*` (26 more) |

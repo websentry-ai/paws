@@ -1,0 +1,18 @@
+description = "paws skill: 'block --force but not --force-with-lease' is written without lookahead"
+prompt = "Block git push --force, but --force-with-lease is fine. Repo rule, via paws."
+allowed_tools = ["Skill", "Read", "Write", "Edit", "Glob", "Bash(paws:*)", "Bash(mkdir:*)", "Bash(ls:*)"]
+timeout = 300
+
+[expect]
+skills_invoked = ["paws"]
+tool_result_contains = ["decision:"]
+shell = [
+  "paws explain 'git push --force' | grep -q '^  DENY'",
+  "paws explain 'git push --force origin main' | grep -q '^  DENY'",
+  "paws explain 'git push -f origin main' | grep -q '^  DENY'",
+  "paws explain 'cd app && git push --force' | grep -q '^  DENY'",
+  "paws explain 'git push --force-with-lease' | grep -q 'allow (no matching gate)'",
+  "paws explain 'git push --force-with-lease origin main' | grep -q 'allow (no matching gate)'",
+  "paws explain 'git push origin main' | grep -q 'allow (no matching gate)'",
+  "! paws explain 'git status' | grep -q 'skipped'",
+]

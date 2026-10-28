@@ -20,7 +20,8 @@ reads every rule on every tool call, so a saved rule is live.
    repos": the user dir, the last path on the `.paws :` line of
    `paws explain` (`$PAWS_HOME` when set, else `~/.paws`).
 4. **Check it** with `paws explain` on one command that must match and one
-   near-miss. Done when the first shows `→` on the rule and the expected
+   near-miss; for a Bash rule, make the near-miss that command inside
+   `echo '...'`. Done when the first shows `→` on the rule and the expected
    decision, the second shows neither, and no `! skipped` line appears.
 5. **Report** the path and what the rule does.
 

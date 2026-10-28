@@ -49,8 +49,11 @@ jobs:
         with:
           distribution: goreleaser
           version: "~> v2"
-          args: check
+          install-only: true
+      - run: goreleaser check
       - run: node --check npm/install.js && node --check npm/bin/paws.js
+      - name: Build all platforms and verify npm installation
+        run: python3 .github/release/smoke.py
 
   release:
     if: github.event_name == 'workflow_dispatch'

@@ -70,7 +70,20 @@ for current requirements.
 
 ## Verify the install
 
-Before publishing, run the npm journey locally:
+CI builds all six archives and tests npm installation on Linux without an
+agent login. Run the same smoke check locally with GoReleaser, Go, Node,
+and Python 3.11 or newer:
+
+```bash
+python3 .github/release/smoke.py
+```
+
+The check verifies archive contents and checksums, installs the package with
+a fresh npm cache, runs `init`, and confirms the hook binary survives cache
+removal. It also rejects corrupted checksums and verifies a retry works
+after the checksums are restored. Nothing is published.
+
+With a working Claude Code login and available usage, run the live journey:
 
 ```bash
 python3 .claude/skills/verify-paws/scripts/drive.py run --npm launch-journey

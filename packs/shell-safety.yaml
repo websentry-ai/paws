@@ -1,8 +1,6 @@
 name: shell-safety
-description: "Org guardrails for destructive shell commands: list before recursive deletes, read back device targets, and state the blast radius before service, cron, launchd and kill changes."
+description: "Org guardrails for destructive shell commands: list before recursive deletes, read back device targets before dd, and state the blast radius of recursive chmod and chown."
 tags: [org, shell, filesystem]
 bindings:
   - filesystem-operations/coreutils.md
   - filesystem-operations/coreutils-mcp.md
-  - process-system-admin/systemctl.md
-  - process-system-admin/launchctl.md

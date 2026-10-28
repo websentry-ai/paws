@@ -1,6 +1,0 @@
-name: cloud-storage
-description: "Org guardrails for bulk transfers with gsutil, gcloud storage and rclone: state direction, dry-run first, org-owned or sanctioned destinations only."
-tags: [org, cloud, storage]
-bindings:
-  - file-transfer/gsutil.md
-  - file-transfer/rclone.md

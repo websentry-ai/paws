@@ -1,6 +1,0 @@
-name: docs
-description: "Org guardrails for Notion and Google Drive writes: right teamspace or folder, org templates, owner set, no broad sharing of sensitive content."
-tags: [org, docs]
-bindings:
-  - document-writers/notion-mcp.md
-  - document-writers/google-drive-mcp.md

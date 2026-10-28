@@ -1,8 +1,0 @@
-# Filled into SKILL.md at install: each KEY placeholder gets its value. Angle-bracket values are
-# org settings with no safe default; SKILL.md "Defaults" says what applies until set.
-placeholders:
-  DD_SITE: datadoghq.com
-  INCIDENT_TOOL: <incident-tool>
-  MAX_MUTE_DURATION: 24h
-  MONITOR_NAMING: '[<team>] <service> — <condition>'
-  POSTMORTEM_POLICY: SEV-2 and above require a postmortem link before close

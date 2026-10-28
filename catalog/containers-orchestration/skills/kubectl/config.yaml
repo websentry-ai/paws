@@ -1,7 +1,0 @@
-# Filled into SKILL.md at install: each KEY placeholder gets its value. Angle-bracket values are
-# org settings with no safe default; SKILL.md "Defaults" says what applies until set.
-placeholders:
-  MANIFEST_REPO_POLICY: 'the org''s manifest policy (default: manifests live in version control; imperative prod edits need a follow-up sync note)'
-  PROD_CONTEXTS: contexts whose name contains `prod`
-  SANCTIONED_REGISTRY: <sanctioned-registry>
-  SHARED_CLUSTER_CONTEXTS: any non-local context (anything but kind-*, minikube, docker-desktop)

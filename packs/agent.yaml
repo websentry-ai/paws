@@ -1,6 +1,0 @@
-name: agent
-description: "Org guardrails for the agent's own environment and browser: MCP servers, Claude Code config and plugins, and browser form fills and clicks."
-tags: [org, agent]
-bindings:
-  - agent-environment/claude-code.md
-  - browser-automation/playwright-mcp.md

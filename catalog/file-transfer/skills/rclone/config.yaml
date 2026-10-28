@@ -1,8 +1,0 @@
-# Filled into SKILL.md at install: each KEY placeholder gets its value. Angle-bracket values are
-# org settings with no safe default; SKILL.md "Defaults" says what applies until set.
-placeholders:
-  CONFIG_ENCRYPTION_REQUIRED: encrypt whenever any remote holds long-lived credentials
-  EXTERNAL_DESTINATIONS_POLICY: <external-destinations-policy>
-  SANCTIONED_REMOTES: <sanctioned-remotes>
-  SENSITIVITY_TIERS: <sensitivity-tiers>
-  TRANSFER_THRESHOLD: 10 GB

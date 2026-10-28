@@ -1,0 +1,15 @@
+description = "paws skill: a user-dir warn rule with when: repo-marker:terraform"
+prompt = "In repos that have a terraform/ directory, ask me before the agent runs terraform apply or terraform destroy. Put it in my user-level paws rules so it covers all my repos."
+allowed_tools = ["Skill", "Read", "Write", "Edit", "Glob", "Bash(paws:*)", "Bash(mkdir:*)", "Bash(ls:*)"]
+timeout = 300
+
+[expect]
+skills_invoked = ["paws"]
+tool_result_contains = ["decision:"]
+shell = [
+  "! ls .paws 2>/dev/null | grep -q .",
+  "paws explain 'terraform apply' | grep -q '^  ASK'",
+  "paws explain 'cd envs/prod && terraform destroy -auto-approve' | grep -q '^  ASK'",
+  "paws explain 'terraform plan' | grep -q 'allow (no matching gate)'",
+  "d=$(mktemp -d) && cd $d && git init -q && paws explain 'terraform apply' | grep -q 'allow (no matching gate)'",
+]

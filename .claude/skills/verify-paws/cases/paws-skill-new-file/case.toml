@@ -1,0 +1,14 @@
+description = "paws skill: when: new-file gates creating a Python file, not editing one"
+prompt = "When the agent creates a brand-new Python file (not when it edits one that already exists), it must load the karpathy-guidelines skill first. Repo rule, via paws."
+allowed_tools = ["Skill", "Read", "Write", "Edit", "Glob", "Bash(paws:*)", "Bash(mkdir:*)", "Bash(ls:*)"]
+timeout = 300
+
+[expect]
+skills_invoked = ["paws"]
+tool_result_contains = ["decision:"]
+shell = [
+  "paws explain --tool Write src/new_module.py | grep -q 'DENY.*karpathy-guidelines'",
+  "paws explain --tool Write src/existing.py | grep -q 'allow (no matching gate)'",
+  "paws explain --tool Edit src/existing.py | grep -q 'allow (no matching gate)'",
+  "paws explain --tool Write notes.md | grep -q 'allow (no matching gate)'",
+]

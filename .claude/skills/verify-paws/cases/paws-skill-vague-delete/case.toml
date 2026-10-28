@@ -1,0 +1,14 @@
+description = "paws skill: a vague 'stop it deleting stuff' gets a narrow rule or a question, never a rule that gates ordinary commands"
+prompt = "Stop the agent from deleting stuff in this repo. Use paws."
+allowed_tools = ["Skill", "Read", "Write", "Edit", "Glob", "Bash(paws:*)", "Bash(mkdir:*)", "Bash(ls:*)"]
+timeout = 300
+
+[expect]
+skills_invoked = ["paws"]
+shell = [
+  "! find .paws -name '*.md' 2>/dev/null | grep -q . || (paws explain 'rm -rf build' | grep -qE '^  (DENY|ASK)')",
+  "! find .paws -name '*.md' 2>/dev/null | grep -q . || (paws explain ls -la | grep -q 'allow (no matching gate)')",
+  "! find .paws -name '*.md' 2>/dev/null | grep -q . || (paws explain 'git status' | grep -q 'allow (no matching gate)')",
+  "! find .paws -name '*.md' 2>/dev/null | grep -q . || (paws explain 'cat remove-me.txt' | grep -q 'allow (no matching gate)')",
+  "! find .paws -name '*.md' 2>/dev/null | grep -q . || (paws explain 'echo delete' | grep -q 'allow (no matching gate)')",
+]

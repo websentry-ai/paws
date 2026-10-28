@@ -1,0 +1,16 @@
+description = "paws skill: no-edit-matching lets test files through and drops the gate once a test was edited"
+prompt = "Before the agent edits Go source files, it must load the test-driven-development skill, unless it has already edited a _test.go file in this session. Writing the test itself must never be blocked. Repo rule, via paws."
+allowed_tools = ["Skill", "Read", "Write", "Edit", "Glob", "Bash(paws:*)", "Bash(mkdir:*)", "Bash(ls:*)"]
+timeout = 300
+
+[expect]
+skills_invoked = ["paws"]
+tool_result_contains = ["decision:"]
+shell = [
+  "paws explain --tool Edit pkg/calc.go | grep -q 'DENY.*test-driven-development'",
+  "paws explain --tool Edit pkg/calc_test.go | grep -q 'allow (no matching gate)'",
+  "paws explain --tool Write pkg/new_test.go | grep -q 'allow (no matching gate)'",
+  "paws explain --tool Edit README.md | grep -q 'allow (no matching gate)'",
+  "python3 \"$VERIFY_FIXTURES/explain_tx.py\" Edit pkg/calc.go --edited pkg/calc_test.go | grep -q 'allow (no matching gate)'",
+  "python3 \"$VERIFY_FIXTURES/explain_tx.py\" Edit pkg/calc.go --edited README.md | grep -q '^  DENY'",
+]

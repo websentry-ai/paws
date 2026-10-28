@@ -1,0 +1,18 @@
+description = "paws skill: npm publish is gated chained, env-prefixed and with sudo, not inside quotes or other scripts"
+prompt = "Require the release-checklist skill before the agent runs npm publish, however it's typed. Repo rule, via paws."
+allowed_tools = ["Skill", "Read", "Write", "Edit", "Glob", "Bash(paws:*)", "Bash(mkdir:*)", "Bash(ls:*)"]
+timeout = 300
+
+[expect]
+skills_invoked = ["paws"]
+tool_result_contains = ["decision:"]
+shell = [
+  "paws explain 'npm publish' | grep -q 'DENY.*release-checklist'",
+  "paws explain 'cd pkg && npm publish --access public' | grep -q '^  DENY'",
+  "paws explain 'NODE_ENV=production npm publish' | grep -q '^  DENY'",
+  "paws explain 'sudo npm publish' | grep -q '^  DENY'",
+  "paws explain 'echo \"npm publish\"' | grep -q 'allow (no matching gate)'",
+  "paws explain 'git commit -m \"prep npm publish\"' | grep -q 'allow (no matching gate)'",
+  "paws explain 'npm run publish-docs' | grep -q 'allow (no matching gate)'",
+  "paws explain 'npm pack' | grep -q 'allow (no matching gate)'",
+]

@@ -1,0 +1,15 @@
+description = "paws skill: when: agent-count>3 gates the fourth Agent call after a prompt"
+prompt = "If the agent launches more than 3 subagents (the Agent tool) after a single prompt of mine, it must load the dispatching-parallel-agents skill before launching another. Repo rule, via paws."
+allowed_tools = ["Skill", "Read", "Write", "Edit", "Glob", "Bash(paws:*)", "Bash(mkdir:*)", "Bash(ls:*)"]
+timeout = 300
+
+[expect]
+skills_invoked = ["paws"]
+tool_result_contains = ["decision:"]
+shell = [
+  "python3 \"$VERIFY_FIXTURES/explain_tx.py\" Agent 'research x' --agents 4 | grep -q 'DENY.*dispatching-parallel-agents'",
+  "python3 \"$VERIFY_FIXTURES/explain_tx.py\" Agent 'research x' --agents 3 | grep -q 'allow (no matching gate)'",
+  "python3 \"$VERIFY_FIXTURES/explain_tx.py\" Agent 'research x' --agents-before 3 --agents 2 | grep -q 'allow (no matching gate)'",
+  "python3 \"$VERIFY_FIXTURES/explain_tx.py\" Bash 'ls' --agents 5 | grep -q 'allow (no matching gate)'",
+  "grep -rqE 'agent-count ?> ?3' .paws",
+]

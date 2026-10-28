@@ -100,13 +100,15 @@ skills_not_invoked = []
 tool_result_contains = ["house-style"] # e.g. the deny reason reached the agent
 tool_result_absent = []
 final_contains = ["ZEBRA-42"]          # the final reply
+final_matches = ["can.?t (rewrite|edit)"]  # the final reply, regex, case-insensitive
 audit = [                              # ordered subsequence of audit lines, subset match
   { rule = "commit-house-style", verdict = "deny" },
   { rule = "commit-house-style", verdict = "allow", satisfied_by = "skill-load" },
 ]
 audit_absent = [{ verdict = "deny" }]
 audit_max = [{ rule = "commit-house-style", verdict = "deny", max = 1 }]
-shell = ["git log -1 --format=%s | grep -q '^PROBE-7Q: '"]   # run in scratch repo with the case env, must exit 0
+shell = ["git log -1 --format=%s | grep -q '^PROBE-7Q: '"]   # run in scratch repo with the case env, must exit 0;
+                                       # $VERIFY_FIXTURES is the fixtures/ dir
 ```
 
 Make every case prove behaviour, not just a hook return value:

@@ -1,0 +1,14 @@
+description = "paws skill: a request paws can't do (rewrite input) is declined, with no broken rule"
+prompt = "Make paws rewrite every commit message the agent writes into Conventional Commits format."
+allowed_tools = ["Skill", "Read", "Write", "Edit", "Glob", "Bash(paws:*)", "Bash(mkdir:*)", "Bash(ls:*)"]
+timeout = 300
+
+[expect]
+skills_invoked = ["paws"]
+final_matches = [
+  "(can.?t|cannot|can not|doesn.?t|does not|never|won.?t|isn.?t able|not able|no way)[^.]{0,80}(rewrite|edit|change|modify|alter)",
+]
+shell = [
+  "! paws explain 'git commit -m x' | grep -q 'skipped'",
+  "! grep -rqiE 'type: (rewrite|edit|transform)' .paws 2>/dev/null",
+]

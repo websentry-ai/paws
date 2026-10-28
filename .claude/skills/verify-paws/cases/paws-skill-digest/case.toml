@@ -1,0 +1,15 @@
+description = "paws skill: 'put our S3 rules in the deny' becomes require-skill with on_miss: digest"
+prompt = "We don't install a skill for our S3 rules. Instead, when the agent runs aws s3api create-bucket or aws s3 mb, deny it once and put the rules from docs/s3-rules.md right in the deny message so it can redo the call. Repo rule, via paws."
+allowed_tools = ["Skill", "Read", "Write", "Edit", "Glob", "Bash(paws:*)", "Bash(mkdir:*)", "Bash(ls:*)"]
+timeout = 300
+
+[expect]
+skills_invoked = ["paws"]
+tool_result_contains = ["decision:"]
+shell = [
+  "paws explain 'aws s3api create-bucket --bucket acme-logs' | grep -q 'DENY \u2014 paws digest' && paws explain 'aws s3api create-bucket --bucket acme-logs' | grep -q 'S3-TAG-7731'",
+  "paws explain 'aws s3 mb s3://acme-logs' | grep -q '^  DENY'",
+  "paws explain 'aws s3 ls' | grep -q 'allow (no matching gate)'",
+  "paws explain 'echo aws s3 mb' | grep -q 'allow (no matching gate)'",
+  "grep -rq 'on_miss: digest' .paws",
+]

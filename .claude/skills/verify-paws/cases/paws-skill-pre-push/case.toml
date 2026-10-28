@@ -1,0 +1,16 @@
+description = "paws skill: pre-push require-skill matches chained and -C pushes, not echoed text"
+prompt = "Before the agent pushes anything with git, it must load the verification-before-completion skill. Set that up in this repo with paws."
+allowed_tools = ["Skill", "Read", "Write", "Edit", "Glob", "Bash(paws:*)", "Bash(mkdir:*)", "Bash(ls:*)"]
+timeout = 300
+
+[expect]
+skills_invoked = ["paws"]
+tool_result_contains = ["decision:"]
+shell = [
+  "paws explain 'git push origin main' | grep -q 'DENY.*verification-before-completion'",
+  "paws explain 'cd app && git push' | grep -q '^  DENY'",
+  "paws explain 'git -C sub push --tags' | grep -q '^  DENY'",
+  "paws explain 'git status' | grep -q 'allow (no matching gate)'",
+  "paws explain 'echo \"git push\"' | grep -q 'allow (no matching gate)'",
+  "paws explain 'git commit -m \"push fix\"' | grep -q 'allow (no matching gate)'",
+]

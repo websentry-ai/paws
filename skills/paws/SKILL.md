@@ -6,8 +6,8 @@ description: Write, change or debug paws rules (.paws/*.md) that gate Claude Cod
 # paws rules
 
 paws is a hook that reads `.paws/**/*.md` (this repo) and the user dir
-(`$PAWS_HOME` when set, else `~/.paws/`) on every tool call. Each file is one rule. A rule takes effect on the
-next tool call; nothing needs restarting.
+(`$PAWS_HOME` when set, else `~/.paws/`) on every tool call. Each file is one
+rule. A rule takes effect on the next tool call; nothing needs restarting.
 
 ## Turn the request into a rule
 

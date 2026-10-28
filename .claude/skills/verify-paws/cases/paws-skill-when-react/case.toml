@@ -10,5 +10,5 @@ shell = [
   "paws explain --tool Edit src/App.tsx | grep -q 'DENY.*react-patterns'",
   "paws explain --tool Write src/Nav.jsx | grep -q 'DENY.*react-patterns'",
   "paws explain --tool Read src/App.tsx | grep -q 'allow (no matching gate)'",
-  "cp package.json ../pkg.bak && echo '{\"dependencies\":{}}' > package.json && paws explain --tool Edit src/App.tsx > ../out.txt; s=0; cp ../pkg.bak package.json; [ $s = 0 ] && grep -q 'allow (no matching gate)' ../out.txt",
+  "cp package.json ../pkg.bak && echo '{\"dependencies\":{}}' > package.json && paws explain --tool Edit src/App.tsx > ../out.txt; cp ../pkg.bak package.json && grep -q 'allow (no matching gate)' ../out.txt",
 ]

@@ -4,6 +4,6 @@ allowed_tools = ["Bash(git:*)"]
 setup = ["git commit -q --allow-empty -m base"]
 
 [expect]
-tool_result_contains = ["Tags are cut by the release pipeline"]
+tool_result_contains = ["Blocked by paws rule", "no-manual-tags", "Tags are cut by the release pipeline"]
 audit = [{ rule = "no-manual-tags", verdict = "deny", action = "block" }]
 shell = ["test -z \"$(git tag)\""]

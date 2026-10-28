@@ -124,7 +124,11 @@ func evaluate(r *rule.Rule, ev Event) outcome {
 	a := r.Action
 	switch a.Type {
 	case "block":
-		return outcome{verdict: Deny, reason: msgOr(a.DenyMessage, fmt.Sprintf("Blocked by paws rule %q.", r.Name)), fired: true}
+		reason := fmt.Sprintf("Blocked by paws rule %q.", r.Name)
+		if a.DenyMessage != "" {
+			reason = fmt.Sprintf("Blocked by paws rule %q: %s", r.Name, a.DenyMessage)
+		}
+		return outcome{verdict: Deny, reason: reason, fired: true}
 	case "require-skill":
 		if SkillLoaded(ev.Transcript, a.Skill, DefaultSkillWindow) {
 			return outcome{verdict: Allow, satisfiedBy: skillLoadSatisfied, fired: true}

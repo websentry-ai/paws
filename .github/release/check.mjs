@@ -28,6 +28,8 @@ export async function publishedVersions(name, request = fetch) {
   if (response.status === 404) return [];
   if (!response.ok) throw new Error(`npm registry returned HTTP ${response.status}.`);
   const metadata = await response.json();
+  // A fully unpublished package answers 200 with only name and modified; nothing is live to compare against.
+  if (metadata.versions === undefined && metadata.name === name && metadata.modified) return [];
   if (!metadata.versions || typeof metadata.versions !== "object" || Array.isArray(metadata.versions)) {
     throw new Error("npm registry response has no versions map.");
   }

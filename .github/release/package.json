@@ -1,0 +1,11 @@
+{
+  "name": "paws-release-check",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "test": "node --test check.test.mjs"
+  },
+  "dependencies": {
+    "semver": "7.8.5"
+  }
+}

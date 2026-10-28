@@ -1,15 +1,44 @@
-name: ci
+name: CI and release
 
 on:
   pull_request:
   push:
     branches: [main]
+  workflow_dispatch:
+    inputs:
+      publish_npm:
+        description: Publish to npm after releasing the binaries
+        type: boolean
+        default: true
+
+permissions:
+  contents: read
 
 jobs:
   test:
     runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.version.outputs.version }}
+      npm-tag: ${{ steps.version.outputs.npm-tag }}
     steps:
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+      - run: npm ci --prefix .github/release --ignore-scripts --no-audit --no-fund
+      - name: Require a newer version on main
+        if: github.event_name == 'workflow_dispatch'
+        id: version
+        run: |
+          if [ "$GITHUB_REF" != refs/heads/main ]; then
+            echo "::error::Run releases from main."
+            exit 1
+          fi
+          node .github/release/check.mjs
+
+      - run: npm test --prefix .github/release
       - uses: actions/setup-go@v5
         with:
           go-version-file: go.mod
@@ -22,3 +51,79 @@ jobs:
           version: "~> v2"
           args: check
       - run: node --check npm/install.js && node --check npm/bin/paws.js
+
+  release:
+    if: github.event_name == 'workflow_dispatch'
+    needs: test
+    runs-on: ubuntu-latest
+    concurrency:
+      group: paws-release
+      cancel-in-progress: false
+    permissions:
+      contents: write
+      id-token: write
+    env:
+      GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      RELEASE_VERSION: ${{ needs.test.outputs.version }}
+      NPM_TAG: ${{ needs.test.outputs.npm-tag }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          registry-url: https://registry.npmjs.org
+      - name: Check release prerequisites
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+        run: |
+          if [ -n "$NODE_AUTH_TOKEN" ]; then
+            npm whoami --registry=https://registry.npmjs.org/
+          fi
+          if [ "$(gh api "repos/$GITHUB_REPOSITORY" --jq '.private')" != false ]; then
+            echo "::error::The npm installer needs public GitHub release downloads. Make the repository public before releasing."
+            exit 1
+          fi
+      - name: Recheck the version before publishing
+        run: |
+          npm ci --prefix .github/release --ignore-scripts --no-audit --no-fund
+          node .github/release/check.mjs
+      - name: Tag the tested commit
+        run: |
+          tag="v$RELEASE_VERSION"
+          if git rev-parse --verify "refs/tags/$tag" >/dev/null 2>&1; then
+            if [ "$(git rev-parse "$tag^{commit}")" != "$(git rev-parse HEAD)" ]; then
+              echo "::error::Tag $tag already points at another commit. Bump npm/package.json."
+              exit 1
+            fi
+          else
+            git tag "$tag"
+            git push origin "refs/tags/$tag"
+          fi
+      - name: Check for binaries from an earlier attempt
+        id: binaries
+        run: |
+          draft=$(gh release view "v$RELEASE_VERSION" --json isDraft --jq '.isDraft' 2>/dev/null || true)
+          if [ "$draft" = false ]; then
+            echo "exists=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "exists=false" >> "$GITHUB_OUTPUT"
+          fi
+      - uses: goreleaser/goreleaser-action@v6
+        if: steps.binaries.outputs.exists != 'true'
+        with:
+          distribution: goreleaser
+          version: "~> v2"
+          args: release --clean
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      - name: Publish npm package
+        if: inputs.publish_npm
+        working-directory: npm
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+        run: npm publish --access public --tag "$NPM_TAG"

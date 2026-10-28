@@ -203,10 +203,11 @@ python3 .claude/skills/verify-paws/scripts/drive.py run --npm launch-journey
 case against a freshly built paws and grades the transcript, the audit log
 and repo side effects.
 
-Releases: push a `v*` tag. GoReleaser builds darwin/linux/windows for
-amd64/arm64 with `checksums.txt`; the `npm` job publishes `unbound-paws` at
-the tag's version once an `NPM_TOKEN` secret exists. `npx` installs download
-from GitHub releases, so the repo must be public for them to work.
+Releases run manually through the **CI and release** workflow on `main`.
+The workflow requires a newer version in `npm/package.json`, runs checks,
+then releases binaries and publishes to npm. Pushes and pull requests run
+checks only. See [Release paws](docs/releases.md) for the first release,
+npm trusted publishing setup, and installation checks.
 
 ```
 cmd/paws          CLI entrypoint

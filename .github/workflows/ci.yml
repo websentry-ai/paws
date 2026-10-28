@@ -64,7 +64,6 @@ jobs:
       cancel-in-progress: false
     permissions:
       contents: write
-      id-token: write
     env:
       GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       RELEASE_VERSION: ${{ needs.test.outputs.version }}
@@ -83,8 +82,13 @@ jobs:
       - name: Check release prerequisites
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+          PUBLISH_NPM: ${{ inputs.publish_npm }}
         run: |
-          if [ -n "$NODE_AUTH_TOKEN" ]; then
+          if [ "$PUBLISH_NPM" = true ]; then
+            if [ -z "$NODE_AUTH_TOKEN" ]; then
+              echo "::error::Add the NPM_TOKEN repository secret before publishing to npm."
+              exit 1
+            fi
             npm whoami --registry=https://registry.npmjs.org/
           fi
           if [ "$(gh api "repos/$GITHUB_REPOSITORY" --jq '.private')" != false ]; then

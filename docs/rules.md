@@ -91,7 +91,7 @@ The repo root is the nearest directory with `.git` above the agent's cwd.
 |---|---|---|
 | `require-skill` | deny until `skill` was invoked in the last 20 agent turns, then allow; on `session-start`, add context naming the skill | all |
 | `advise` | allow, and attach `message` as context once per 20-turn window | tool events, `session-start` |
-| `block` | hard deny with `deny_message` | tool events, `user-prompt` |
+| `block` | hard deny naming the rule, plus `deny_message` | tool events, `user-prompt` |
 | `warn` | ask the human to approve | tool events |
 | `audit` | allow silently; log it | all |
 | `prompt-inject` | add `message` to the prompt | `user-prompt` |

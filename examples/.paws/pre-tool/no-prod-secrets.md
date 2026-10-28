@@ -6,7 +6,7 @@ matcher:
   command_regex: (\.env(\.|$)|secrets/|prod\.env)
 action:
   type: block
-  deny_message: paws blocks reading or writing production secret files via file tools or the shell.
+  deny_message: reading or writing production secret files is not permitted.
 ---
 # no-prod-secrets
 Blocks reading/writing files that look like prod secrets.

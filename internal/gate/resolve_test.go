@@ -290,9 +290,9 @@ func TestRetryDeniesJoinReasons(t *testing.T) {
 	if d.Verdict != DenyRetry || !strings.Contains(d.Reason, `"one"`) || !strings.Contains(d.Reason, `"two"`) {
 		t.Errorf("both skills should be named in one deny, got %q", d.Reason)
 	}
-	// A hard block still wins with its own reason only.
+	// A hard block still wins with its own reason only, which names the rule.
 	rules = append(rules, mustRule(t, "---\nname: c\nevent: pre-tool\naction:\n  type: block\n  deny_message: nope\n---\n"))
-	if d := Decide(Event{Kind: rule.KindTool, Tool: "Bash", Target: "x"}, rules); d.Reason != "nope" {
+	if d := Decide(Event{Kind: rule.KindTool, Tool: "Bash", Target: "x"}, rules); d.Reason != `Blocked by paws rule "c": nope` {
 		t.Errorf("block should win alone, got %q", d.Reason)
 	}
 }

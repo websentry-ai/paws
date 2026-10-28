@@ -1,0 +1,14 @@
+description = "paws skill: 'only in React repos' adds when: dependency:react to a file_glob require-skill rule"
+prompt = "Only in repos that use React: load the react-patterns skill before the agent writes or edits .tsx or .jsx files. Put the rule in this repo with paws."
+allowed_tools = ["Skill", "Read", "Write", "Edit", "Glob", "Bash(paws:*)", "Bash(mkdir:*)", "Bash(ls:*)"]
+timeout = 300
+
+[expect]
+skills_invoked = ["paws"]
+tool_result_contains = ["decision:"]
+shell = [
+  "paws explain --tool Edit src/App.tsx | grep -q 'DENY.*react-patterns'",
+  "paws explain --tool Write src/Nav.jsx | grep -q 'DENY.*react-patterns'",
+  "paws explain --tool Read src/App.tsx | grep -q 'allow (no matching gate)'",
+  "cp package.json ../pkg.bak && echo '{\"dependencies\":{}}' > package.json && paws explain --tool Edit src/App.tsx > ../out.txt; cp ../pkg.bak package.json && grep -q 'allow (no matching gate)' ../out.txt",
+]

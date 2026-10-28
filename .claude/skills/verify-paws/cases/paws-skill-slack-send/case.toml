@@ -1,0 +1,15 @@
+description = "paws skill: 'load slack-tone before Slack MCP sends' gates Slack sends only, not reads or other servers"
+prompt = "Load the slack-tone skill before the agent sends anything through the Slack MCP server (its tools are named mcp__slack__...). Reading Slack is fine, and other servers like Gmail are out of scope. Set that up with paws."
+allowed_tools = ["Skill", "Read", "Write", "Edit", "Glob", "Bash(paws:*)", "Bash(mkdir:*)", "Bash(ls:*)"]
+timeout = 300
+
+[expect]
+skills_invoked = ["paws"]
+tool_result_contains = ["decision:"]
+shell = [
+  "paws explain --tool mcp__slack__send_message '{\"channel_id\":\"C1\",\"text\":\"hi\"}' | grep -q 'DENY.*slack-tone'",
+  "paws explain --tool mcp__slack__reply_to_thread '{\"channel_id\":\"C1\",\"text\":\"hi\"}' | grep -q 'DENY.*slack-tone'",
+  "paws explain --tool mcp__slack__read_channel '{\"channel_id\":\"C1\"}' | grep -q 'allow (no matching gate)'",
+  "paws explain --tool mcp__slack__search_messages '{\"query\":\"x\"}' | grep -q 'allow (no matching gate)'",
+  "paws explain --tool mcp__gmail__send_email '{\"to\":\"a@b.c\"}' | grep -q 'allow (no matching gate)'",
+]

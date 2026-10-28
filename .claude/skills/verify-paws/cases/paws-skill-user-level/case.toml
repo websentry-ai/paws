@@ -1,0 +1,15 @@
+description = "paws skill: 'for all my repos' puts the rule in the user dir (PAWS_HOME), not the repo"
+prompt = "For all my repos, not just this one, block git push --force. Set that up with paws."
+allowed_tools = ["Skill", "Read", "Write", "Edit", "Glob", "Bash(paws:*)", "Bash(mkdir:*)", "Bash(ls:*)"]
+timeout = 300
+
+[expect]
+skills_invoked = ["paws"]
+tool_result_contains = ["decision:"]
+shell = [
+  "! ls .paws 2>/dev/null | grep -q .",
+  "find \"$PAWS_HOME\" -name '*.md' -not -path '*/packs/*' | grep -q .",
+  "d=$(mktemp -d) && cd $d && git init -q && paws explain 'git push --force origin main' | grep -q '^  DENY'",
+  "d=$(mktemp -d) && cd $d && git init -q && paws explain 'git push -f' | grep -q '^  DENY'",
+  "paws explain 'git push origin main' | grep -q 'allow (no matching gate)'",
+]

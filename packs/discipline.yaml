@@ -1,6 +1,8 @@
 name: discipline
-description: Karpathy-style coding guidelines at session start and before new source files, against overbuilding and drive-by changes.
+description: Karpathy guidelines and ponytail at session start and before new source files, against overbuilding and drive-by changes.
 tags: [discipline]
 bindings:
   - discipline/karpathy-session-start.md
   - discipline/karpathy-new-file.md
+  - discipline/ponytail-session-start.md
+  - discipline/ponytail-new-file.md

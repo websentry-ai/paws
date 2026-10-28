@@ -21,6 +21,10 @@ message. Proof: one deny carrying the tagged digest, then an allow via
 digest-delivered, no Skill call, and `v1.0.0` is an annotated tag whose
 message starts with the token.
 
+`run secret-scan-commit`. Only the secrets pack's commit binding and its digest
+are installed; a staged file holds an AWS key. Proof: one deny carrying the
+digest, no Skill call, and the key is in no commit (the agent unstages it).
+
 ## Gotchas
 
 - Claude Code records the deny as `toolUseResult: "Error: PreToolUse:<Tool> hook

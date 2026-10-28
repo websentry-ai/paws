@@ -64,6 +64,7 @@ Isolation rules, all enforced by the driver:
   The real `~/.paws` is never read or written.
 - `--allowedTools` instead of a bypass mode: give each case the narrowest set,
   e.g. `Bash(git:*)` and `Skill`. Auto mode refuses `bypassPermissions`.
+- `--disallowedTools` on every case: no Write or Edit under `~/.paws` or `~/.claude`.
 - Claude's auth is the developer's normal login. Do not set
   `CLAUDE_CONFIG_DIR`; on macOS the login lives in the Keychain under the
   default config dir and a scratch config dir is logged out.

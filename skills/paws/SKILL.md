@@ -5,8 +5,8 @@ description: Write, change or debug paws rules (.paws/*.md) that gate Claude Cod
 
 # paws rules
 
-paws is a hook that reads `.paws/**/*.md` (this repo) and `~/.paws/` (this
-user) on every tool call. Each file is one rule. A rule takes effect on the
+paws is a hook that reads `.paws/**/*.md` (this repo) and the user dir
+(`$PAWS_HOME` when set, else `~/.paws/`) on every tool call. Each file is one rule. A rule takes effect on the
 next tool call; nothing needs restarting.
 
 ## Turn the request into a rule
@@ -15,12 +15,16 @@ next tool call; nothing needs restarting.
 2. **What should happen?** Usually `require-skill`: deny until the skill is
    loaded, then allow. `advise` for a gentle note, `block` for never,
    `warn` to ask the human, `audit` to only record.
-3. **Where?** `.paws/<event>/<name>.md` in the repo for the team;
-   `~/.paws/<name>.md` for this user only. Ask if unclear.
+3. **Where?** `.paws/<event>/<name>.md` in the repo for the team; the user
+   dir for this user in every repo ("all my repos", "everywhere"). The user
+   dir is the last path on the `.paws :` line of any `paws explain` output;
+   it is `$PAWS_HOME` when that is set, so never assume `~/.paws`. Ask if
+   unclear.
 4. **Check it** with `paws explain` (below) before you report it done.
 
-If `paws` is not on PATH (it was installed with `npx unbound-paws init`), run
-it as `~/.paws/bin/paws` (or `$PAWS_HOME/bin/paws` when that is set).
+Run `paws` as a plain command, one `paws explain` per Bash call: no `||`,
+`;`, `&&`, loops or variables around it, which need approval. Only if
+`paws` is not found, run `~/.paws/bin/paws` (or `$PAWS_HOME/bin/paws`).
 
 Write the file with frontmatter, then one or two sentences saying why:
 
@@ -108,7 +112,10 @@ paws explain --event session-start startup
 
 The output marks matching rules with `→` and prints the decision. If a rule
 does not show up, the file failed to parse: `paws explain` lists it with the
-reason. Then tell the user what the rule does and where it lives.
+reason. Check one command that should match and one near-miss that should
+not. A `block` rule also fires on your own Bash call when the quoted test
+command is chained (`'cd x && rm -rf y'`): that deny shows the rule matches.
+Then tell the user what the rule does and where it lives.
 
 ## When a gate fires on you
 

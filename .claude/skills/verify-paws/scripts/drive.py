@@ -49,6 +49,8 @@ SESSION_MARKERS = {
     "CLAUDE_CODE_BRIDGE_SESSION_ID", "CLAUDE_CODE_MESSAGING_SOCKET", "CLAUDE_CODE_MESSAGING_TOKEN",
 }
 
+NEVER_EDIT = ["Edit(~/.paws/**)", "Write(~/.paws/**)", "Edit(~/.claude/**)", "Write(~/.claude/**)"]
+
 EXPECT_KEYS = {
     "skills_invoked", "skills_not_invoked", "tool_result_contains", "tool_result_absent",
     "audit", "audit_absent", "audit_max", "final_contains", "shell",
@@ -291,6 +293,9 @@ def drive_case(case: Path, spec: dict, evidence: Path, scratch: Path, installer:
             "--setting-sources", "project", "--output-format", "stream-json", "--verbose"]
     if spec.get("allowed_tools"):
         args += ["--allowedTools", *spec["allowed_tools"]]
+    # The agent must never edit the developer's own paws or Claude Code config, even when a
+    # case asks for a user-level rule (that belongs in the scratch PAWS_HOME).
+    args += ["--disallowedTools", *NEVER_EDIT]
     if (case / "mcp.json").exists():
         # {project} and {fixtures} are filled in so servers get absolute paths.
         cfg = (case / "mcp.json").read_text().replace("{project}", str(project)).replace("{fixtures}", str(SKILL_DIR / "fixtures"))

@@ -1,0 +1,17 @@
+description = "paws skill: 'load pr-voice before gh pr create/edit' becomes a require-skill rule that matches PR commands only"
+prompt = "Whenever a pull request is opened or edited with gh in this repo, the pr-voice skill has to be loaded first. Set that up with paws."
+allowed_tools = ["Skill", "Read", "Write", "Edit", "Glob", "Bash(paws:*)", "Bash(mkdir:*)", "Bash(ls:*)"]
+timeout = 300
+
+[expect]
+skills_invoked = ["paws"]
+tool_result_contains = ["decision:"]   # the agent ran paws explain itself
+shell = [
+  "ls .paws/**/*.md .paws/*.md 2>/dev/null | grep -q .",
+  "paws explain 'gh pr create --fill' | grep -q 'DENY.*pr-voice'",
+  "paws explain 'gh pr edit 12 --body x' | grep -q 'DENY.*pr-voice'",
+  "paws explain 'git add . && gh pr create -t x -b y' | grep -q 'DENY.*pr-voice'",
+  "paws explain 'gh pr list' | grep -q 'allow (no matching gate)'",
+  "paws explain 'echo gh pr create' | grep -q 'allow (no matching gate)'",
+  "paws explain 'git commit -m x' | grep -q 'allow (no matching gate)'",
+]

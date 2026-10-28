@@ -1,7 +1,0 @@
-name: network
-description: "Org guardrails for curl/wget, ssh/scp and rsync: no pipe-to-shell, TLS and host keys stay verified, credentials stay out of commands, deletes are dry-run first."
-tags: [org, network]
-bindings:
-  - http-clients/curl.md
-  - network-remote-access/ssh.md
-  - network-remote-access/rsync.md

@@ -1,7 +1,0 @@
-name: issues
-description: "Org guardrails for Jira and Linear writes: dedupe first, template bodies, real states, human assignees, agent attribution."
-tags: [org, issues]
-bindings:
-  - issue-trackers/jira.md
-  - issue-trackers/jira-mcp.md
-  - issue-trackers/linear-mcp.md

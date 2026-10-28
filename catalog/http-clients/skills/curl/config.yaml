@@ -1,8 +1,0 @@
-# Filled into SKILL.md at install: each KEY placeholder gets its value. Angle-bracket values are
-# org settings with no safe default; SKILL.md "Defaults" says what applies until set.
-placeholders:
-  CHECKSUM_POLICY: the org's checksum policy (verify when published, state when absent)
-  CREDENTIALS_SOURCE: the org's credential convention (env vars or ~/.netrc with mode 0600)
-  CURL_DEFAULT_FLAGS: -fsSL --proto '=https' --max-time 60
-  INTERNAL_CA_PATH: <internal-ca-path>
-  PIPE_TO_SHELL_POLICY: 'the org''s pipe-to-shell policy (never in one step: download → inspect → state → execute)'

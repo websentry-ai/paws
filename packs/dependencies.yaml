@@ -1,7 +1,6 @@
 name: dependencies
-description: "Org guardrails for adding dependencies with npm, pip/uv and cargo: lockfiles, audits, install-script checks and license review."
+description: "Org guardrails for adding dependencies with npm and pip/uv: lockfiles, audits, install-script checks and license review."
 tags: [org, dependencies, supply-chain]
 bindings:
   - dependency-management/npm-deps.md
   - dependency-management/pip.md
-  - dependency-management/cargo.md

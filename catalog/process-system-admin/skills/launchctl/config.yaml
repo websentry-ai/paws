@@ -1,7 +1,0 @@
-# Filled into SKILL.md at install: each KEY placeholder gets its value. Angle-bracket values are
-# org settings with no safe default; SKILL.md "Defaults" says what applies until set.
-placeholders:
-  AGENT_ATTRIBUTION_CONVENTION: '`# added-by: ai-agent <date>`'
-  ORG_LABEL_PREFIX: <org-label-prefix>
-  PROD_HOSTS: hosts matching `*prod*`
-  UNIT_CONVENTIONS: the org's unit conventions (reverse-DNS or org-prefixed names, one service per unit, owner in a comment)

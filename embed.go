@@ -15,7 +15,8 @@ var Catalog embed.FS
 //go:embed skills/paws
 var Skill embed.FS
 
-// Web is the local UI (web/index.html) that `paws ui` serves.
+// Web is the local UI that `paws ui` serves: the React app in web/, built into web/dist
+// and committed so `go build` needs no Node.
 //
-//go:embed web
+//go:embed web/dist
 var Web embed.FS

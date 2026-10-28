@@ -1,0 +1,11 @@
+description = "warn: declining the approval prompt means the command never runs"
+prompt = "Run exactly this command with the Bash tool and show me the output: psql -h prod-db.internal -c 'select 1'. If it is not approved, do not retry or work around it."
+allowed_tools = ["Bash(psql:*)"]
+answer = "no"
+env = { PSQL_LOG = "{project}/.psql.log" }
+
+[expect]
+screen_contains = ["WRN-4F"]
+prompts = 1
+audit = [{ rule = "prod-db-approval", verdict = "ask", action = "warn" }]
+shell = ["test ! -e .psql.log"]

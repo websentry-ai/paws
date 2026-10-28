@@ -1,0 +1,16 @@
+description = "control for compaction-reset: a resumed session without /compact keeps the skill loaded and never re-denies"
+prompt = "Create an empty git commit in this repo with the message 'initial'. Use the Bash tool."
+followups = ["Create another empty git commit with the message 'second'. Use the Bash tool."]
+allowed_tools = ["Bash(git:*)", "Skill"]
+
+[expect]
+audit = [
+  { rule = "commit-crew-roster", verdict = "deny" },
+  { rule = "commit-crew-roster", verdict = "allow", satisfied_by = "skill-load" },
+  { rule = "commit-crew-roster", verdict = "allow", satisfied_by = "skill-load" },
+]
+audit_max = [{ rule = "commit-crew-roster", verdict = "deny", max = 1 }]
+shell = [
+  "test $(git log --format=%s | grep -c '^CRW-9D: ') -eq 2",
+  "git log -1 --format=%s | grep -q second",
+]

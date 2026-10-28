@@ -109,7 +109,9 @@ func summarize(paths []string, inScope []string) Stats {
 	for _, rs := range byRule {
 		st.Rules = append(st.Rules, *rs)
 	}
-	sort.Slice(st.Rules, func(i, j int) bool { return st.Rules[i].Fires > st.Rules[j].Fires || st.Rules[i].Fires == st.Rules[j].Fires && st.Rules[i].Rule < st.Rules[j].Rule })
+	sort.Slice(st.Rules, func(i, j int) bool {
+		return st.Rules[i].Fires > st.Rules[j].Fires || st.Rules[i].Fires == st.Rules[j].Fires && st.Rules[i].Rule < st.Rules[j].Rule
+	})
 	for _, name := range inScope {
 		if byRule[name] == nil {
 			st.Dormant = append(st.Dormant, name)

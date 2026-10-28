@@ -1,0 +1,8 @@
+description = "when repo-marker:infra/terraform stays silent in a repo without the marker"
+prompt = "Create an empty git commit in this repo with the message 'initial'. Use the Bash tool."
+allowed_tools = ["Bash(git:*)", "Skill"]
+
+[expect]
+skills_not_invoked = ["ledger-notes"]
+audit_absent = [{ rule = "infra-commit" }]
+shell = ["git log -1 --format=%s | grep -q 'initial'", "! git log -1 --format=%s | grep -q 'TFM-3K'"]

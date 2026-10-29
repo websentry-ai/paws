@@ -38,6 +38,11 @@ test("a missing npm package permits the first release", async () => {
   assert.deepEqual(await publishedVersions("unbound-paws", async () => new Response(null, { status: 404 })), []);
 });
 
+test("a fully unpublished npm package permits the first release", async () => {
+  const request = async () => Response.json({ name: "unbound-paws", modified: "2026-10-28T15:44:06.735Z" });
+  assert.deepEqual(await publishedVersions("unbound-paws", request), []);
+});
+
 test("registry outages fail the check instead of permitting a release", async () => {
   await assert.rejects(publishedVersions("unbound-paws", async () => new Response(null, { status: 503 })), /HTTP 503/);
 });

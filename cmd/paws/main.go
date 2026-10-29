@@ -44,8 +44,6 @@ func run(args []string) int {
 		return cli.Index(args[1:])
 	case "pin":
 		return cli.Pin(args[1:])
-	case "stats":
-		return cli.StatsCmd(args[1:])
 	case "ui":
 		return cli.UI(args[1:])
 	case "version", "--version", "-v":
@@ -74,7 +72,6 @@ Usage:
                                                  Install packs: bindings plus the skills they require.
   paws remove [--project] <pack>                 Uninstall a pack (and skills only it needed).
   paws list [--project]                          Installed packs with local fire counts.
-  paws stats [--json]                            Local summary: fires, denies, already-loaded, skills.
   paws ui [--port N] [--no-open]                 Local page: catalog, installed packs, what fired.
   paws search <text>                             Search the catalog.
   paws index [-o file]                           The catalog as JSON (website, local UI).

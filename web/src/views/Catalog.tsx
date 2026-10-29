@@ -96,7 +96,6 @@ function BindingTable({ bindings }: { bindings: CatalogBinding[] }) {
             <th>Event</th>
             <th>Skill</th>
             <th>Source</th>
-            <th />
           </tr>
         </thead>
         <tbody>
@@ -105,6 +104,7 @@ function BindingTable({ bindings }: { bindings: CatalogBinding[] }) {
               <td>
                 <code>{b.name}</code>
                 <div className="desc tight">{b.description}</div>
+                <Cmd text={b.add} />
               </td>
               <td className="nowrap">{b.event}</td>
               <td className="nowrap">{b.skill && <code>{b.skill}</code>}</td>
@@ -120,9 +120,6 @@ function BindingTable({ bindings }: { bindings: CatalogBinding[] }) {
                 ) : (
                   "paws"
                 )}
-              </td>
-              <td>
-                <Cmd text={b.add} />
               </td>
             </tr>
           ))}

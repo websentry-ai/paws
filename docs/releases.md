@@ -22,51 +22,27 @@ to `latest`. Prereleases publish to `next`.
 Make the repository public before a release. The workflow checks visibility
 because npm users need anonymous access to GitHub release downloads.
 
-## Publish the first npm version
+## npm token
 
-The package must exist on npm before you can configure a trusted publisher.
-Use your local npm login for the first publication, with npm's interactive
-two-factor authentication. This avoids adding a publishing token to GitHub.
+The workflow publishes with an npm token, as unbound-cli does. A repository
+admin adds it once:
 
-1. Merge the release workflow and make the repository public.
-2. Run **CI and release** on `main` with **Publish to npm after releasing the
-   binaries** unchecked, or run:
+1. On npmjs.com, as the account that owns `unbound-paws`, create a granular
+   access token with read and write access to packages, and allow it to
+   bypass two-factor authentication so CI can publish.
+2. Save it as the `NPM_TOKEN` repository secret:
 
    ```bash
-   gh workflow run ci.yml --ref main -f publish_npm=false
+   gh secret set NPM_TOKEN -R websentry-ai/paws
    ```
 
-3. Wait for the run to succeed. Check out the exact commit used by that run.
-4. From `npm/`, run `npm publish --access public`. For a prerelease, add
-   `--tag next`. Complete npm's 2FA prompt.
-5. Configure trusted publishing before the next release.
+The release job stops before tagging if the secret is missing, and runs
+`npm whoami` with it first. To release binaries without npm, run the
+workflow with **Publish to npm after releasing the binaries** unchecked:
 
-The first `npm publish` creates `unbound-paws` under the logged-in npm
-account. A separate package-creation step on npmjs.com is not required.
-
-## Link npm to GitHub Actions
-
-Open the [unbound-paws package page](https://www.npmjs.com/package/unbound-paws)
-after the first publication and select **Settings**. Under **Trusted Publisher**, select
-**GitHub Actions** and enter:
-
-| Field | Value |
-| --- | --- |
-| Organization or user | `websentry-ai` |
-| Repository | `paws` |
-| Workflow filename | `ci.yml` |
-| Environment name | Leave empty |
-| Allowed actions | Allow `npm publish` |
-
-Save the configuration and complete npm's 2FA challenge. The workflow has
-`id-token: write` and Node 24, so subsequent releases authenticate through
-OIDC. No `NPM_TOKEN` secret is required. If a token secret already exists,
-the workflow also supports it.
-
-Configure the trusted publisher when you are ready to run the next release.
-npm expires a new configuration if it has no successful publish within two
-days. Check the [npm trusted publishing documentation](https://docs.npmjs.com/trusted-publishers/)
-for current requirements.
+```bash
+gh workflow run ci.yml --ref main -f publish_npm=false
+```
 
 ## Verify the install
 

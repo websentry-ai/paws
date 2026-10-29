@@ -207,7 +207,7 @@ Releases run manually through the **CI and release** workflow on `main`.
 The workflow requires a newer version in `npm/package.json`, runs checks,
 then releases binaries and publishes to npm. Pushes and pull requests run
 checks only. See [Release paws](docs/releases.md) for the first release,
-npm trusted publishing setup, and installation checks.
+the npm token setup, and installation checks.
 
 ```
 cmd/paws          CLI entrypoint

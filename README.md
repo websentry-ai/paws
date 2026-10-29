@@ -49,7 +49,6 @@ paws search aws            # browse the catalog built into the binary
 paws add writing           # install for you (~/.paws, ~/.claude/skills)
 paws add --project writing # install into this repo, to commit for the team
 paws list                  # what's installed, how often each binding fired
-paws stats                 # what fired, and how often the skill was already loaded
 paws ui                    # all of that as a local page
 paws remove writing
 ```

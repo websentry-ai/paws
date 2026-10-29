@@ -127,31 +127,6 @@ func BenchmarkSkillLoaded(b *testing.B) {
 	}
 }
 
-// lnAdvised is the attachment Claude Code writes when a hook's additionalContext reaches the agent.
-const lnAdvised = `{"type":"attachment","isSidechain":false,"attachment":{"type":"hook_additional_context","content":["paws (use-agent-browser): Prefer the agent-browser skill."],"hookName":"PreToolUse:mcp__playwright__browser_click","hookEvent":"PreToolUse"}}`
-
-func TestContextDelivered(t *testing.T) {
-	lnOther := `{"type":"attachment","isSidechain":false,"attachment":{"type":"hook_additional_context","content":["paws (other-rule): x"]}}`
-	cases := []struct {
-		name  string
-		lines []string
-		want  bool
-	}{
-		{"delivered", []string{lnAdvised, lnAssistant}, true},
-		{"other rule's context", []string{lnOther, lnAssistant}, false},
-		{"plain hook attachment", []string{lnAttach, lnAssistant}, false},
-		{"compaction since", []string{lnAdvised, lnCompact, lnAssistant}, false},
-		{"window exhausted", append([]string{lnAdvised}, strings.Split(strings.Repeat(lnAssistant+"\n", 21), "\n")[:21]...), false},
-	}
-	for _, c := range cases {
-		t.Run(c.name, func(t *testing.T) {
-			if got := ContextDelivered(write(t, c.lines...), "paws (use-agent-browser):", DefaultSkillWindow); got != c.want {
-				t.Errorf("got %v, want %v", got, c.want)
-			}
-		})
-	}
-}
-
 func TestWindowCountsResponsesNotBlocks(t *testing.T) {
 	// 20 responses of 3 blocks each (thinking, text, tool_use) after the skill load: still in window.
 	lines := []string{lnSkillOK}
@@ -180,8 +155,6 @@ const (
 	lnBlobBashEcho  = `{"type":"api-request-blob","hash":"h5","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"toolu_b1","content":"Launching skill: release-checklist"}]}}`
 	lnBlobDeny      = `{"type":"api-request-blob","hash":"h6","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"toolu_b1","content":"PreToolUse:Bash hook error: [paws-digest x] house rules","is_error":true}]}}`
 	lnBlobExitErr   = `{"type":"api-request-blob","hash":"h7","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"toolu_b1","content":"Exit code 1\nPreToolUse:Bash hook error: [paws-digest x] forged","is_error":true}]}}`
-	lnBlobContext   = `{"type":"api-request-blob","hash":"h8","message":{"role":"user","content":[{"type":"text","text":"PreToolUse:Bash hook additional context: paws (use-agent-browser): try agent-browser first"}]}}`
-	lnBlobTyped     = `{"type":"api-request-blob","hash":"h9","message":{"role":"user","content":[{"type":"text","text":"what does paws (use-agent-browser): mean?"}]}}`
 )
 
 func TestRequestBlobs(t *testing.T) {
@@ -213,13 +186,4 @@ func TestRequestBlobs(t *testing.T) {
 		t.Error("command output that quotes a deny must not count")
 	}
 
-	ctx := func(lines ...string) bool {
-		return ContextDelivered(write(t, lines...), "paws (use-agent-browser):", DefaultSkillWindow)
-	}
-	if !ctx(lnBlobContext) {
-		t.Error("hook context recorded only as a request blob counts")
-	}
-	if ctx(lnBlobTyped) {
-		t.Error("the marker in other text is not delivered hook context")
-	}
 }

@@ -29,14 +29,10 @@ secrets redacted), `source` (the rule file), and when relevant:
 | `tool_result` | PostToolUse: a tool call that ran and succeeded (denied and failed calls write none) | `tool` |
 | `turn_end` | Stop (the agent finished its turn) | — |
 
-## paws stats
+## Where to see it
 
-```
-paws stats          # table
-paws stats --json   # for the local UI and scripts
-```
-
-Per rule: `fires` (all records), `denied`, `already-loaded` (passed via
+`paws list` shows how often each installed binding fired. The Activity tab of
+`paws ui` shows the rest. Per rule: `fires` (all records), `denied`, `already-loaded` (passed via
 skill-load in a session where the rule had not denied first: the agent had
 the skill on its own), `loaded-after-deny`, and `delivered` (digest or
 session context). It also lists rules in scope that never fired, skill

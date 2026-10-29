@@ -21,7 +21,6 @@ type transcriptEntry struct {
 	IsSidechain bool   `json:"isSidechain"`
 	// Polymorphic in the log: an object for tool results, a bare string for hook denials.
 	ToolUseResult json.RawMessage `json:"toolUseResult"`
-	Attachment    *attachment     `json:"attachment"`
 	Message       struct {
 		ID string `json:"id"`
 	} `json:"message"`
@@ -80,13 +79,6 @@ func (b block) text() string {
 		out = append(out, p.Text)
 	}
 	return strings.Join(out, "\n")
-}
-
-// attachment is a harness-written record; hook_additional_context holds what a hook's
-// additionalContext delivered to the agent.
-type attachment struct {
-	Type    string   `json:"type"`
-	Content []string `json:"content"`
 }
 
 // skillResult is the agent-written result of a skill invocation. Only the agent
@@ -162,37 +154,6 @@ func skillCalls(path, skill string) map[string]bool {
 	return calls
 }
 
-// ContextDelivered reports whether a hook's additionalContext containing marker reached the
-// agent within the last `window` turns. Same window and compaction rules as SkillLoaded.
-func ContextDelivered(path, marker string, window int) bool {
-	if marker == "" {
-		return false
-	}
-	return scanWindow(path, window, func(e transcriptEntry) bool {
-		if e.Type == requestBlob {
-			// The blob carries the context as text: "PreToolUse:Bash hook additional context: ...".
-			if !bytes.Contains(e.raw, []byte(hookContextLabel)) {
-				return false
-			}
-			for _, b := range e.blocks() {
-				if i := strings.Index(b.Text, hookContextLabel); b.Type == "text" && i >= 0 && strings.Contains(b.Text[i:], marker) {
-					return true
-				}
-			}
-			return false
-		}
-		if e.Type != "attachment" || e.Attachment == nil || e.Attachment.Type != "hook_additional_context" {
-			return false
-		}
-		for _, c := range e.Attachment.Content {
-			if strings.Contains(c, marker) {
-				return true
-			}
-		}
-		return false
-	})
-}
-
 // hookDenyPrefix is how Claude Code records a PreToolUse deny in toolUseResult:
 // "Error: PreToolUse:<Tool> hook error: <reason>". A failed command is recorded as
 // "Error: Exit code N\n<output>", so anchoring here keeps tool output from forging a deny.
@@ -201,9 +162,6 @@ var hookDenyPrefix = regexp.MustCompile(`^Error: PreToolUse:\S+ hook error: `)
 // blobDenyPrefix is the same deny as a request blob records it: the tool_result content,
 // without the "Error: " that toolUseResult adds.
 var blobDenyPrefix = regexp.MustCompile(`^PreToolUse:\S+ hook error: `)
-
-// hookContextLabel precedes a hook's additionalContext in the text a request blob records.
-const hookContextLabel = " hook additional context: "
 
 // DenyDelivered reports whether a paws deny whose reason starts with marker reached the
 // agent within the last `window` turns.

@@ -3,7 +3,6 @@ package cli
 import (
 	"bufio"
 	"encoding/json"
-	"fmt"
 	"os"
 	"sort"
 
@@ -120,47 +119,6 @@ func summarize(paths []string, inScope []string) Stats {
 	sort.Strings(st.Dormant)
 	st.Sessions = len(sessions)
 	return st
-}
-
-// StatsCmd prints the local summary: `paws stats [--json]`.
-func StatsCmd(args []string) int {
-	asJSON := false
-	for _, a := range args {
-		if a != "--json" {
-			fmt.Fprintln(os.Stderr, "usage: paws stats [--json]")
-			return 2
-		}
-		asJSON = true
-	}
-	st, log := localStats()
-	if asJSON {
-		b, _ := json.MarshalIndent(st, "", "  ")
-		fmt.Println(string(b))
-		return 0
-	}
-	fmt.Printf("%-28s %6s %7s %15s %18s %10s\n", "rule", "fires", "denied", "already-loaded", "loaded-after-deny", "delivered")
-	for _, r := range st.Rules {
-		fmt.Printf("%-28s %6d %7d %15d %18d %10d\n", r.Rule, r.Fires, r.Denied, r.AlreadyLoaded, r.LoadedAfterDeny, r.Delivered)
-	}
-	if len(st.Rules) == 0 {
-		fmt.Println("(no rule has fired yet)")
-	}
-	if len(st.Dormant) > 0 {
-		fmt.Printf("\ndormant here (never fired): %v\n", st.Dormant)
-	}
-	var skills []string
-	for s := range st.Skills {
-		skills = append(skills, s)
-	}
-	sort.Strings(skills)
-	if len(skills) > 0 {
-		fmt.Println("\nskills invoked:")
-		for _, s := range skills {
-			fmt.Printf("  %-26s %d\n", s, st.Skills[s])
-		}
-	}
-	fmt.Printf("\nsessions %d · turns %d · tool calls %d · log %s\n", st.Sessions, st.Turns, st.ToolResults, log)
-	return 0
 }
 
 // localStats summarises this user's audit log against the rules in scope for the cwd.

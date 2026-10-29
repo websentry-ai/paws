@@ -1,0 +1,12 @@
+# Filled into SKILL.md at install: each KEY placeholder gets its value. Angle-bracket values are
+# org settings with no safe default; SKILL.md "Defaults" says what applies until set.
+placeholders:
+  COMPANY_HOME: the workspace's top-level home/company page
+  DEFAULT_OWNER: the requesting human
+  ENG_TEAMSPACE: the teamspace whose name best matches engineering content
+  PRD_TEMPLATE_PAGE: <prd-template-page>
+  PRODUCT_TEAMSPACE: the teamspace whose name best matches product content
+  SALES_TEAMSPACE: the teamspace whose name best matches sales/GTM content
+  SENSITIVE_SPACE: <sensitive-space>
+  SENSITIVITY_TIERS: credentials, customer data, financials, unreleased plans = sensitive
+  TEMPLATE_REGISTRY: <template-registry>

@@ -1,0 +1,9 @@
+# Filled into SKILL.md at install: each KEY placeholder gets its value. Angle-bracket values are
+# org settings with no safe default; SKILL.md "Defaults" says what applies until set.
+placeholders:
+  BROAD_ACCESS_BOUNDARY: 'anyone-with-link or domain-wide: permission type `anyone` or `domain`'
+  DEFAULT_OWNER: the requesting human
+  DRIVE_FOLDER_MAP: the existing folder and shared-drive names
+  SENSITIVE_DRIVE: <sensitive-drive>
+  SENSITIVITY_TIERS: credentials, customer data, financials, unreleased plans = sensitive
+  TEMPLATE_REGISTRY: <template-registry>

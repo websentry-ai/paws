@@ -43,6 +43,9 @@ func Gate() (code int) {
 	case "PostToolUse":
 		gate.LogTelemetry("tool_result", ev, map[string]any{"tool": in.ToolName})
 		return allow()
+	case "UserPromptSubmit":
+		// Retired event: a settings entry from an older build may still call us until `paws init` reruns.
+		return allow()
 	case "PreToolUse":
 		if in.ToolName == "Skill" {
 			if s, _ := in.ToolInput["skill"].(string); s != "" {

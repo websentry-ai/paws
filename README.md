@@ -132,7 +132,9 @@ binary. From source: `go build -o paws ./cmd/paws && ./paws init`.
 Upgrading from 0.1: re-run `paws init` once. 0.2 registers SessionStart
 (for `session-start` rules) and PostToolUse and Stop (for local telemetry,
 async), and drops the UserPromptSubmit hook. 0.2 runs `require-skill` rules
-only; a rule using an older action is skipped with a notice.
+only; a rule using an older action is skipped with a notice. From a 0.2
+release candidate: re-run `paws init`, then `paws add <pack>` for each
+installed pack.
 
 `$PAWS_HOME`, when set to an absolute path, replaces `~/.paws`. Claude Code
 passes a settings file's `env` to hooks, so a repo's `.claude/settings.json`

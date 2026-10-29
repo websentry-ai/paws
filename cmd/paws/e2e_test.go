@@ -91,10 +91,10 @@ func TestGateSkipsRemovedActionRules(t *testing.T) {
 	if got := run(rm); bytes.Contains([]byte(got), []byte("deny")) || !bytes.Contains([]byte(got), []byte("2 rule file(s) failed to parse")) {
 		t.Errorf("removed actions must be skipped with a notice, got %q", got)
 	}
-	// An older settings file can still send UserPromptSubmit; it must stay an allow.
+	// An older settings file can still send UserPromptSubmit; it must stay a silent allow, without rule notices.
 	prompt := `{"cwd":"` + repo + `","hook_event_name":"UserPromptSubmit","prompt":"hi"}`
-	if got := run(prompt); bytes.Contains([]byte(got), []byte("decision")) || bytes.Contains([]byte(got), []byte("additionalContext")) {
-		t.Errorf("a retired UserPromptSubmit must allow, got %q", got)
+	if got := run(prompt); bytes.Contains([]byte(got), []byte("decision")) || bytes.Contains([]byte(got), []byte("systemMessage")) {
+		t.Errorf("a retired UserPromptSubmit must allow silently, got %q", got)
 	}
 
 	mustWriteFile(t, filepath.Join(repo, ".paws", "skill.md"),

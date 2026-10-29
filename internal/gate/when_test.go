@@ -145,12 +145,12 @@ func TestWhenAgentCount(t *testing.T) {
 
 func TestWhenParseErrors(t *testing.T) {
 	for name, md := range map[string]string{
-		"unknown":            "---\nname: x\nevent: pre-tool\nwhen: phase-of-moon\naction:\n  type: require-skill\n  skill: s\n---\n",
-		"empty dependency":   "---\nname: x\nevent: pre-tool\nwhen: \"dependency:\"\naction:\n  type: require-skill\n  skill: s\n---\n",
-		"marker traversal":   "---\nname: x\nevent: pre-tool\nwhen: repo-marker:../x\naction:\n  type: require-skill\n  skill: s\n---\n",
-		"new-file on prompt": "---\nname: x\nevent: user-prompt\nwhen: new-file\naction:\n  type: require-skill\n  skill: s\n---\n",
-		"bad glob":           "---\nname: x\nevent: pre-tool\nwhen: \"no-edit-matching:{a\"\naction:\n  type: require-skill\n  skill: s\n---\n",
-		"map not list":       "---\nname: x\nevent: pre-tool\nwhen:\n  a: b\naction:\n  type: require-skill\n  skill: s\n---\n",
+		"unknown":             "---\nname: x\nevent: pre-tool\nwhen: phase-of-moon\naction:\n  type: require-skill\n  skill: s\n---\n",
+		"empty dependency":    "---\nname: x\nevent: pre-tool\nwhen: \"dependency:\"\naction:\n  type: require-skill\n  skill: s\n---\n",
+		"marker traversal":    "---\nname: x\nevent: pre-tool\nwhen: repo-marker:../x\naction:\n  type: require-skill\n  skill: s\n---\n",
+		"new-file on session": "---\nname: x\nevent: session-start\nwhen: new-file\naction:\n  type: require-skill\n  skill: s\n---\n",
+		"bad glob":            "---\nname: x\nevent: pre-tool\nwhen: \"no-edit-matching:{a\"\naction:\n  type: require-skill\n  skill: s\n---\n",
+		"map not list":        "---\nname: x\nevent: pre-tool\nwhen:\n  a: b\naction:\n  type: require-skill\n  skill: s\n---\n",
 	} {
 		if _, err := rule.Parse([]byte(md), "t.md"); err == nil {
 			t.Errorf("%s: should fail to parse", name)

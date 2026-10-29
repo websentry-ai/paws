@@ -93,7 +93,7 @@ reads a checkout instead) and:
    unless the fetched directory hashes to `upstream.content_hash`; ours from
    `catalog/<category>/skills/<skill>/` with `{{NAME}}` placeholders filled
    from that directory's `config.yaml` (`placeholders: {NAME: default}`);
-2. copies the bindings (with their digests and scripts) to
+2. copies the bindings (with their digests) to
    `<packs dir>/<pack>/<catalog-relative path>` (a single binding,
    `paws add writing/humanizer-pr`, goes under `<packs dir>/_bindings/`);
 3. records the pack, its picks and the skills it installed in `installed.yaml`.

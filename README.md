@@ -16,10 +16,6 @@ retries, and the retry goes through. Husky, for agents.
 paws guarantees the skill was loaded; the skill governs the behaviour. It
 never rewrites tool input, reads tool output, or calls the network.
 
-The same hook runs plain guardrails too: block a command, ask you first, log
-it, or hand it to a script. Any Bash command, file path or MCP call can be
-matched; see [Guardrails](#guardrails).
-
 Apache-2.0 · Claude Code · no account.
 
 ## Ten minutes
@@ -88,38 +84,10 @@ installs a `paws` skill that knows the format and checks its work with
 
 | | |
 |---|---|
-| events | `pre-tool`, `pre-commit`, `pre-push`, `user-prompt`, `session-start` |
+| events | `pre-tool`, `pre-commit`, `pre-push`, `session-start` |
 | matcher | `tool` (names, `mcp__server__*`), `command_regex`, `file_glob`, `mcp_action` (`send`, `create`, `update`, `delete`) |
 | when | `dependency:PKG`, `repo-marker:PATH`, `new-file`, `no-edit-matching:GLOB`, `agent-count>N` |
-| actions | `require-skill`, `advise`, `block`, `warn`, `audit`, `prompt-inject`, `exec-script` |
-
-The full reference: [docs/rules.md](docs/rules.md).
-
-## Guardrails
-
-Rules don't need a skill. Swap the action and the same file is a guardrail
-on commands, files or MCP calls:
-
-| Action | What the agent sees | Example |
-|---|---|---|
-| `block` | a hard deny naming the rule, no retry | reading `.env` or `secrets/` |
-| `warn` | Claude Code asks you to approve the call | `psql` against prod |
-| `audit` | nothing; the call is logged to `~/.paws/audit.log` | every `npm publish` |
-| `exec-script` | your script decides; exit 2 denies | `rm -rf` checked by a shell script |
-| `advise` | the call runs, with a note added to context | style guide on the first `.tsx` edit |
-
-```markdown
----
-name: prod-db-approval
-event: pre-tool
-matcher:
-  tool: Bash
-  command_regex: (?s)psql.*(prod|production)
-action:
-  type: warn
-  deny_message: Touching the prod DB needs approval.
----
-```
+| action | `require-skill`, with `on_miss: digest` to send the skill's rules in the deny |
 
 MCP calls match by server and by what the call does, so one rule covers
 every Slack tool that sends:
@@ -130,9 +98,7 @@ matcher:
   mcp_action: send      # send, create, update or delete
 ```
 
-When several rules match one call, the strictest wins: `block`, then a
-missing skill, then `warn`, then `audit`. More in
-[examples/.paws](examples/.paws).
+The full reference: [docs/rules.md](docs/rules.md).
 
 ## What paws does and doesn't do
 
@@ -146,7 +112,8 @@ missing skill, then `warn`, then `audit`. More in
   last 20 agent turns. After a compaction its text is gone, so the next gated
   call denies once more.
 - **Not a sandbox.** Regex rules match command text, not shell semantics.
-  `block` stops an agent following instructions, not an adversary.
+  A gate makes an agent that follows instructions load the skill; it doesn't
+  stop an adversary.
 
 ## Install details
 
@@ -162,9 +129,12 @@ against the release's `checksums.txt`. `paws init` copies the binary to
 breaks the hook; re-run `init` after an upgrade. All repos share that one
 binary. From source: `go build -o paws ./cmd/paws && ./paws init`.
 
-Upgrading from 0.1: re-run `paws init` once. 0.2 also registers SessionStart
+Upgrading from 0.1: re-run `paws init` once. 0.2 registers SessionStart
 (for `session-start` rules) and PostToolUse and Stop (for local telemetry,
-async).
+async), and drops the UserPromptSubmit hook. 0.2 runs `require-skill` rules
+only; a rule using an older action is skipped with a notice. From a 0.2
+release candidate: re-run `paws init`, then `paws add <pack>` for each
+installed pack.
 
 `$PAWS_HOME`, when set to an absolute path, replaces `~/.paws`. Claude Code
 passes a settings file's `env` to hooks, so a repo's `.claude/settings.json`
@@ -213,7 +183,7 @@ the npm token setup, and installation checks.
 cmd/paws          CLI entrypoint
 internal/hook     Claude Code adapter (hook I/O, settings entries)
 internal/rule     rule format: parse, match, when-conditions (pure)
-internal/gate     decision engine: load, resolve, transcript scan, audit
+internal/gate     decision engine: load, resolve, transcript scan, audit log
 internal/catalog  catalog bindings and pack manifests (disk or embedded)
 internal/pack     paws add/remove: bindings, skill install, state
 internal/cli      the commands

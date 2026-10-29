@@ -102,7 +102,7 @@ func TestValidateProblems(t *testing.T) {
 			write(t, filepath.Join(root, "catalog/other/dup.md"), binding("humanizer-pr", "humanizer"))
 		}, `binding name "humanizer-pr" already used`},
 		{"missing tags", func(t *testing.T, root string) {
-			write(t, filepath.Join(root, "catalog/writing/untagged.md"), "---\nname: untagged\nevent: pre-tool\naction:\n  type: block\n---\n")
+			write(t, filepath.Join(root, "catalog/writing/untagged.md"), "---\nname: untagged\nevent: pre-tool\naction:\n  type: require-skill\n  skill: s\n---\n")
 		}, "at least one tag"},
 		{"partial upstream", func(t *testing.T, root string) {
 			write(t, filepath.Join(root, "catalog/writing/partial.md"), strings.Replace(binding("partial", "x"), "  ref: 0123456789abcdef0123456789abcdef01234567\n", "", 1))
@@ -174,6 +174,9 @@ func TestValidateProblems(t *testing.T) {
 		{"option repeats a top-level binding", func(t *testing.T, root string) {
 			write(t, filepath.Join(root, "packs/writing.yaml"), "name: writing\ndescription: x\nbindings: [writing/humanizer-pr.md]\npick_one:\n  - name: prose\n    default: humanizer\n    options:\n      humanizer: [writing/humanizer-pr.md]\n      stop-slop: [writing/stop-slop-pr.md]\n")
 		}, "listed more than once (pick_one prose)"},
+		{"removed action", func(t *testing.T, root string) {
+			write(t, filepath.Join(root, "catalog/writing/old.md"), "---\nname: old\nevent: pre-tool\naction:\n  type: block\ntags: [safety]\n---\n")
+		}, `action "block" is no longer supported (paws supports require-skill only)`},
 		{"empty pack", func(t *testing.T, root string) {
 			write(t, filepath.Join(root, "packs/aws.yaml"), "name: aws\ndescription: x\n")
 		}, "lists no bindings"},

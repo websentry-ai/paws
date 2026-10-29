@@ -5,7 +5,7 @@ matcher:
   tool: Agent|Task
 when: agent-count>1
 action:
-  type: block
-  deny_message: at most two subagents per prompt in this repo.
+  type: require-skill
+  skill: fanout-review-7k
 ---
-Caps subagent fan-out at two per prompt.
+Past two subagents in one prompt, the fan-out notes load first.

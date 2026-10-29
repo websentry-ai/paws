@@ -1,6 +1,9 @@
 package rule
 
-import "testing"
+import (
+	"strings"
+	"testing"
+)
 
 func mustRule(t *testing.T, md string) *Rule {
 	t.Helper()
@@ -48,24 +51,17 @@ func TestParseValidation(t *testing.T) {
 		name string
 		md   string
 	}{
-		{"missing event", "---\nname: x\naction:\n  type: block\n---\n"},
-		{"unknown event", "---\nname: x\nevent: bogus\naction:\n  type: block\n---\n"},
-		{"session-start rejected", "---\nname: x\nevent: session-start\naction:\n  type: block\n---\n"},
+		{"missing event", "---\nname: x\naction:\n  type: require-skill\n  skill: s\n---\n"},
+		{"unknown event", "---\nname: x\nevent: bogus\naction:\n  type: require-skill\n  skill: s\n---\n"},
+		{"session-start with a tool matcher", "---\nname: x\nevent: session-start\nmatcher:\n  tool: Bash\naction:\n  type: require-skill\n  skill: s\n---\n"},
 		{"missing action type", "---\nname: x\nevent: pre-tool\n---\n"},
 		{"unknown action", "---\nname: x\nevent: pre-tool\naction:\n  type: nope\n---\n"},
 		{"require-skill no skill", "---\nname: x\nevent: pre-tool\naction:\n  type: require-skill\n---\n"},
-		{"exec-script absolute path", "---\nname: x\nevent: pre-tool\naction:\n  type: exec-script\n  script: /etc/passwd\n---\n"},
-		{"exec-script traversal", "---\nname: x\nevent: pre-tool\naction:\n  type: exec-script\n  script: ../../etc/passwd\n---\n"},
-		{"bad regex", "---\nname: x\nevent: pre-tool\nmatcher:\n  command_regex: \"([\"\naction:\n  type: block\n---\n"},
-		{"warn on user-prompt", "---\nname: x\nevent: user-prompt\naction:\n  type: warn\n---\n"},
+		{"bad regex", "---\nname: x\nevent: pre-tool\nmatcher:\n  command_regex: \"([\"\naction:\n  type: require-skill\n  skill: s\n---\n"},
 		{"unknown on_miss", "---\nname: x\nevent: pre-tool\naction:\n  type: require-skill\n  skill: s\n  on_miss: maybe\n---\n"},
 		{"digest without file", "---\nname: x\nevent: pre-tool\naction:\n  type: require-skill\n  skill: s\n  on_miss: digest\n---\n"},
-		{"on_miss on block", "---\nname: x\nevent: pre-tool\naction:\n  type: block\n  on_miss: load-required\n---\n"},
 		{"digest traversal", "---\nname: x\nevent: pre-tool\naction:\n  type: require-skill\n  skill: s\n  on_miss: digest\n  digest: ../secret.md\n---\n"},
-		{"audit with message", "---\nname: x\nevent: pre-tool\naction:\n  type: audit\n  message: hi\n---\n"},
-		{"prompt-inject no message", "---\nname: x\nevent: user-prompt\naction:\n  type: prompt-inject\n---\n"},
-		{"prompt-inject on pre-tool", "---\nname: x\nevent: pre-tool\naction:\n  type: prompt-inject\n  message: hi\n---\n"},
-		{"pre-push non-bash tool", "---\nname: x\nevent: pre-push\nmatcher:\n  tool: Edit\naction:\n  type: warn\n---\n"},
+		{"pre-push non-bash tool", "---\nname: x\nevent: pre-push\nmatcher:\n  tool: Edit\naction:\n  type: require-skill\n  skill: s\n---\n"},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
@@ -76,15 +72,22 @@ func TestParseValidation(t *testing.T) {
 	}
 }
 
-func TestExecScriptSubdirAllowed(t *testing.T) {
-	r := mustRule(t, "---\nname: x\nevent: pre-tool\naction:\n  type: exec-script\n  script: scripts/foo.sh\n---\n")
-	if r.Action.Script != "scripts/foo.sh" {
-		t.Errorf("expected subdir script path to be accepted, got %q", r.Action.Script)
+func TestRemovedActionsAndEventsSayWhy(t *testing.T) {
+	for _, a := range []string{"block", "warn", "audit", "exec-script", "prompt-inject", "advise"} {
+		_, err := Parse([]byte("---\nname: x\nevent: pre-tool\naction:\n  type: "+a+"\n  message: m\n  script: s.sh\n---\n"), "t.md")
+		want := `action "` + a + `" is no longer supported (paws supports require-skill only)`
+		if err == nil || err.Error() != want {
+			t.Errorf("%s: got %v, want %q", a, err, want)
+		}
+	}
+	_, err := Parse([]byte("---\nname: x\nevent: user-prompt\naction:\n  type: require-skill\n  skill: s\n---\n"), "t.md")
+	if err == nil || !strings.Contains(err.Error(), `event "user-prompt" is no longer supported`) {
+		t.Errorf("user-prompt: got %v", err)
 	}
 }
 
 func TestParseWildcardToolQuoted(t *testing.T) {
-	r := mustRule(t, "---\nname: x\nevent: pre-tool\nmatcher:\n  tool: \"*\"\naction:\n  type: warn\n  message: hi\n---\n")
+	r := mustRule(t, "---\nname: x\nevent: pre-tool\nmatcher:\n  tool: \"*\"\naction:\n  type: require-skill\n  skill: s\n  message: hi\n---\n")
 	if !r.Matches("AnyTool", "anything") {
 		t.Error("quoted \"*\" should match any tool")
 	}
@@ -111,8 +114,8 @@ func TestMatchTool(t *testing.T) {
 }
 
 func TestMatchesGitSyntheticEvents(t *testing.T) {
-	push := mustRule(t, "---\nname: p\nevent: pre-push\naction:\n  type: warn\n---\n")
-	commit := mustRule(t, "---\nname: c\nevent: pre-commit\naction:\n  type: warn\n---\n")
+	push := mustRule(t, "---\nname: p\nevent: pre-push\naction:\n  type: require-skill\n  skill: s\n---\n")
+	commit := mustRule(t, "---\nname: c\nevent: pre-commit\naction:\n  type: require-skill\n  skill: s\n---\n")
 
 	if !push.Matches("Bash", "git push origin main") {
 		t.Error("pre-push should match git push")
@@ -182,7 +185,7 @@ Removes the AI tells from PR bodies.
 }
 
 func TestParseKeepsBody(t *testing.T) {
-	r := mustRule(t, "---\nname: x\nevent: pre-tool\naction:\n  type: audit\n---\n\nFirst line.\nSecond.\n")
+	r := mustRule(t, "---\nname: x\nevent: pre-tool\naction:\n  type: require-skill\n  skill: s\n---\n\nFirst line.\nSecond.\n")
 	if r.Body != "First line.\nSecond." {
 		t.Errorf("body = %q", r.Body)
 	}

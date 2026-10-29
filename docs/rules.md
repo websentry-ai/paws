@@ -12,7 +12,7 @@ matcher:                          # which calls (all fields must match)
   tool: Bash
   command_regex: (^|[;&|\n])\s*gh\s+pr\s+create\b
 when: dependency:react            # optional repo / session conditions
-action:                           # what happens
+action:                           # the skill to load first
   type: require-skill
   skill: humanizer
 ---
@@ -26,7 +26,6 @@ Loads humanizer before a PR body goes out.
 | `pre-tool` | any tool call | see the table below |
 | `pre-commit` | a Bash call that runs `git commit` (flags and `-C dir` allowed) | the command |
 | `pre-push` | a Bash call that runs `git push` | the command |
-| `user-prompt` | the prompt the user submits | the prompt text |
 | `session-start` | a session starting | `startup`, `resume`, `clear` or `compact` |
 
 Per tool, `pre-tool` matches against:
@@ -85,21 +84,19 @@ One condition, or a list where every condition must hold.
 
 The repo root is the nearest directory with `.git` above the agent's cwd.
 
-## Actions
+## Action
 
-| `action.type` | Effect | Events |
-|---|---|---|
-| `require-skill` | deny until `skill` was invoked in the last 20 agent turns, then allow; on `session-start`, add context naming the skill | all |
-| `advise` | allow, and attach `message` as context once per 20-turn window | tool events, `session-start` |
-| `block` | hard deny naming the rule, plus `deny_message` | tool events, `user-prompt` |
-| `warn` | ask the human to approve | tool events |
-| `audit` | allow silently; log it | all |
-| `prompt-inject` | add `message` to the prompt | `user-prompt` |
-| `exec-script` | run `script` (relative, inside the rule's dir) with the event JSON on stdin; exit 2 denies with stderr as the reason | tool events, `user-prompt` |
+`require-skill` is the one action. It denies the call until `skill` was
+invoked in the last 20 agent turns, then allows it. On `session-start`,
+which can't be denied, it adds context naming the skill instead (`message`
+replaces that text).
 
-`require-skill` takes an optional `deny_message`; the default names the
-skill and tells the agent to invoke it and retry the same command. A
-compaction resets the 20-turn window, so the next gated call denies once more.
+`deny_message` replaces the default deny, which names the skill and tells
+the agent to invoke it and retry the same command. A compaction resets the
+20-turn window, so the next gated call denies once more.
+
+A rule with any other action, or an event not listed above, is skipped with
+a notice, and `paws validate` names it.
 
 ### on_miss: digest
 
@@ -114,28 +111,25 @@ action:
 ```
 
 The deny then carries the digest. Once that deny is in the transcript window,
-the retry passes without the skill (audit `satisfied_by: digest-delivered`).
-A loaded skill still passes first. A missing or oversize digest falls back to
+the retry passes without the skill; the audit log records
+`satisfied_by: digest-delivered`. A loaded skill still passes first. A missing or oversize digest falls back to
 the plain load-required deny, and the audit record carries `digest_error`.
 Delivery is keyed by rule name: two rules with the same name share it.
 
-When several rules match, the most restrictive wins: `block` > unresolved
-`require-skill` / `exec-script` deny > `warn` > allow. Context from every
-matching rule is joined.
+When several rules match one call, one deny names every skill still missing,
+so a single retry clears them all.
 
 ## Test a rule
 
 ```
 paws explain 'gh pr create --fill'              # Bash by default
 paws explain --tool Edit src/app/page.tsx
-paws explain --event user-prompt 'deploy it'
 paws explain --event session-start compact
 echo '<hook event json>' | paws explain -
 ```
 
 `explain` prints the rules in scope, marks the ones that apply (matcher and
-`when:`), and shows the decision. It writes no audit record and runs no
-script.
+`when:`), and shows the decision. It writes no audit record.
 
 ## Failure modes
 

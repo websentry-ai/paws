@@ -1,0 +1,15 @@
+description = "paws skill: 'record every npm publish, never stop it' is declined: paws only loads skills"
+prompt = 'Keep a record every time the agent runs npm publish, but never stop it. Set that up with paws.'
+allowed_tools = ["Skill", "Read", "Write", "Edit", "Glob", "Bash(paws:*)", "Bash(mkdir:*)", "Bash(ls:*)"]
+timeout = 300
+
+[expect]
+skills_invoked = ["paws"]
+final_matches = [
+  "(can.?t|cannot|can not|doesn.?t|does not|won.?t|isn.?t able|not able|no way|only)[^.]{0,120}(record|log|track|audit|count)",
+]
+shell = [
+  "! paws explain 'npm publish' | grep -q '^  DENY'",
+  "! paws explain 'npm publish' | grep -q 'skipped'",
+  "! grep -rhE '^ *type: *[a-z-]+' .paws 2>/dev/null | grep -qv 'require-skill'",
+]

@@ -1,5 +1,5 @@
-description = "paws skill: one request for two rules writes both, a block and an audit"
-prompt = "Two paws rules for this repo: block reading .env files, and log every docker run without telling the agent."
+description = "paws skill: one request for two rules writes both"
+prompt = "Two paws rules for this repo: load the secrets-handling skill before the agent reads .env files, and load the docker-safety skill before every docker run."
 allowed_tools = ["Skill", "Read", "Write", "Edit", "Glob", "Bash(paws:*)", "Bash(mkdir:*)", "Bash(ls:*)"]
 timeout = 300
 
@@ -8,9 +8,9 @@ skills_invoked = ["paws"]
 tool_result_contains = ["decision:"]
 shell = [
   "[ $(find .paws -name '*.md' | wc -l) -ge 2 ]",
-  "paws explain --tool Read .env | grep -q 'DENY \u2014 Blocked by paws rule'",
+  "paws explain --tool Read .env | grep -q 'DENY.*secrets-handling'",
   "paws explain --tool Read config/.env | grep -q '^  DENY'",
   "paws explain --tool Read README.md | grep -q 'allow (no matching gate)'",
-  "paws explain 'docker run --rm alpine echo hi' | grep -q '\u2192.*action=audit' && paws explain 'docker run --rm alpine echo hi' | grep -q 'allow (no matching gate)'",
+  "paws explain 'docker run --rm alpine echo hi' | grep -q 'DENY.*docker-safety'",
   "! paws explain 'docker ps' | grep -q '\u2192'",
 ]

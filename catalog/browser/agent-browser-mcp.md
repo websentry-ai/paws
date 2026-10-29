@@ -18,4 +18,4 @@ provenance:
   fetched: 2026-10-27
 tags: [practice, browser]
 ---
-Loads agent-browser when the agent opens a page with Playwright or Chrome MCP (navigation only, so clicks and reads in an open page don't re-trigger it), so it weighs the faster agent-browser CLI first. require-skill, not advise, because only require-skill installs the skill with the pack.
+Loads agent-browser when the agent opens a page with Playwright or Chrome MCP (navigation only, so clicks and reads in an open page don't re-trigger it), so it weighs the faster agent-browser CLI first.

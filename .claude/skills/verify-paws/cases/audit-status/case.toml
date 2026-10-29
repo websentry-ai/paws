@@ -1,8 +1,0 @@
-description = "audit on git status: call allowed silently and recorded to the audit log"
-prompt = "Run git status in this repo using the Bash tool and tell me the branch name."
-allowed_tools = ["Bash(git:*)"]
-
-[expect]
-audit = [{ rule = "watch-status", verdict = "allow", action = "audit" }]
-audit_absent = [{ verdict = "deny" }]
-tool_result_absent = ["paws rule", "hook error"]

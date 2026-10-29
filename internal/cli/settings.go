@@ -71,13 +71,38 @@ func writeSettings(path string, doc settingsDoc) error {
 	return nil
 }
 
-// ensureHooks adds (or repoints, if the binary moved) a paws entry per registered event; idempotent, other hooks untouched.
+// ensureHooks adds (or repoints, if the binary moved) a paws entry per registered event and drops
+// paws entries from retired events; idempotent, other hooks untouched.
 func ensureHooks(doc settingsDoc, command string) (bool, error) {
 	hooks, err := hooksBlock(doc)
 	if err != nil {
 		return false, err
 	}
 	changed := false
+	for _, event := range hook.RetiredEvents {
+		var list, kept []json.RawMessage
+		if json.Unmarshal(hooks[event], &list) != nil {
+			continue
+		}
+		for _, entry := range list {
+			if !isPawsEntry(entry) {
+				kept = append(kept, entry)
+			}
+		}
+		if len(kept) == len(list) {
+			continue
+		}
+		changed = true
+		if len(kept) == 0 {
+			delete(hooks, event)
+			continue
+		}
+		b, err := json.Marshal(kept)
+		if err != nil {
+			return false, err
+		}
+		hooks[event] = b
+	}
 	for _, event := range hook.RegisteredEvents {
 		var list []json.RawMessage
 		if raw, ok := hooks[event]; ok {

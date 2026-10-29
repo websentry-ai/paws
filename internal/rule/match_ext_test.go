@@ -66,7 +66,7 @@ func TestMCPActionClassifiesRealToolNames(t *testing.T) {
 }
 
 func TestToolPrefixWildcard(t *testing.T) {
-	r := mustRule(t, "---\nname: x\nevent: pre-tool\nmatcher:\n  tool: mcp__slack__*|mcp__plugin_slack_slack__*\naction:\n  type: audit\n---\n")
+	r := mustRule(t, "---\nname: x\nevent: pre-tool\nmatcher:\n  tool: mcp__slack__*|mcp__plugin_slack_slack__*\naction:\n  type: require-skill\n  skill: s\n---\n")
 	for _, tool := range []string{"mcp__slack__slack_send_message", "mcp__plugin_slack_slack__slack_read_channel"} {
 		if !r.Matches(tool, "{}") {
 			t.Errorf("%s should match the slack wildcard", tool)
@@ -80,14 +80,14 @@ func TestToolPrefixWildcard(t *testing.T) {
 }
 
 func TestMCPActionMatcher(t *testing.T) {
-	r := mustRule(t, "---\nname: x\nevent: pre-tool\nmatcher:\n  mcp_action: send\naction:\n  type: audit\n---\n")
+	r := mustRule(t, "---\nname: x\nevent: pre-tool\nmatcher:\n  mcp_action: send\naction:\n  type: require-skill\n  skill: s\n---\n")
 	if !r.Matches("mcp__claude_ai_Gmail__send_message", "{}") {
 		t.Error("send should match a gmail send")
 	}
 	if r.Matches("mcp__claude_ai_Gmail__search_threads", "{}") || r.Matches("Bash", "git push") {
 		t.Error("send must not match reads or non-MCP tools")
 	}
-	multi := mustRule(t, "---\nname: x\nevent: pre-tool\nmatcher:\n  mcp_action: create|delete\naction:\n  type: audit\n---\n")
+	multi := mustRule(t, "---\nname: x\nevent: pre-tool\nmatcher:\n  mcp_action: create|delete\naction:\n  type: require-skill\n  skill: s\n---\n")
 	if !multi.Matches("mcp__github__create_pull_request", "{}") || !multi.Matches("mcp__x__delete_page", "{}") || multi.Matches("mcp__x__send_message", "{}") {
 		t.Error("pipe list of actions misbehaves")
 	}
@@ -131,11 +131,11 @@ func TestFileGlob(t *testing.T) {
 }
 
 func TestFileGlobOnlyMatchesFileTools(t *testing.T) {
-	r := mustRule(t, "---\nname: x\nevent: pre-tool\nmatcher:\n  file_glob: \"**/*.tsx\"\naction:\n  type: audit\n---\n")
+	r := mustRule(t, "---\nname: x\nevent: pre-tool\nmatcher:\n  file_glob: \"**/*.tsx\"\naction:\n  type: require-skill\n  skill: s\n---\n")
 	if !r.Matches("Edit", "/repo/src/App.tsx") || !r.Matches("Write", "/repo/App.tsx") {
 		t.Error("file_glob should match Edit and Write on a .tsx path")
 	}
-	nb := mustRule(t, "---\nname: nb\nevent: pre-tool\nmatcher:\n  file_glob: \"**/*.ipynb\"\naction:\n  type: audit\n---\n")
+	nb := mustRule(t, "---\nname: nb\nevent: pre-tool\nmatcher:\n  file_glob: \"**/*.ipynb\"\naction:\n  type: require-skill\n  skill: s\n---\n")
 	if !nb.Matches("NotebookEdit", "/repo/analysis.ipynb") {
 		t.Error("file_glob should match NotebookEdit on its notebook_path")
 	}
@@ -144,11 +144,11 @@ func TestFileGlobOnlyMatchesFileTools(t *testing.T) {
 	}
 }
 
-func TestSessionStartAndAdviseValidation(t *testing.T) {
+func TestSessionStartValidation(t *testing.T) {
 	ok := []string{
 		"---\nname: x\nevent: session-start\naction:\n  type: require-skill\n  skill: caveman\n---\n",
-		"---\nname: x\nevent: session-start\nmatcher:\n  command_regex: ^(startup|compact)$\naction:\n  type: advise\n  message: hi\n---\n",
-		"---\nname: x\nevent: pre-tool\nmatcher:\n  tool: mcp__playwright__*\naction:\n  type: advise\n  message: use agent-browser\n---\n",
+		"---\nname: x\nevent: session-start\nmatcher:\n  command_regex: ^(startup|compact)$\naction:\n  type: require-skill\n  skill: caveman\n  message: hi\n---\n",
+		"---\nname: x\nevent: pre-tool\nmatcher:\n  tool: mcp__playwright__*\naction:\n  type: require-skill\n  skill: agent-browser\n---\n",
 	}
 	for _, md := range ok {
 		if _, err := Parse([]byte(md), "t.md"); err != nil {
@@ -156,12 +156,9 @@ func TestSessionStartAndAdviseValidation(t *testing.T) {
 		}
 	}
 	bad := map[string]string{
-		"block on session-start":   "---\nname: x\nevent: session-start\naction:\n  type: block\n---\n",
-		"tool matcher on session":  "---\nname: x\nevent: session-start\nmatcher:\n  tool: Bash\naction:\n  type: audit\n---\n",
-		"advise without message":   "---\nname: x\nevent: pre-tool\naction:\n  type: advise\n---\n",
-		"advise on user-prompt":    "---\nname: x\nevent: user-prompt\naction:\n  type: advise\n  message: m\n---\n",
-		"unknown mcp_action":       "---\nname: x\nevent: pre-tool\nmatcher:\n  mcp_action: shout\naction:\n  type: audit\n---\n",
-		"unclosed brace file_glob": "---\nname: x\nevent: pre-tool\nmatcher:\n  file_glob: \"*.{ts\"\naction:\n  type: audit\n---\n",
+		"tool matcher on session":  "---\nname: x\nevent: session-start\nmatcher:\n  tool: Bash\naction:\n  type: require-skill\n  skill: s\n---\n",
+		"unknown mcp_action":       "---\nname: x\nevent: pre-tool\nmatcher:\n  mcp_action: shout\naction:\n  type: require-skill\n  skill: s\n---\n",
+		"unclosed brace file_glob": "---\nname: x\nevent: pre-tool\nmatcher:\n  file_glob: \"*.{ts\"\naction:\n  type: require-skill\n  skill: s\n---\n",
 	}
 	for name, md := range bad {
 		if _, err := Parse([]byte(md), "t.md"); err == nil {

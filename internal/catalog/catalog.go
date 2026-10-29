@@ -228,9 +228,6 @@ func ValidateFS(fsys fs.FS, display string) (*Catalog, []Problem) {
 				add(p, "digest file %s is %d bytes, over the %d-byte limit", b.Action.Digest, st.Size(), rule.MaxDigest)
 			}
 		}
-		if b.Action.Type == "exec-script" && !isRegular(fsys, path.Join(dir, filepath.ToSlash(b.Action.Script))) {
-			add(p, "script %s not found", b.Action.Script)
-		}
 	}
 
 	for _, p := range c.Packs {

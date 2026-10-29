@@ -7,14 +7,17 @@ import (
 	"github.com/websentry-ai/paws/internal/rule"
 )
 
-// Agent identifies this adapter in audit records and exec-script payloads.
+// Agent identifies this adapter in audit records.
 const Agent = "claude-code"
 
 // RegisteredEvents are the Claude Code hook events `paws init` subscribes to.
-var RegisteredEvents = []string{"PreToolUse", "UserPromptSubmit", "SessionStart", "PostToolUse", "Stop"}
+var RegisteredEvents = []string{"PreToolUse", "SessionStart", "PostToolUse", "Stop"}
 
-// ToEvent normalizes a Claude Code hook event into the engine's terms; raw passes through untouched for exec-scripts.
-func ToEvent(in *Input, raw []byte) gate.Event {
+// RetiredEvents were registered by earlier builds; `paws init` removes paws entries from them.
+var RetiredEvents = []string{"UserPromptSubmit"}
+
+// ToEvent normalizes a Claude Code hook event into the engine's terms.
+func ToEvent(in *Input) gate.Event {
 	ev := gate.Event{
 		Agent:      Agent,
 		Tool:       in.ToolName,
@@ -24,13 +27,10 @@ func ToEvent(in *Input, raw []byte) gate.Event {
 		Cwd:        in.CWD,
 		AgentID:    in.AgentID,
 		AgentType:  in.AgentType,
-		Raw:        raw,
 	}
 	switch in.HookEventName {
 	case "PreToolUse":
 		ev.Kind = rule.KindTool
-	case "UserPromptSubmit":
-		ev.Kind = rule.KindPrompt
 	case "SessionStart":
 		ev.Kind = rule.KindSession
 	}
@@ -40,21 +40,10 @@ func ToEvent(in *Input, raw []byte) gate.Event {
 // Render turns an engine decision into Claude Code's wire format for eventName.
 func Render(eventName string, d gate.Decision) Output {
 	switch {
-	case d.Verdict >= gate.Ask:
-		if eventName == "UserPromptSubmit" {
-			out := Output{Decision: "block", Reason: d.Reason}
-			if d.Context != "" {
-				out.SpecificOutput = &SpecificOutput{HookEventName: eventName, AdditionalContext: d.Context}
-			}
-			return out
-		}
-		decision := "deny"
-		if d.Verdict == gate.Ask {
-			decision = "ask"
-		}
+	case d.Verdict == gate.Deny:
 		return Output{SpecificOutput: &SpecificOutput{
 			HookEventName:            eventName,
-			PermissionDecision:       decision,
+			PermissionDecision:       "deny",
 			PermissionDecisionReason: d.Reason,
 			AdditionalContext:        d.Context,
 		}}
@@ -69,8 +58,6 @@ func EventName(e string) string {
 	switch e {
 	case "pre-tool", "pre-commit", "pre-push":
 		return "PreToolUse"
-	case "user-prompt":
-		return "UserPromptSubmit"
 	case "session-start":
 		return "SessionStart"
 	}

@@ -37,8 +37,9 @@ func Explain(args []string) int {
 				}
 				if args[i] == "--tool" {
 					in.ToolName = args[i+1]
-				} else {
-					in.HookEventName = hook.EventName(args[i+1])
+				} else if in.HookEventName = hook.EventName(args[i+1]); in.HookEventName != "PreToolUse" && in.HookEventName != "SessionStart" {
+					fmt.Fprintf(os.Stderr, "paws: unknown event %q (want pre-tool, pre-commit, pre-push or session-start)\n", args[i+1])
+					return 2
 				}
 				i++
 			default:
@@ -47,8 +48,6 @@ func Explain(args []string) int {
 		}
 		text := strings.Join(words, " ")
 		switch in.HookEventName {
-		case "UserPromptSubmit":
-			in.Prompt = text
 		case "SessionStart":
 			in.ToolName, in.Source = "", text
 		default:
@@ -67,7 +66,7 @@ func Explain(args []string) int {
 		in.CWD = cwd
 	}
 	res := gate.Collect(cwd)
-	ev := hook.ToEvent(in, nil)
+	ev := hook.ToEvent(in)
 
 	fmt.Printf("event : %s\ntool  : %s\ninput : %s\n.paws : %s\n",
 		in.HookEventName, in.ToolName, ev.Target, strings.Join(res.Dirs, ", "))
@@ -97,10 +96,8 @@ func Explain(args []string) int {
 func printDecision(d gate.Decision) {
 	fmt.Println("\ndecision:")
 	switch d.Verdict {
-	case gate.Deny, gate.DenyRetry:
+	case gate.Deny:
 		fmt.Printf("  DENY — %s\n", d.Reason)
-	case gate.Ask:
-		fmt.Printf("  ASK — %s\n", d.Reason)
 	default:
 		if d.Context != "" {
 			fmt.Printf("  allow + context: %s\n", d.Context)

@@ -64,7 +64,7 @@ func TestLoadDirSkipsBadRules(t *testing.T) {
 	dir := t.TempDir()
 	pawsDir := filepath.Join(dir, ".paws")
 	mustMkdir(t, pawsDir)
-	mustWrite(t, filepath.Join(pawsDir, "good.md"), "---\nname: good\nevent: pre-tool\naction:\n  type: block\n---\nok")
+	mustWrite(t, filepath.Join(pawsDir, "good.md"), "---\nname: good\nevent: pre-tool\naction:\n  type: require-skill\n  skill: s\n---\nok")
 	mustWrite(t, filepath.Join(pawsDir, "bad.md"), "no frontmatter here")
 	mustWrite(t, filepath.Join(pawsDir, "notes.txt"), "ignored, not .md")
 
@@ -80,7 +80,7 @@ func TestLoadDirSkipsBadRules(t *testing.T) {
 
 func TestLoadDirFollowsSymlinkedRoot(t *testing.T) {
 	real := t.TempDir()
-	mustWrite(t, filepath.Join(real, "rule.md"), "---\nname: shared\nevent: pre-tool\naction:\n  type: block\n---\n")
+	mustWrite(t, filepath.Join(real, "rule.md"), "---\nname: shared\nevent: pre-tool\naction:\n  type: require-skill\n  skill: s\n---\n")
 
 	link := filepath.Join(t.TempDir(), ".paws")
 	if err := os.Symlink(real, link); err != nil {
@@ -98,12 +98,12 @@ func TestCollectMergesAllScopes(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("HOME", home)
 	mustMkdir(t, filepath.Join(home, ".paws"))
-	mustWrite(t, filepath.Join(home, ".paws", "home.md"), "---\nname: home\nevent: pre-tool\naction:\n  type: audit\n---\n")
+	mustWrite(t, filepath.Join(home, ".paws", "home.md"), "---\nname: home\nevent: pre-tool\naction:\n  type: require-skill\n  skill: s\n---\n")
 
 	repo := filepath.Join(t.TempDir(), "repo")
 	mustMkdir(t, filepath.Join(repo, ".git"))
 	mustMkdir(t, filepath.Join(repo, ".paws"))
-	mustWrite(t, filepath.Join(repo, ".paws", "repo.md"), "---\nname: repo\nevent: pre-tool\naction:\n  type: audit\n---\n")
+	mustWrite(t, filepath.Join(repo, ".paws", "repo.md"), "---\nname: repo\nevent: pre-tool\naction:\n  type: require-skill\n  skill: s\n---\n")
 
 	res := Collect(repo)
 	if len(res.Rules) != 2 {
@@ -170,7 +170,7 @@ func TestLoadSkipsSkillsDigestsAndReadmes(t *testing.T) {
 	t.Setenv("HOME", t.TempDir())
 	dir := filepath.Join(t.TempDir(), ".paws")
 	for path, body := range map[string]string{
-		"aws/s3.md":                  "---\nname: s3\nevent: pre-tool\naction:\n  type: block\n---\n",
+		"aws/s3.md":                  "---\nname: s3\nevent: pre-tool\naction:\n  type: require-skill\n  skill: s\n---\n",
 		"aws/digests/aws-s3.md":      "Block public access.\n",
 		"aws/skills/aws-s3/SKILL.md": "---\nname: aws-s3\n---\n",
 		"README.md":                  "# my rules\n",

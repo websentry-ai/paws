@@ -40,14 +40,14 @@ func TestGateFailsOpen(t *testing.T) {
 	}
 }
 
-func TestGateDeniesAMatchingBlockRule(t *testing.T) {
+func TestGateDeniesAnUnloadedSkill(t *testing.T) {
 	bin := buildPaws(t)
 	home := t.TempDir()
 	repo := t.TempDir()
 	mustMkdirAll(t, filepath.Join(repo, ".git"))
 	mustMkdirAll(t, filepath.Join(repo, ".paws"))
-	mustWriteFile(t, filepath.Join(repo, ".paws", "block.md"),
-		"---\nname: block-rm\nevent: pre-tool\nmatcher:\n  tool: Bash\n  command_regex: rm -rf\naction:\n  type: block\n---\n")
+	mustWriteFile(t, filepath.Join(repo, ".paws", "rm.md"),
+		"---\nname: rm-skill\nevent: pre-tool\nmatcher:\n  tool: Bash\n  command_regex: rm -rf\naction:\n  type: require-skill\n  skill: s\n---\n")
 
 	cmd := exec.Command(bin, "gate")
 	cmd.Env = append(os.Environ(), "HOME="+home)
@@ -59,6 +59,48 @@ func TestGateDeniesAMatchingBlockRule(t *testing.T) {
 	}
 	if got := stdout.String(); !bytes.Contains([]byte(got), []byte(`"permissionDecision":"deny"`)) {
 		t.Errorf("expected a deny decision, got %q", got)
+	}
+}
+
+// A rule written for a removed action (or the removed user-prompt event) is skipped with a
+// notice; it never denies, and the require-skill rules beside it still work.
+func TestGateSkipsRemovedActionRules(t *testing.T) {
+	bin := buildPaws(t)
+	home := t.TempDir()
+	repo := t.TempDir()
+	mustMkdirAll(t, filepath.Join(repo, ".git"))
+	mustMkdirAll(t, filepath.Join(repo, ".paws"))
+	mustWriteFile(t, filepath.Join(repo, ".paws", "old-block.md"),
+		"---\nname: old-block\nevent: pre-tool\nmatcher:\n  tool: Bash\n  command_regex: rm -rf\naction:\n  type: block\n---\n")
+	mustWriteFile(t, filepath.Join(repo, ".paws", "old-prompt.md"),
+		"---\nname: old-prompt\nevent: user-prompt\naction:\n  type: prompt-inject\n  message: hi\n---\n")
+
+	run := func(stdin string) string {
+		t.Helper()
+		cmd := exec.Command(bin, "gate")
+		cmd.Env = append(os.Environ(), "HOME="+home)
+		cmd.Stdin = bytes.NewReader([]byte(stdin))
+		var stdout bytes.Buffer
+		cmd.Stdout = &stdout
+		if err := cmd.Run(); err != nil {
+			t.Fatalf("gate exited non-zero: %v", err)
+		}
+		return stdout.String()
+	}
+	rm := `{"cwd":"` + repo + `","hook_event_name":"PreToolUse","tool_name":"Bash","tool_input":{"command":"rm -rf /tmp/x"}}`
+	if got := run(rm); bytes.Contains([]byte(got), []byte("deny")) || !bytes.Contains([]byte(got), []byte("2 rule file(s) failed to parse")) {
+		t.Errorf("removed actions must be skipped with a notice, got %q", got)
+	}
+	// An older settings file can still send UserPromptSubmit; it must stay a silent allow, without rule notices.
+	prompt := `{"cwd":"` + repo + `","hook_event_name":"UserPromptSubmit","prompt":"hi"}`
+	if got := run(prompt); bytes.Contains([]byte(got), []byte("decision")) || bytes.Contains([]byte(got), []byte("systemMessage")) {
+		t.Errorf("a retired UserPromptSubmit must allow silently, got %q", got)
+	}
+
+	mustWriteFile(t, filepath.Join(repo, ".paws", "skill.md"),
+		"---\nname: rm-skill\nevent: pre-tool\nmatcher:\n  tool: Bash\n  command_regex: rm -rf\naction:\n  type: require-skill\n  skill: s\n---\n")
+	if got := run(rm); !bytes.Contains([]byte(got), []byte(`"permissionDecision":"deny"`)) || !bytes.Contains([]byte(got), []byte(`\"s\" skill`)) {
+		t.Errorf("the require-skill rule beside the skipped ones should still deny, got %q", got)
 	}
 }
 

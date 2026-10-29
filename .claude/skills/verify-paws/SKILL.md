@@ -17,7 +17,7 @@ Nothing stays running. Each case builds nothing extra; the run builds paws once:
 ```bash
 python3 .claude/skills/verify-paws/scripts/drive.py run require-skill-commit
 python3 .claude/skills/verify-paws/scripts/drive.py run --all
-python3 .claude/skills/verify-paws/scripts/drive.py run block-tag --keep   # keep scratch repo
+python3 .claude/skills/verify-paws/scripts/drive.py run require-skill-commit --keep   # keep scratch repo
 ```
 
 A case finishes when `claude -p` exits (end of turn). Default timeout 300 s.
@@ -125,7 +125,7 @@ Make every case prove behaviour, not just a hook return value:
 ## Interactive TUI
 
 `scripts/interactive.py` drives the real `claude` TUI in a private tmux server
-for what headless can't show: `warn` approval prompts and how denies render.
+for what headless can't show: how the TUI renders a deny and the skill load.
 Cases live in `cases-interactive/`, with the same layout, isolation and
 `[expect]` keys (minus `final_contains`), plus:
 

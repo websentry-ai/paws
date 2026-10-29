@@ -1,8 +1,0 @@
-description = "exec-script on git commit: script denies with a reason, agent fixes the command, retry passes"
-prompt = "Create an empty git commit in this repo with the message 'initial'. Use the Bash tool. If a hook rejects it, follow the hook's instructions; the ticket for this work is PAWS-101."
-allowed_tools = ["Bash(git:*)"]
-
-[expect]
-tool_result_contains = ["must reference a ticket"]
-audit = [{ rule = "ticket-ref", verdict = "deny", action = "exec-script" }]
-shell = ["git log -1 --format=%s | grep -Eq 'PAWS-[0-9]+'"]

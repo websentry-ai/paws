@@ -1,0 +1,15 @@
+description = "paws skill: a rule that denies the agent's own check still gets checked and reported"
+prompt = 'Require the sql-safety skill before any command containing DROP TABLE, in any letter case. Repo rule, via paws.'
+allowed_tools = ["Skill", "Read", "Write", "Edit", "Glob", "Bash(paws:*)", "Bash(mkdir:*)", "Bash(ls:*)"]
+timeout = 300
+
+[expect]
+skills_invoked = ["paws"]
+tool_result_contains = ["decision:"]
+shell = [
+  "paws explain 'psql -c \"DROP TABLE users\"' | grep -q 'DENY.*sql-safety'",
+  "paws explain 'psql -c \"drop table users\"' | grep -q '^  DENY'",
+  "paws explain 'mysql -e '\\''Drop Table x'\\''' | grep -q '^  DENY'",
+  "paws explain 'psql -c \"select 1\"' | grep -q 'allow (no matching gate)'",
+  "paws explain 'git log' | grep -q 'allow (no matching gate)'",
+]

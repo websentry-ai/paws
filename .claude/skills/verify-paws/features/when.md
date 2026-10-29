@@ -22,7 +22,7 @@ Add `when:` beside `matcher:` in a rule.
 - `run when-repo-marker-hit`: `infra/terraform/` exists, the commit is gated, the skill's `TFM-3K:` prefix lands.
 - `run when-repo-marker-miss`: `infra/` without `terraform/`, no audit record, plain commit.
 - `run when-new-file`: an Edit of an existing file is never gated; the Write that creates `app/stats.py` is denied once, and after the skill the file opens with `# NB-58X module`.
-- `run when-agent-count`: with `agent-count>1`, three sequential subagent spawns: the first two run (their files exist), the third is blocked with the rule's name.
+- `run when-agent-count`: with `agent-count>1`, three sequential subagent spawns: the first two run (their files exist), the third is denied naming the skill once; the agent loads it and the third spawn runs, following the skill.
 
 ## Gotchas
 

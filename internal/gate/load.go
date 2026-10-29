@@ -1,4 +1,4 @@
-// Package gate is the paws decision engine: discover rules, resolve them to a decision, run exec-scripts, audit.
+// Package gate is the paws decision engine: discover rules, resolve them to a decision, audit.
 package gate
 
 import (

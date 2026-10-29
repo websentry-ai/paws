@@ -34,7 +34,7 @@ func Gate() (code int) {
 	if in.CWD == "" {
 		in.CWD, _ = os.Getwd()
 	}
-	ev := hook.ToEvent(&in, data)
+	ev := hook.ToEvent(&in)
 	// Telemetry-only events: count and leave. No rules run after a tool or at turn end.
 	switch in.HookEventName {
 	case "Stop":
@@ -42,6 +42,9 @@ func Gate() (code int) {
 		return allow()
 	case "PostToolUse":
 		gate.LogTelemetry("tool_result", ev, map[string]any{"tool": in.ToolName})
+		return allow()
+	case "UserPromptSubmit":
+		// Retired event: a settings entry from an older build may still call us until `paws init` reruns.
 		return allow()
 	case "PreToolUse":
 		if in.ToolName == "Skill" {

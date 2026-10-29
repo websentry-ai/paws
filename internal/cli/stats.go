@@ -15,14 +15,14 @@ type RuleStats struct {
 	Rule string `json:"rule"`
 	// Fires is every record the rule produced; the other counts split it.
 	Fires int `json:"fires"`
-	// Denied counts denies (require-skill, block, exec-script).
+	// Denied counts denies.
 	Denied int `json:"denied"`
 	// AlreadyLoaded counts allows via skill-load in sessions where this rule had not denied first:
 	// the agent had the skill without being told. Over time this is internalization.
 	AlreadyLoaded int `json:"already_loaded"`
 	// LoadedAfterDeny counts allows via skill-load that followed a deny in the same session.
 	LoadedAfterDeny int `json:"loaded_after_deny"`
-	// Delivered counts digests and advice the agent received instead of loading a skill.
+	// Delivered counts digests and session-start context the agent received instead of loading a skill.
 	Delivered int `json:"delivered"`
 }
 
@@ -100,7 +100,7 @@ func summarize(paths []string, inScope []string) Stats {
 				rs.LoadedAfterDeny++
 			case r.SatisfiedBy == "skill-load":
 				rs.AlreadyLoaded++
-			case r.SatisfiedBy == "digest-delivered" || r.SatisfiedBy == "advice-delivered" || r.Context:
+			case r.SatisfiedBy == "digest-delivered" || r.Context:
 				rs.Delivered++
 			}
 		}
@@ -170,8 +170,7 @@ func localStats() (Stats, string) {
 	var names []string
 	seen := map[string]bool{}
 	for _, r := range gate.Collect(cwd).Rules {
-		// prompt-inject writes no audit record by design, so it would always look dormant.
-		if !seen[r.Name] && r.Action.Type != "prompt-inject" {
+		if !seen[r.Name] {
 			seen[r.Name] = true
 			names = append(names, r.Name)
 		}

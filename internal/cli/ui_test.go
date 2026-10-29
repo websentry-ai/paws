@@ -5,6 +5,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"os"
+	"regexp"
 	"strings"
 	"testing"
 )
@@ -25,8 +26,17 @@ func TestUIHandler(t *testing.T) {
 		return rec
 	}
 
-	if rec := do("GET", "/", "127.0.0.1:4242"); rec.Code != 200 || !strings.Contains(rec.Body.String(), "<title>paws</title>") {
+	rec := do("GET", "/", "127.0.0.1:4242")
+	if rec.Code != 200 || !strings.Contains(rec.Body.String(), "<title>paws</title>") {
 		t.Errorf("page: %d", rec.Code)
+	}
+	// The page loads its bundle from the embedded build, never from another origin.
+	script := regexp.MustCompile(`src="\./(assets/[^"]+\.js)"`).FindStringSubmatch(rec.Body.String())
+	if script == nil {
+		t.Fatalf("page should load its bundle from ./assets: %s", rec.Body)
+	}
+	if rec := do("GET", "/"+script[1], "127.0.0.1:4242"); rec.Code != 200 || !strings.Contains(rec.Header().Get("Content-Type"), "javascript") {
+		t.Errorf("bundle %s: %d %q", script[1], rec.Code, rec.Header().Get("Content-Type"))
 	}
 	if rec := do("GET", "/api/catalog", "localhost:4242"); rec.Code != 200 {
 		t.Errorf("catalog: %d %s", rec.Code, rec.Body)

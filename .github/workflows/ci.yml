@@ -39,6 +39,15 @@ jobs:
           node .github/release/check.mjs
 
       - run: npm test --prefix .github/release
+      - name: Check the committed paws ui bundle
+        run: |
+          npm ci --prefix web --ignore-scripts --no-audit --no-fund
+          npm run build --prefix web
+          if [ -n "$(git status --porcelain -- web/dist)" ]; then
+            git status --short -- web/dist
+            echo "::error::web/dist doesn't match web/src. Run 'npm ci && npm run build' in web/ and commit web/dist."
+            exit 1
+          fi
       - uses: actions/setup-go@v5
         with:
           go-version-file: go.mod

@@ -219,7 +219,7 @@ internal/pack     paws add/remove: bindings, skill install, state
 internal/cli      the commands
 catalog, packs    shipped bindings and packs
 skills/paws       the skill paws init installs
-web               the page paws ui serves
+web               the paws ui React app; web/dist is the committed build
 npm               the unbound-paws npm wrapper
 docs              rules, catalog, telemetry references
 examples          sample .paws rules

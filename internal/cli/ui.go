@@ -66,7 +66,7 @@ func UI(args []string) int {
 func uiHandler(addr string) http.Handler {
 	_, port, _ := net.SplitHostPort(addr)
 	allowed := map[string]bool{"127.0.0.1:" + port: true, "localhost:" + port: true}
-	page, _ := fs.Sub(paws.Web, "web")
+	page, _ := fs.Sub(paws.Web, "web/dist")
 	mux := http.NewServeMux()
 	mux.Handle("/", http.FileServer(http.FS(page)))
 	mux.HandleFunc("/api/catalog", func(w http.ResponseWriter, r *http.Request) {
@@ -93,7 +93,7 @@ func uiHandler(addr string) http.Handler {
 			http.Error(w, "read-only", http.StatusMethodNotAllowed)
 			return
 		}
-		w.Header().Set("Content-Security-Policy", "default-src 'self'; style-src 'self' 'unsafe-inline'; script-src 'self' 'unsafe-inline'; frame-ancestors 'none'")
+		w.Header().Set("Content-Security-Policy", "default-src 'self'; style-src 'self' 'unsafe-inline'; script-src 'self'; frame-ancestors 'none'")
 		w.Header().Set("X-Content-Type-Options", "nosniff")
 		mux.ServeHTTP(w, r)
 	})

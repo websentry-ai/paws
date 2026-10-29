@@ -21,7 +21,7 @@ func TestLogAuditWritesJSONL(t *testing.T) {
 		t.Fatalf("expected an audit log: %v", err)
 	}
 	line := strings.TrimSpace(string(data))
-	if !strings.Contains(line, `"rule":"audited"`) || !strings.Contains(line, `"verdict":"allow"`) {
+	if !strings.Contains(line, `"rule":"audited"`) || !strings.Contains(line, `"verdict":"allow"`) || !strings.Contains(line, `"skill":"s"`) {
 		t.Errorf("audit record missing expected fields: %s", line)
 	}
 }

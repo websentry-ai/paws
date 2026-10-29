@@ -36,6 +36,7 @@ type Stats struct {
 }
 
 type auditRecord struct {
+	TS          string `json:"ts"`
 	Event       string `json:"event"`
 	Rule        string `json:"rule"`
 	Verdict     string `json:"verdict"`
@@ -43,6 +44,7 @@ type auditRecord struct {
 	Context     bool   `json:"context_added"`
 	Session     string `json:"session"`
 	Skill       string `json:"skill"`
+	Source      string `json:"source"`
 }
 
 // summarize reads audit records in order (rotated file first) and counts them.

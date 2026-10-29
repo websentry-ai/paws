@@ -13,8 +13,8 @@ paws checks the session transcript for the skill. If it isn't loaded, the call
 is denied once with a message naming the skill; the agent loads it and
 retries, and the retry goes through. Husky, for agents.
 
-paws guarantees the skill was loaded; the skill governs the behaviour. It
-never rewrites tool input, reads tool output, or calls the network.
+paws guarantees the skill was loaded; the skill governs the behaviour. The
+hook never rewrites tool input, reads tool output, or calls the network.
 
 Apache-2.0 · Claude Code · no account.
 
@@ -102,8 +102,8 @@ The full reference: [docs/rules.md](docs/rules.md).
 ## What paws does and doesn't do
 
 - **Local only.** The hook reads rule files and the session transcript and
-  writes `~/.paws/audit.log`. Nothing leaves the machine
-  ([docs/telemetry.md](docs/telemetry.md)).
+  writes `~/.paws/audit.log`. Nothing leaves the machine unless you run
+  `paws login` and `paws sync` ([docs/telemetry.md](docs/telemetry.md)).
 - **Fails open.** A rule that doesn't parse is skipped with a one-line
   notice; an internal error allows the call. A hook that wedges your terminal
   gets uninstalled within the hour.
@@ -113,6 +113,24 @@ The full reference: [docs/rules.md](docs/rules.md).
 - **Not a sandbox.** Regex rules match command text, not shell semantics.
   A gate makes an agent that follows instructions load the skill; it doesn't
   stop an adversary.
+
+## Portal (optional)
+
+Nothing leaves the machine unless you run `paws login` and `paws sync`.
+
+```bash
+paws login            # confirm a code in the browser; saves ~/.paws/credentials.json
+paws sync --dry-run   # print exactly what would be uploaded, send nothing
+paws sync             # upload rule counts not sent before
+paws logout
+```
+
+`paws sync` sends one record per rule firing: the binding name, its event,
+skill and verdict, whether the skill was already loaded, and for catalog
+bindings the matcher. Never command text, tool input, file paths or session
+ids. The hook itself never calls the network. The fields:
+[docs/telemetry.md](docs/telemetry.md#portal-upload-paws-sync).
+`PAWS_PORTAL_API` sets the portal address.
 
 ## Install details
 

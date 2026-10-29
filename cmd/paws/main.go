@@ -46,6 +46,12 @@ func run(args []string) int {
 		return cli.Pin(args[1:])
 	case "ui":
 		return cli.UI(args[1:])
+	case "login":
+		return cli.Login(args[1:])
+	case "logout":
+		return cli.Logout(args[1:])
+	case "sync":
+		return cli.Sync(args[1:])
 	case "version", "--version", "-v":
 		fmt.Println("paws " + version)
 		return 0
@@ -77,9 +83,15 @@ Usage:
   paws index [-o file]                           The catalog as JSON (website, local UI).
   paws validate [root]                           Check root/catalog bindings and root/packs manifests.
   paws pin [root]                                Fetch upstream skills and pin their content hashes.
+  paws login                                     Link this machine to the paws portal (opt-in).
+  paws logout                                    Forget the portal login.
+  paws sync [--dry-run]                          Upload new rule counts to the portal; --dry-run prints them.
   paws version                                   Print version.
 
 Rules are .paws/**/*.md files; paws reads every .paws/ from the working
 directory up to the repo root (or $HOME if no repo), plus ~/.paws.
+
+Nothing leaves the machine unless you run paws login and paws sync. The
+portal address is $PAWS_PORTAL_API (default http://localhost:8000).
 `)
 }

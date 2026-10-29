@@ -42,6 +42,9 @@ func logAudit(ev Event, r *rule.Rule, oc outcome) {
 		"source":  r.SourcePath,
 		"session": ev.Session,
 	}
+	if r.Action.Type == rule.ActionRequireSkill {
+		rec["skill"] = r.Action.Skill // the bound skill, so `paws sync` needn't re-read the rule file
+	}
 	if oc.satisfiedBy != "" {
 		rec["satisfied_by"] = oc.satisfiedBy
 	}

@@ -14,7 +14,8 @@ is denied once with a message naming the skill; the agent loads it and
 retries, and the retry goes through. Husky, for agents.
 
 paws guarantees the skill was loaded; the skill governs the behaviour. The
-hook never rewrites tool input, reads tool output, or calls the network.
+hook never rewrites tool input or reads tool output, and the gate that decides
+each tool call never calls the network.
 
 Apache-2.0 · Claude Code · no account.
 
@@ -103,7 +104,7 @@ The full reference: [docs/rules.md](docs/rules.md).
 
 - **Local only.** The hook reads rule files and the session transcript and
   writes `~/.paws/audit.log`. Nothing leaves the machine unless you run
-  `paws login` and `paws sync` ([docs/telemetry.md](docs/telemetry.md)).
+  `paws login` ([docs/telemetry.md](docs/telemetry.md)).
 - **Fails open.** A rule that doesn't parse is skipped with a one-line
   notice; an internal error allows the call. A hook that wedges your terminal
   gets uninstalled within the hour.
@@ -116,21 +117,41 @@ The full reference: [docs/rules.md](docs/rules.md).
 
 ## Portal (optional)
 
-Nothing leaves the machine unless you run `paws login` and `paws sync`.
+Nothing leaves the machine until you run `paws login`.
 
 ```bash
-paws login            # confirm a code in the browser; saves ~/.paws/credentials.json
-paws sync --dry-run   # print exactly what would be uploaded, send nothing
-paws sync             # upload rule counts not sent before
+paws login              # confirm a code in the browser; saves ~/.paws/credentials.json
+paws login --key pk_... # a machine with no browser: a one-time key made in the portal
+paws sync --dry-run     # print exactly what the next upload holds, send nothing
+paws sync               # upload and pull settings now
 paws logout
 ```
 
-`paws sync` sends one record per rule firing: the binding name, its event,
-skill and verdict, whether the skill was already loaded, and for catalog
-bindings the matcher. Never command text, tool input, file paths or session
-ids. The hook itself never calls the network. The fields:
-[docs/telemetry.md](docs/telemetry.md#portal-upload-paws-sync).
-`PAWS_PORTAL_API` sets the portal address.
+What leaves the machine once you are logged in:
+
+- counts: each time a rule fired, its skill and verdict, and whether the
+  skill was already loaded;
+- the commands Claude ran, with secrets redacted and cut to 500 characters;
+- MCP calls: server, tool and action class (send, create, update, delete);
+- tool actions as a short key, such as `git commit`, `gh pr create`,
+  `edit migrations/**` or `DELETE`;
+- file paths relative to the repo root (a path outside the repo is left out);
+- the names of your installed skills and the paws rules in scope.
+
+Never prompts, replies, file contents, tool output, absolute paths or session
+ids. Field by field: [docs/telemetry.md](docs/telemetry.md#portal-upload).
+
+When: after Claude finishes a turn, from the async Stop hook, at most every
+10 minutes (`PAWS_SYNC_INTERVAL`); on `paws sync`; and once at `paws login`.
+
+Settings come down from the portal: the skills you turn on in the browser
+and the actions each one runs before. The Stop hook checks for a change at
+most every 15 minutes (`PAWS_CONFIG_INTERVAL`), then writes them as rule files
+under `~/.paws/portal/`. Catalog skills install into `~/.claude/skills` at
+their pinned commit and are refused if their content hash differs; a skill
+directory you wrote or edited is never replaced. The gate itself stays
+offline: it reads those files like any other rule, and a tool call is never
+held up by the network. `PAWS_PORTAL_API` sets the portal address.
 
 ## Install details
 

@@ -39,9 +39,13 @@ func Gate() (code int) {
 	switch in.HookEventName {
 	case "Stop":
 		gate.LogTelemetry("turn_end", ev, nil)
-		return allow()
+		allow()
+		wrote = true          // a panic below must not print a second decision
+		syncAfterTurn(in.CWD) // the async Stop hook is the only hook that may use the network
+		return 0
 	case "PostToolUse":
 		gate.LogTelemetry("tool_result", ev, map[string]any{"tool": in.ToolName})
+		gate.LogAction(ev)
 		return allow()
 	case "UserPromptSubmit":
 		// Retired event: a settings entry from an older build may still call us until `paws init` reruns.

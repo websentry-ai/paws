@@ -17,7 +17,8 @@ import (
 	"github.com/websentry-ai/paws/internal/gate"
 )
 
-// The portal is opt-in: only `paws login` and `paws sync` talk to it. The hook never does.
+// The portal is opt-in. Only `paws login`, `paws sync` and, once logged in, the async Stop
+// hook talk to it. The PreToolUse gate never does.
 
 // defaultPortalAPI is a placeholder until the hosted portal's address is final.
 const defaultPortalAPI = "http://localhost:8000"
@@ -102,6 +103,19 @@ func postJSON(url, token string, body any) (int, []byte, error) {
 		return 0, nil, err
 	}
 	req.Header.Set("Content-Type", "application/json")
+	return portalDo(req, token)
+}
+
+// getJSON fetches url and returns the status and response body.
+func getJSON(url, token string) (int, []byte, error) {
+	req, err := http.NewRequest(http.MethodGet, url, nil)
+	if err != nil {
+		return 0, nil, err
+	}
+	return portalDo(req, token)
+}
+
+func portalDo(req *http.Request, token string) (int, []byte, error) {
 	if token != "" {
 		req.Header.Set("Authorization", "Bearer "+token)
 	}
@@ -110,9 +124,12 @@ func postJSON(url, token string, body any) (int, []byte, error) {
 		return 0, nil, err
 	}
 	defer resp.Body.Close()
-	out, err := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
+	out, err := io.ReadAll(io.LimitReader(resp.Body, maxPortalResponse))
 	return resp.StatusCode, out, err
 }
+
+// maxPortalResponse bounds what paws reads from the portal; a config with many rule texts fits.
+const maxPortalResponse = 8 << 20
 
 // portalError turns an unexpected response into an error, using the portal's {"error": "..."}.
 func portalError(status int, body []byte) error {
@@ -139,10 +156,13 @@ type deviceToken struct {
 	DeviceID json.RawMessage `json:"device_id"`
 }
 
-// Login links this machine to a portal account with the device flow: `paws login`.
+// Login links this machine to a portal account: `paws login` runs the device flow in the
+// browser; `paws login --key <one-time-key>` connects a machine with no browser. Then it syncs
+// once, so the portal sees this machine's skills right away.
 func Login(args []string) int {
-	if len(args) != 0 {
-		fmt.Fprintln(os.Stderr, "usage: paws login")
+	key, ok := loginKey(args)
+	if !ok {
+		fmt.Fprintln(os.Stderr, "usage: paws login [--key <one-time-key>]")
 		return 2
 	}
 	path := credentialsPath()
@@ -151,17 +171,13 @@ func Login(args []string) int {
 		return 1
 	}
 	api := portalAPI()
-	dc, err := requestDeviceCode(api)
-	if err != nil {
-		fmt.Fprintf(os.Stderr, "paws: %v\n", err)
-		return 1
+	var tok deviceToken
+	var err error
+	if key != "" {
+		tok, err = redeemKey(api, key)
+	} else {
+		tok, err = deviceLogin(api)
 	}
-	fmt.Printf("Open %s and confirm code %s\n", dc.VerificationURI, dc.UserCode)
-	if u, err := url.Parse(dc.VerificationURI); err == nil && (u.Scheme == "https" || u.Scheme == "http") {
-		openURL(dc.VerificationURI)
-	}
-	fmt.Println("Waiting for confirmation (Ctrl-C to cancel)...")
-	tok, err := pollDeviceToken(api, dc)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "paws: %v\n", err)
 		return 1
@@ -171,15 +187,75 @@ func Login(args []string) int {
 		fmt.Fprintf(os.Stderr, "paws: saving credentials: %v\n", err)
 		return 1
 	}
-	fmt.Println("Logged in. Run `paws sync` to upload counts.")
+	fmt.Println("Logged in.")
+	cwd, _ := os.Getwd()
+	rep, err := syncNow(&c, cwd)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "paws: first sync failed: %v (run `paws sync` to retry)\n", err)
+		return 0
+	}
+	printSyncReport(rep)
 	return 0
 }
 
-func requestDeviceCode(api string) (deviceCode, error) {
+// loginKey reads `--key K` or `--key=K`; no arguments means the device flow.
+func loginKey(args []string) (string, bool) {
+	switch {
+	case len(args) == 0:
+		return "", true
+	case len(args) == 2 && args[0] == "--key" && args[1] != "":
+		return args[1], true
+	case len(args) == 1 && strings.HasPrefix(args[0], "--key=") && len(args[0]) > len("--key="):
+		return strings.TrimPrefix(args[0], "--key="), true
+	}
+	return "", false
+}
+
+// deviceLogin shows a code to confirm in the browser and waits for the confirmation.
+func deviceLogin(api string) (deviceToken, error) {
+	dc, err := requestDeviceCode(api)
+	if err != nil {
+		return deviceToken{}, err
+	}
+	fmt.Printf("Open %s and confirm code %s\n", dc.VerificationURI, dc.UserCode)
+	if u, err := url.Parse(dc.VerificationURI); err == nil && (u.Scheme == "https" || u.Scheme == "http") {
+		openURL(dc.VerificationURI)
+	}
+	fmt.Println("Waiting for confirmation (Ctrl-C to cancel)...")
+	return pollDeviceToken(api, dc)
+}
+
+// redeemKey trades a one-time key made in the portal for a device token.
+func redeemKey(api, key string) (deviceToken, error) {
+	body := deviceInfo()
+	body["key"] = key
+	var tok deviceToken
+	status, resp, err := postJSON(api+"/paws/v1/device/key", "", body)
+	if err != nil {
+		return tok, err
+	}
+	switch status {
+	case http.StatusOK:
+		if json.Unmarshal(resp, &tok) == nil && tok.Status == "ok" && tok.Token != "" {
+			return tok, nil
+		}
+		return tok, errors.New("portal: malformed token response")
+	case http.StatusGone:
+		return tok, errors.New("this key was already used or has expired; make a new one in the portal")
+	default:
+		return tok, portalError(status, resp)
+	}
+}
+
+// deviceInfo names this machine to the portal.
+func deviceInfo() map[string]string {
 	host, _ := os.Hostname()
-	body := map[string]string{"device_name": host, "os": runtime.GOOS, "paws_version": Version}
+	return map[string]string{"device_name": host, "os": runtime.GOOS, "paws_version": Version}
+}
+
+func requestDeviceCode(api string) (deviceCode, error) {
 	var dc deviceCode
-	status, resp, err := postJSON(api+"/paws/v1/device/code", "", body)
+	status, resp, err := postJSON(api+"/paws/v1/device/code", "", deviceInfo())
 	if err != nil {
 		return dc, err
 	}

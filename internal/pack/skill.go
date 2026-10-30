@@ -293,6 +293,46 @@ func InstallBundledSkill(fsys fs.FS, skillsDir, name, source string) (string, er
 	return BundledInstalled, nil
 }
 
+// UpstreamMismatch: the upstream content at the pinned ref doesn't hash to the expected value.
+const UpstreamMismatch = "hash-mismatch"
+
+// InstallUpstreamSkill installs skill name from repo@ref (skillPath is its SKILL.md), refusing
+// content that doesn't hash to want. Same rules as `paws add`: a user's own or edited copy is
+// kept, and a paws copy already at this source and hash is not fetched again.
+func InstallUpstreamSkill(skillsDir, name, repo, skillPath, ref, want string) (string, error) {
+	if !catalog.ValidSkillName(name) {
+		return "", fmt.Errorf("invalid skill name %q", name)
+	}
+	source := repo + "@" + ref
+	if dest := filepath.Join(skillsDir, name); exists(dest) {
+		if !replaceable(dest) {
+			return BundledKept, nil
+		}
+		if m := readMarker(dest); m.Source == source && m.Hash == want {
+			return BundledCurrent, nil
+		}
+	}
+	dir, tmp, hash, err := FetchUpstream(repo, ref, skillPath)
+	if err != nil {
+		return "", err
+	}
+	defer os.RemoveAll(tmp)
+	if hash != want {
+		return UpstreamMismatch, nil
+	}
+	if _, err := installSkill(os.DirFS(dir), skillsDir, name, marker{Skill: name, Source: source, Hash: hash}); err != nil {
+		return "", err
+	}
+	return BundledInstalled, nil
+}
+
+func readMarker(dir string) marker {
+	var m marker
+	data, _ := os.ReadFile(filepath.Join(dir, markerFile))
+	json.Unmarshal(data, &m)
+	return m
+}
+
 // RemoveBundledSkill removes a bundled skill paws installed and nobody edited; it reports
 // whether it did.
 func RemoveBundledSkill(skillsDir, name string) (bool, error) { return removeSkill(skillsDir, name) }

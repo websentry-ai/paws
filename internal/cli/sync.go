@@ -3,42 +3,66 @@ package cli
 import (
 	"bufio"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
 	"os"
 	"path/filepath"
 	"strings"
+	"time"
 
 	"github.com/websentry-ai/paws/internal/gate"
 	"github.com/websentry-ai/paws/internal/rule"
 )
 
-// syncRecord is everything `paws sync` uploads about one rule firing. No command or file
-// text, tool input, session id or path ever goes in here.
-type syncRecord struct {
+// ruleUpload is what `paws sync` uploads about one rule firing. command is the redacted
+// Bash command only: a file path or MCP input never goes in it. No session id or rule path.
+type ruleUpload struct {
+	Kind          string `json:"kind"` // "rule"
 	TS            string `json:"ts"`
 	Event         string `json:"event"`
-	Binding       string `json:"binding"`
-	Pattern       string `json:"pattern,omitempty"` // catalog bindings only
 	Skill         string `json:"skill"`
+	ActionLabel   string `json:"action_label,omitempty"` // portal-managed rules only
+	Matcher       string `json:"matcher,omitempty"`      // catalog and portal-managed rules only
+	Command       string `json:"command,omitempty"`
+	Tool          string `json:"tool,omitempty"`
 	Verdict       string `json:"verdict"`
 	AlreadyLoaded bool   `json:"already_loaded"`
 	SatisfiedBy   string `json:"satisfied_by,omitempty"`
 }
 
-type syncBody struct {
-	Records []syncRecord `json:"records"`
+// actionUpload is what `paws sync` uploads about one finished tool call (see gate.ToolAction).
+type actionUpload struct {
+	Kind    string        `json:"kind"` // "action"
+	TS      string        `json:"ts"`
+	Tool    string        `json:"tool"`
+	Action  string        `json:"action"`
+	Command string        `json:"command,omitempty"`
+	File    string        `json:"file,omitempty"`
+	MCP     *gate.MCPCall `json:"mcp,omitempty"`
 }
 
-// syncCursor marks the last uploaded record: its ts, and how many rule records carry that
-// ts up to and including it (ts has one-second resolution). Survives log rotation.
+type syncBody struct {
+	Records           []any      `json:"records"` // ruleUpload and actionUpload
+	AppliedConfigHash *string    `json:"applied_config_hash"`
+	Inventory         *inventory `json:"inventory"`
+}
+
+type syncResponse struct {
+	Accepted   int    `json:"accepted"`
+	Rejected   int    `json:"rejected"`
+	ConfigHash string `json:"config_hash"`
+}
+
+// syncCursor marks the last uploaded record: its ts, and how many uploadable (rule or action)
+// records carry that ts up to and including it (ts has one-second resolution). Survives log rotation.
 type syncCursor struct {
 	TS string `json:"last_ts"`
 	N  int    `json:"count_at_ts"`
 }
 
 type pendingRecord struct {
-	rec   syncRecord
+	rec   any
 	after syncCursor // the cursor once this record is uploaded
 }
 
@@ -48,7 +72,9 @@ const (
 	dryRunShown    = 20
 )
 
-// Sync uploads rule records not sent before: `paws sync [--dry-run]`.
+var errRevoked = errors.New("your login was revoked; run `paws login`")
+
+// Sync uploads new records and pulls the portal config now: `paws sync [--dry-run]`.
 func Sync(args []string) int {
 	dry := false
 	for _, a := range args {
@@ -67,21 +93,92 @@ func Sync(args []string) int {
 		fmt.Fprintln(os.Stderr, "Run `paws login` first.")
 		return 1
 	}
-	log, statePath := gate.AuditPath(), syncStatePath()
-	if log == "" {
+	if gate.AuditPath() == "" {
 		fmt.Fprintln(os.Stderr, "paws: no home directory for the audit log; set PAWS_HOME")
 		return 1
 	}
-	cur, err := loadSyncCursor(statePath)
+	cwd, _ := os.Getwd()
+	if dry {
+		return printDryRun(cwd)
+	}
+	rep, err := syncNow(creds, cwd)
+	if errors.Is(err, errRevoked) {
+		fmt.Fprintln(os.Stderr, "Your login was revoked. Run `paws login`.")
+		return 1
+	}
+	printSyncReport(rep)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "paws: %v\n", err)
 		return 1
 	}
-	recs := pendingSync([]string{log + ".1", log}, cur)
-	if dry {
-		return printDryRun(recs)
+	return 0
+}
+
+// syncReport is what one syncNow did, for `paws sync` and `paws login` to print.
+type syncReport struct {
+	Uploaded int
+	Uploads  bool         // the upload step ran to the end
+	Config   *applyResult // nil when the config was unchanged or never fetched
+	Skills   []string     // skills the applied config turns on
+}
+
+// syncNow uploads every new record (posting once even with none, so the portal gets the
+// inventory and applied hash) and then pulls the config if its hash changed.
+func syncNow(creds *credentials, cwd string) (syncReport, error) {
+	var rep syncReport
+	recs, err := pendingRecords()
+	if err != nil {
+		return rep, err
 	}
-	return upload(creds, statePath, recs)
+	st := loadPortalState()
+	res, err := uploadRecords(creds, st.AppliedHash, cwd, recs, true)
+	rep.Uploaded = res.n
+	if err != nil {
+		return rep, err
+	}
+	rep.Uploads = true
+	now := time.Now().UTC()
+	st.LastUpload, st.LastConfigCheck = now, now
+	rep.Config, err = pullConfig(creds, &st, res.configHash)
+	rep.Skills = st.Skills
+	if serr := savePortalState(st); err == nil {
+		err = serr
+	}
+	if rep.Config != nil && rep.Config.Hash == st.AppliedHash {
+		reportApplied(creds, st.AppliedHash, cwd)
+	}
+	return rep, err
+}
+
+func printSyncReport(rep syncReport) {
+	if rep.Uploads {
+		if rep.Uploaded == 0 {
+			fmt.Println("Nothing new to upload.")
+		} else {
+			fmt.Printf("Uploaded %d records.\n", rep.Uploaded)
+		}
+	}
+	if rep.Config == nil {
+		if rep.Uploads {
+			fmt.Printf("Config: up to date, %s.\n", skillList(rep.Skills))
+		}
+		return
+	}
+	fmt.Printf("Config: %s applied.\n", skillList(rep.Config.Applied))
+	for _, s := range rep.Config.Skipped {
+		fmt.Printf("  skipped %s\n", s)
+	}
+}
+
+// skillList renders "3 skills (humanizer, tdd, git)".
+func skillList(names []string) string {
+	switch len(names) {
+	case 0:
+		return "no skills"
+	case 1:
+		return "1 skill (" + names[0] + ")"
+	}
+	return fmt.Sprintf("%d skills (%s)", len(names), strings.Join(names, ", "))
 }
 
 func syncStatePath() string {
@@ -107,8 +204,21 @@ func loadSyncCursor(path string) (syncCursor, error) {
 	return c, nil
 }
 
-// pendingSync reads the audit logs in order (rotated file first) and returns the rule records
-// after cur. The whole log is read so already_loaded sees denies from earlier syncs.
+// pendingRecords is every rule and action record in the audit logs not uploaded yet.
+func pendingRecords() ([]pendingRecord, error) {
+	log := gate.AuditPath()
+	if log == "" {
+		return nil, errors.New("no home directory for the audit log; set PAWS_HOME")
+	}
+	cur, err := loadSyncCursor(syncStatePath())
+	if err != nil {
+		return nil, err
+	}
+	return pendingSync([]string{log + ".1", log}, cur), nil
+}
+
+// pendingSync reads the audit logs in order (rotated file first) and returns the rule and
+// action records after cur. The whole log is read so already_loaded sees earlier denies.
 func pendingSync(paths []string, cur syncCursor) []pendingRecord {
 	var out []pendingRecord
 	deniedIn := map[string]bool{} // rule|session pairs that saw a deny, as in summarize
@@ -126,12 +236,16 @@ func pendingSync(paths []string, cur syncCursor) []pendingRecord {
 				break
 			}
 			var r auditRecord
-			if json.Unmarshal(line, &r) != nil || r.Rule == "" || r.TS == "" || (r.Verdict != "allow" && r.Verdict != "deny") {
+			if json.Unmarshal(line, &r) != nil || r.TS == "" {
+				continue
+			}
+			isRule := r.Rule != "" && (r.Verdict == "allow" || r.Verdict == "deny")
+			if !isRule && (r.Event != "action" || r.Action == "") {
 				continue
 			}
 			key := r.Rule + "|" + r.Session
-			already := r.Verdict == "allow" && r.SatisfiedBy == "skill-load" && !deniedIn[key]
-			if r.Verdict == "deny" {
+			already := isRule && r.Verdict == "allow" && r.SatisfiedBy == "skill-load" && !deniedIn[key]
+			if isRule && r.Verdict == "deny" {
 				deniedIn[key] = true
 			}
 			atTS[r.TS]++
@@ -139,7 +253,9 @@ func pendingSync(paths []string, cur syncCursor) []pendingRecord {
 			if after.TS < cur.TS || after.TS == cur.TS && after.N <= cur.N {
 				continue
 			}
-			if rec, ok := toSyncRecord(r, already, rules); ok {
+			if !isRule {
+				out = append(out, pendingRecord{rec: toActionUpload(r), after: after})
+			} else if rec, ok := toRuleUpload(r, already, rules); ok {
 				out = append(out, pendingRecord{rec: rec, after: after})
 			}
 		}
@@ -148,22 +264,41 @@ func pendingSync(paths []string, cur syncCursor) []pendingRecord {
 	return out
 }
 
-// toSyncRecord keeps only the fields the portal gets. A record whose skill can't be known
+// toRuleUpload keeps only the fields the portal gets. A record whose skill can't be known
 // (written before the audit log carried it, rule file since removed) is dropped.
-func toSyncRecord(r auditRecord, already bool, rules sourceRules) (syncRecord, bool) {
+func toRuleUpload(r auditRecord, already bool, rules sourceRules) (ruleUpload, bool) {
 	src := rules.get(r.Source, r.Rule)
 	skill := r.Skill
 	if skill == "" && src != nil {
 		skill = src.Action.Skill
 	}
 	if skill == "" {
-		return syncRecord{}, false
+		return ruleUpload{}, false
 	}
-	rec := syncRecord{TS: r.TS, Event: r.Event, Binding: r.Rule, Skill: skill, Verdict: r.Verdict, AlreadyLoaded: already, SatisfiedBy: r.SatisfiedBy}
-	if src != nil && fromCatalog(r.Source) {
-		rec.Pattern = matcherText(src.Matcher)
+	rec := ruleUpload{Kind: "rule", TS: r.TS, Event: r.Event, Skill: skill, Tool: r.Tool, Verdict: r.Verdict,
+		AlreadyLoaded: already, SatisfiedBy: r.SatisfiedBy}
+	if r.Tool == "Bash" {
+		rec.Command = gate.RedactCommand(r.Target)
+	}
+	if src != nil && (fromCatalog(r.Source) || managed(r.Source)) {
+		rec.Matcher = matcherText(src.Matcher)
+	}
+	if src != nil && managed(r.Source) {
+		rec.ActionLabel = firstLine(src.Body)
 	}
 	return rec, true
+}
+
+// toActionUpload passes an action record through, re-checking what may leave the machine.
+func toActionUpload(r auditRecord) actionUpload {
+	rec := actionUpload{Kind: "action", TS: r.TS, Tool: r.Tool, Action: r.Action, File: r.File, MCP: r.MCP}
+	if r.Command != "" {
+		rec.Command = gate.RedactCommand(r.Command)
+	}
+	if filepath.IsAbs(rec.File) || rec.File == ".." || strings.HasPrefix(rec.File, "../") {
+		rec.File = ""
+	}
+	return rec
 }
 
 // sourceRules parses each rule file named by the audit log once.
@@ -205,17 +340,18 @@ func matcherText(m rule.Matcher) string {
 	return strings.Join(parts, " ")
 }
 
-// batches splits records into requests of at most maxSyncRecords records and maxSyncBytes.
-func batches(recs []pendingRecord) [][]pendingRecord {
+// batches splits records into requests of at most maxSyncRecords records and maxSyncBytes,
+// base being the size of the request with no records.
+func batches(recs []pendingRecord, base int) [][]pendingRecord {
 	var out [][]pendingRecord
 	var cur []pendingRecord
-	size := len(`{"records":[]}`)
+	size := base
 	for _, p := range recs {
 		b, _ := json.Marshal(p.rec)
 		n := len(b) + 1 // the comma
 		if len(cur) == maxSyncRecords || len(cur) > 0 && size+n > maxSyncBytes {
 			out = append(out, cur)
-			cur, size = nil, len(`{"records":[]}`)
+			cur, size = nil, base
 		}
 		cur = append(cur, p)
 		size += n
@@ -226,56 +362,96 @@ func batches(recs []pendingRecord) [][]pendingRecord {
 	return out
 }
 
-func recordsOf(batch []pendingRecord) []syncRecord {
-	out := make([]syncRecord, len(batch))
+func recordsOf(batch []pendingRecord) []any {
+	out := make([]any, len(batch))
 	for i, p := range batch {
 		out[i] = p.rec
 	}
 	return out
 }
 
+// newSyncBody is a request with no records yet: the applied hash (null before the first
+// apply) and what is installed on this machine.
+func newSyncBody(applied, cwd string) syncBody {
+	b := syncBody{Records: []any{}, Inventory: inventoryFor(cwd)}
+	if applied != "" {
+		b.AppliedConfigHash = &applied
+	}
+	return b
+}
+
 // printDryRun shows the first request's body, cut to the first records, on stdout.
-func printDryRun(recs []pendingRecord) int {
+func printDryRun(cwd string) int {
+	recs, err := pendingRecords()
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "paws: %v\n", err)
+		return 1
+	}
+	body := newSyncBody(loadPortalState().AppliedHash, cwd)
+	base, _ := json.Marshal(body)
 	shown := recs
 	if len(shown) > dryRunShown {
 		shown = shown[:dryRunShown]
 	}
-	data, _ := json.MarshalIndent(syncBody{Records: recordsOf(shown)}, "", "  ")
+	body.Records = recordsOf(shown)
+	data, _ := json.MarshalIndent(body, "", "  ")
 	fmt.Println(string(data))
-	fmt.Fprintf(os.Stderr, "%d record(s) would be uploaded in %d request(s); showing %d. Nothing was sent.\n", len(recs), len(batches(recs)), len(shown))
+	fmt.Fprintf(os.Stderr, "%d record(s) would be uploaded in %d request(s); showing %d. Nothing was sent.\n", len(recs), len(batches(recs, len(base))), len(shown))
 	return 0
 }
 
-// upload sends each batch and advances the cursor after each one the portal took.
-func upload(creds *credentials, statePath string, recs []pendingRecord) int {
-	if len(recs) == 0 {
-		fmt.Println("Nothing new to upload.")
-		return 0
+type uploadResult struct {
+	n          int    // records the portal took
+	configHash string // the portal's current config hash, from the last response
+}
+
+// uploadRecords sends recs in batches and advances the cursor after each one the portal took.
+// With always set it posts once even when there is nothing new.
+func uploadRecords(creds *credentials, applied, cwd string, recs []pendingRecord, always bool) (uploadResult, error) {
+	var res uploadResult
+	body := newSyncBody(applied, cwd)
+	base, _ := json.Marshal(body)
+	bs := batches(recs, len(base))
+	if len(bs) == 0 && always {
+		bs = [][]pendingRecord{nil}
 	}
-	accepted, rejected := 0, 0
-	for _, b := range batches(recs) {
-		status, resp, err := postJSON(creds.API+"/paws/v1/sync", creds.Token, syncBody{Records: recordsOf(b)})
+	for _, b := range bs {
+		body.Records = recordsOf(b)
+		resp, err := postSync(creds, body)
 		if err != nil {
-			fmt.Fprintf(os.Stderr, "paws: %v\n", err)
-			return 1
+			return res, err
 		}
-		switch status {
-		case http.StatusOK:
-		case http.StatusUnauthorized:
-			fmt.Fprintln(os.Stderr, "Your login was revoked. Run `paws login`.")
-			return 1
-		default:
-			fmt.Fprintf(os.Stderr, "paws: %v\n", portalError(status, resp))
-			return 1
+		res.configHash = resp.ConfigHash
+		if len(b) == 0 {
+			continue
 		}
-		var res struct{ Accepted, Rejected int }
-		json.Unmarshal(resp, &res)
-		accepted, rejected = accepted+res.Accepted, rejected+res.Rejected
-		if err := writePrivate(statePath, b[len(b)-1].after); err != nil {
-			fmt.Fprintf(os.Stderr, "paws: saving sync state: %v\n", err)
-			return 1
+		res.n += len(b)
+		if err := writePrivate(syncStatePath(), b[len(b)-1].after); err != nil {
+			return res, fmt.Errorf("saving sync state: %v", err)
 		}
 	}
-	fmt.Printf("Uploaded %d record(s): %d accepted, %d rejected.\n", len(recs), accepted, rejected)
-	return 0
+	return res, nil
+}
+
+func postSync(creds *credentials, body syncBody) (syncResponse, error) {
+	var res syncResponse
+	status, resp, err := postJSON(creds.API+"/paws/v1/sync", creds.Token, body)
+	if err != nil {
+		return res, err
+	}
+	switch status {
+	case http.StatusOK:
+		json.Unmarshal(resp, &res)
+		return res, nil
+	case http.StatusUnauthorized:
+		return res, errRevoked
+	default:
+		return res, portalError(status, resp)
+	}
+}
+
+// reportApplied tells the portal which config this machine now runs, so the website can clear
+// "waiting for sync" without waiting for the next upload. Best effort.
+func reportApplied(creds *credentials, applied, cwd string) {
+	postSync(creds, newSyncBody(applied, cwd))
 }

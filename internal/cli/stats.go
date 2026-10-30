@@ -45,6 +45,13 @@ type auditRecord struct {
 	Session     string `json:"session"`
 	Skill       string `json:"skill"`
 	Source      string `json:"source"`
+	// Read by `paws sync`: rule records' tool and target, action records' fields.
+	Tool    string        `json:"tool"`
+	Target  string        `json:"target"`
+	Action  string        `json:"action"`
+	Command string        `json:"command"`
+	File    string        `json:"file"`
+	MCP     *gate.MCPCall `json:"mcp"`
 }
 
 // summarize reads audit records in order (rotated file first) and counts them.

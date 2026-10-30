@@ -26,6 +26,7 @@ type fakePortal struct {
 	auths      []string
 	requests   []string
 	keyBody    map[string]string
+	keyEmail   string // account_email in the /device/key reply; "" leaves it out, like an older portal
 }
 
 func (s *fakePortal) ServeHTTP(w http.ResponseWriter, r *http.Request) {
@@ -70,6 +71,10 @@ func (s *fakePortal) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		if s.keyBody["key"] == "pk_used" {
 			w.WriteHeader(http.StatusGone)
 			io.WriteString(w, `{"error":"key used or expired"}`)
+			return
+		}
+		if s.keyEmail != "" {
+			json.NewEncoder(w).Encode(map[string]any{"status": "ok", "token": "tok-key", "device_id": 7, "account_email": s.keyEmail})
 			return
 		}
 		io.WriteString(w, `{"status":"ok","token":"tok-key","device_id":7}`)

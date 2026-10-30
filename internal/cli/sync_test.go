@@ -307,11 +307,15 @@ func TestSyncBatchesAndResumesAfterRevokedLogin(t *testing.T) {
 	appendLines(t, filepath.Join(home, "audit.log"), lines...)
 
 	code, errOut := capture(t, &os.Stderr, func() int { return Sync(nil) })
-	if code != 1 || !strings.Contains(errOut, "Your login was revoked. Run `paws login`.") {
+	if code != 1 || !strings.Contains(errOut, "Your login was revoked and its portal rules were removed. Run `paws login`.") {
 		t.Fatalf("401 must stop the sync: exit %d, stderr %q", code, errOut)
 	}
 	if len(srv.bodies) != 2 {
 		t.Fatalf("sync must stop at the 401, sent %d requests", len(srv.bodies))
+	}
+	// The 401 logged this machine out; log in again and the upload resumes at the cursor.
+	if err := writePrivate(filepath.Join(home, "credentials.json"), credentials{API: strings.TrimSuffix(os.Getenv("PAWS_PORTAL_API"), "/"), Token: "tok-new"}); err != nil {
+		t.Fatal(err)
 	}
 	if code, _ := captureStdout(t, func() int { return Sync(nil) }); code != 0 {
 		t.Fatal("sync after re-login failed")

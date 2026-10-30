@@ -13,7 +13,7 @@ Every record has `v` (2), `ts`, `agent`, `event` and `session`, plus
 
 **Rule records** (a rule matched): `rule`, `action`, `skill` (the skill
 the rule requires), `verdict` (`allow` or `deny`), `tool`, `target` (the
-matched command or path, with secrets redacted), `source` (the rule file),
+matched command or path, with secrets [redacted](#redaction)), `source` (the rule file),
 and when relevant:
 
 | Field | Meaning |
@@ -63,18 +63,47 @@ invocations, and session, turn and successful tool-call totals.
 The PostToolUse and Stop hooks are registered `async`: Claude Code does not
 wait for them. Matched targets are capped at 2,000 bytes per record.
 
+## Redaction
+
+Commands and targets are redacted before they are written to the audit log,
+and again before upload. The value is replaced by `***`; the name in front of
+it stays, so the log still reads:
+
+- secret-named flags and assignments: `--password=`, `--token`, `-api-key`,
+  `--access-key`, `*_SECRET=`, `*_TOKEN=`, `*PASSWORD*=`, and any
+  `password=`, `passwd=`, `secret=`, `token=`, `api_key=` / `api-key=`;
+- the password in a connection string (`postgres://user:***@host`);
+- `Authorization:` header values (the scheme, such as `Bearer`, stays),
+  `Bearer <token>` anywhere, and `x-api-key:` headers;
+- provider tokens: `sk-...` (OpenAI, Anthropic `sk-ant-`, `sk-proj-`),
+  `sk_live_`/`sk_test_` (Stripe), `ghp_`/`gho_`/`ghs_`/`github_pat_`
+  (GitHub), `glpat-` (GitLab), `xox?-` (Slack), `AKIA...` (AWS key ids);
+- bare JWTs (`eyJ...`.`...`.`...`);
+- `-p<password>` when the command is `mysql` or `mariadb` (and their
+  `mysqldump`/`mariadb-dump` tools). Elsewhere `-p` means too many things.
+
+It is a heuristic: a secret in a shape not listed here is written as it is.
+
 ## Portal upload
 
 Opt-in. Nothing is sent until you run `paws login`, which stores a token in
-`~/.paws/credentials.json` (0600; `paws logout` deletes it). From then on:
+`~/.paws/credentials.json` (0600). The portal address (`PAWS_PORTAL_API`)
+must be https; plain http works only for `localhost`, `127.0.0.1` or `::1`,
+and credentials saved for any other http address are refused. From then on:
 
 - the async **Stop hook** (after each Claude turn) uploads new records when
   there are some and the last upload was more than `PAWS_SYNC_INTERVAL` ago
   (default `10m`), and checks the portal's config hash when the last check
   was more than `PAWS_CONFIG_INTERVAL` ago (default `15m`). Each request times
-  out after 5 seconds; any failure is dropped silently and retried later;
+  out after 5 seconds and the whole step, skill downloads included, after 12;
+  any failure is dropped silently and retried later;
 - **`paws sync`** does both at once and prints what it did;
 - **`paws login`** syncs once, so the portal sees the machine right away.
+
+`paws logout` deletes the token and removes every rule and digest the portal
+config wrote, and `~/.paws/portal/state.json`. A 401 from the portal (the
+login was revoked) does the same, from `paws sync` or the Stop hook; `paws
+sync` then says the login was revoked.
 
 The PreToolUse and SessionStart hooks, which decide tool calls, never touch
 the network.
@@ -127,16 +156,29 @@ Settings come down; the gate stays offline. When the config hash changes
 config and applies it:
 
 - one rule file per skill and action under `~/.paws/portal/`
-  (`<skill>--<action id>.md`), a plain `require-skill` rule that paws loads
-  like any other. Files the config no longer has, including turned-off
+  (`<skill>--<action id>.md`; an id that had to be shortened or cleaned up
+  gets a short hash of the original), a plain `require-skill` rule that paws
+  loads like any other. Files the config no longer has, including turned-off
   skills, are removed. Every write is atomic;
+- an action that would gate the Skill tool (no tool and no matcher, or tool
+  `Skill`) is skipped and reported: it would deny the call that loads the
+  skill. The gate never gates the Skill tool in any case;
 - a `load: rule` skill becomes `on_miss: digest` with its rule text as the
-  digest (`~/.paws/portal/digests/<skill>.md`); no SKILL.md is installed;
+  digest (`~/.paws/portal/digests/<skill>.md`); no SKILL.md is installed.
+  Rule text over 7,000 bytes is skipped;
 - a catalog skill installs into `~/.claude/skills/<name>`: from upstream at
   its pinned commit, or from the catalog in the paws binary, and only when its
-  content hash matches the config. A mismatch is skipped and reported. A skill
-  directory paws didn't install, or one you edited, is left as it is, as with
-  `paws add`. Turning a skill off removes its rules, not its skill directory;
+  content hash matches the config. An upstream skill must match a catalog pin
+  in this paws binary exactly (a `github.com` repo, path, commit and content
+  hash), so the portal can only choose among pins paws already ships; anything
+  else is skipped as "not in this paws version's catalog". A mismatch is
+  skipped and reported. A skill directory paws didn't install, or one you
+  edited, is left as it is, as with `paws add`. Turning a skill off removes
+  its rules, not its skill directory;
+- a skill's rules are written only when its `SKILL.md` is in
+  `~/.claude/skills/<name>` or the project's `.claude/skills/<name>` (or it
+  is `load: rule`); otherwise it is skipped as "skill not installed". A custom
+  skill is yours to install: paws never downloads one;
 - the applied hash, the applied skills and the last upload and check times
   are kept in `~/.paws/portal/state.json`. A skill that failed to download
   leaves the hash unrecorded, so the next check tries again.

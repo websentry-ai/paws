@@ -90,7 +90,11 @@ func Sync(args []string) int {
 		return 1
 	}
 	if creds == nil && !dry {
-		fmt.Fprintln(os.Stderr, "Run `paws login` first.")
+		if loadPortalState().Revoked {
+			fmt.Fprintln(os.Stderr, "Your login was revoked and its portal rules were removed. Run `paws login`.")
+		} else {
+			fmt.Fprintln(os.Stderr, "Run `paws login` first.")
+		}
 		return 1
 	}
 	if gate.AuditPath() == "" {
@@ -103,7 +107,7 @@ func Sync(args []string) int {
 	}
 	rep, err := syncNow(creds, cwd)
 	if errors.Is(err, errRevoked) {
-		fmt.Fprintln(os.Stderr, "Your login was revoked. Run `paws login`.")
+		fmt.Fprintln(os.Stderr, "Your login was revoked and its portal rules were removed. Run `paws login`.")
 		return 1
 	}
 	printSyncReport(rep)
@@ -123,7 +127,8 @@ type syncReport struct {
 }
 
 // syncNow uploads every new record (posting once even with none, so the portal gets the
-// inventory and applied hash) and then pulls the config if its hash changed.
+// inventory and applied hash) and then pulls the config if its hash changed. A 401 logs this
+// machine out (forgetIfRevoked).
 func syncNow(creds *credentials, cwd string) (syncReport, error) {
 	var rep syncReport
 	recs, err := pendingRecords()
@@ -134,12 +139,16 @@ func syncNow(creds *credentials, cwd string) (syncReport, error) {
 	res, err := uploadRecords(creds, st.AppliedHash, cwd, recs, true)
 	rep.Uploaded = res.n
 	if err != nil {
+		forgetIfRevoked(err)
 		return rep, err
 	}
 	rep.Uploads = true
 	now := time.Now().UTC()
 	st.LastUpload, st.LastConfigCheck = now, now
-	rep.Config, err = pullConfig(creds, &st, res.configHash)
+	rep.Config, err = pullConfig(creds, &st, res.configHash, cwd)
+	if forgetIfRevoked(err) {
+		return rep, err
+	}
 	rep.Skills = st.Skills
 	if serr := savePortalState(st); err == nil {
 		err = serr
@@ -166,7 +175,7 @@ func printSyncReport(rep syncReport) {
 	}
 	fmt.Printf("Config: %s applied.\n", skillList(rep.Config.Applied))
 	for _, s := range rep.Config.Skipped {
-		fmt.Printf("  skipped %s\n", s)
+		fmt.Printf("  skipped %s\n", printable(s))
 	}
 }
 

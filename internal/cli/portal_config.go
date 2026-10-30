@@ -2,6 +2,8 @@ package cli
 
 import (
 	"bytes"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -33,6 +35,7 @@ type portalState struct {
 	Skills          []string  `json:"skills,omitempty"` // skills the applied config turns on
 	LastUpload      time.Time `json:"last_upload"`
 	LastConfigCheck time.Time `json:"last_config_check"`
+	Revoked         bool      `json:"revoked,omitempty"` // the portal answered 401; login was forgotten
 }
 
 // portalConfig is GET /config: the account's skills that are on.
@@ -70,6 +73,10 @@ type applyResult struct {
 	Applied []string // skills whose rule files are in place
 	Skipped []string // "<skill>: <reason>"
 }
+
+// catalogFS is the catalog this binary ships: the only skills a portal config can install.
+// Tests replace it.
+var catalogFS fs.FS = paws.Catalog
 
 func portalDir() string {
 	dir := gate.UserDir()
@@ -113,6 +120,36 @@ func savePortalState(st portalState) error {
 	return writeAtomic(filepath.Join(dir, "state.json"), append(data, '\n'), 0o600)
 }
 
+// clearPortal removes every rule file and digest the portal config wrote, and state.json.
+func clearPortal() error {
+	dir := portalDir()
+	if dir == "" {
+		return nil
+	}
+	if err := writeManaged(dir, nil); err != nil {
+		return err
+	}
+	if err := os.Remove(filepath.Join(dir, "state.json")); err != nil && !errors.Is(err, os.ErrNotExist) {
+		return err
+	}
+	return nil
+}
+
+// forgetIfRevoked logs this machine out when err is a 401: the token is dead, so the portal's
+// rules, state and credentials go, as with `paws logout`, and state.json remembers why. It
+// reports whether it did.
+func forgetIfRevoked(err error) bool {
+	if !errors.Is(err, errRevoked) {
+		return false
+	}
+	clearPortal()
+	if path := credentialsPath(); path != "" {
+		os.Remove(path)
+	}
+	savePortalState(portalState{Revoked: true})
+	return true
+}
+
 // writeAtomic writes through a temp file in the same directory and a rename, so a reader (a
 // gate running in parallel) sees the old file or the new one, never half of one.
 func writeAtomic(path string, data []byte, perm os.FileMode) error {
@@ -145,7 +182,7 @@ func writeAtomic(path string, data []byte, perm os.FileMode) error {
 // is a hash the caller already has (from a /sync response); "" asks GET /config/hash. It
 // returns nil when nothing changed. The applied hash is recorded only when every skill could be
 // fetched, so a network failure is retried at the next check.
-func pullConfig(creds *credentials, st *portalState, known string) (*applyResult, error) {
+func pullConfig(creds *credentials, st *portalState, known, cwd string) (*applyResult, error) {
 	hash := known
 	if hash == "" {
 		var h struct {
@@ -163,7 +200,7 @@ func pullConfig(creds *credentials, st *portalState, known string) (*applyResult
 	if err := portalGet(creds, "/config", &cfg); err != nil {
 		return nil, err
 	}
-	res, err := applyConfig(cfg)
+	res, err := applyConfig(cfg, cwd)
 	st.Skills = res.Applied
 	if err == nil {
 		st.AppliedHash = cfg.ConfigHash
@@ -188,16 +225,18 @@ func portalGet(creds *credentials, path string, v any) error {
 }
 
 // applyConfig makes $PAWS_HOME/portal/ hold exactly the config's rule files: one per skill
-// and action, plus a digest per load=rule skill. Skills install first, so a rule is never live
-// before the skill it requires can load.
-func applyConfig(cfg portalConfig) (applyResult, error) {
+// and action, plus a digest per load=rule skill. Skills install first, and a full skill's rules
+// are written only once its SKILL.md is in place (user skills, or cwd's project), so a rule is
+// never live before the skill it requires can load.
+func applyConfig(cfg portalConfig, cwd string) (applyResult, error) {
 	res := applyResult{Hash: cfg.ConfigHash}
 	dir := portalDir()
 	if dir == "" {
 		return res, errors.New("no home directory for portal rules; set PAWS_HOME")
 	}
 	skillsDir := pack.UserTarget(gate.UserDir()).SkillsDir
-	embedded, _ := catalog.LoadFS(paws.Catalog, "embedded")
+	projectSkills := pack.ProjectTarget(projectRoot(cwd)).SkillsDir
+	embedded, _ := catalog.LoadFS(catalogFS, "embedded")
 	want := map[string][]byte{} // path under dir -> content
 	var errs []error
 	for _, s := range cfg.Skills {
@@ -207,6 +246,9 @@ func applyConfig(cfg portalConfig) (applyResult, error) {
 		files, skip, err := skillFiles(s, skillsDir, embedded, dir)
 		if err != nil {
 			errs = append(errs, fmt.Errorf("skill %s: %w", s.Name, err))
+		}
+		if len(files) > 0 && s.Load != "rule" && !hasSkill(s.Name, skillsDir, projectSkills) {
+			files, skip = nil, "skill not installed"
 		}
 		if skip != "" {
 			res.Skipped = append(res.Skipped, s.Name+": "+skip)
@@ -236,11 +278,15 @@ func skillFiles(s portalSkill, skillsDir string, embedded *catalog.Catalog, dir 
 	digest := ""
 	var installErr error
 	if s.Load == "rule" {
-		if strings.TrimSpace(s.RuleText) == "" {
+		text := strings.TrimSpace(s.RuleText) + "\n"
+		if text == "\n" {
 			return nil, "load=rule with no rule text", nil
 		}
+		if len(text) > rule.MaxDigest {
+			return nil, fmt.Sprintf("rule text is %d bytes, over the %d-byte limit", len(text), rule.MaxDigest), nil
+		}
 		digest = "digests/" + s.Name + ".md"
-		files[digest] = []byte(strings.TrimSpace(s.RuleText) + "\n")
+		files[digest] = []byte(text)
 	} else if skip, err := prepareSkill(s, skillsDir, embedded); skip != "" {
 		return nil, skip, err
 	} else {
@@ -256,6 +302,16 @@ func skillFiles(s portalSkill, skillsDir string, embedded *catalog.Catalog, dir 
 	return files, strings.Join(skips, "; "), installErr
 }
 
+// hasSkill reports whether a skill's SKILL.md is in one of the skills directories.
+func hasSkill(name string, skillsDirs ...string) bool {
+	for _, d := range skillsDirs {
+		if st, err := os.Stat(filepath.Join(d, name, "SKILL.md")); err == nil && st.Mode().IsRegular() {
+			return true
+		}
+	}
+	return false
+}
+
 // prepareSkill installs a full skill before its rules go live. A non-empty skip means its
 // rules must not be written; an error with no skip means an older copy serves meanwhile.
 func prepareSkill(s portalSkill, skillsDir string, embedded *catalog.Catalog) (string, error) {
@@ -263,6 +319,8 @@ func prepareSkill(s portalSkill, skillsDir string, embedded *catalog.Catalog) (s
 	switch {
 	case outcome == pack.UpstreamMismatch:
 		return "content hash mismatch at the pinned ref; not installed", nil
+	case outcome == notInCatalog:
+		return "not in this paws version's catalog — update paws", nil
 	case err == nil:
 		return "", nil
 	}
@@ -288,16 +346,24 @@ func actionFiles(s portalSkill, digest, dir string) (map[string][]byte, []string
 	return files, skips
 }
 
-// installPortalSkill installs a full skill: from upstream at the pinned ref, or from the
-// catalog inside this binary, checked against the config's content hash either way. A custom
-// skill (neither) is the user's to provide; "" with no error.
+// notInCatalog: the config names an upstream skill this binary's catalog doesn't pin.
+const notInCatalog = "not-in-catalog"
+
+// installPortalSkill installs a full skill: from upstream at a pin this binary's catalog
+// carries, or from the catalog inside this binary, checked against the config's content hash
+// either way. The portal can only pick among those pins, never name new code to download. A
+// custom skill (neither) is the user's to provide; "" with no error.
 func installPortalSkill(s portalSkill, skillsDir string, embedded *catalog.Catalog) (string, error) {
 	want := s.ContentHash
 	if u := s.Upstream; u != nil && u.Repo != "" {
 		if want == "" {
 			want = u.ContentHash
 		}
-		return pack.InstallUpstreamSkill(skillsDir, s.Name, u.Repo, u.Path, u.Ref, want)
+		pin := catalogPin(embedded, s.Name, *u, want)
+		if pin == nil {
+			return notInCatalog, nil
+		}
+		return pack.InstallUpstreamSkill(portalCtx, skillsDir, s.Name, pin.Repo, pin.Path, pin.Ref, pin.ContentHash)
 	}
 	fsys, source := embeddedSkill(embedded, s.Name)
 	if fsys == nil {
@@ -307,6 +373,22 @@ func installPortalSkill(s portalSkill, skillsDir string, embedded *catalog.Catal
 		return pack.UpstreamMismatch, err
 	}
 	return pack.InstallBundledSkill(fsys, skillsDir, s.Name, source)
+}
+
+// catalogPin returns the catalog binding's upstream pin for skill when the config's repo, path,
+// ref and content hash all match it exactly; only github.com repos qualify.
+func catalogPin(c *catalog.Catalog, skill string, u rule.Upstream, hash string) *rule.Upstream {
+	if c == nil || !strings.HasPrefix(u.Repo, "github.com/") {
+		return nil
+	}
+	for _, rel := range sortedKeys(c.Bindings) {
+		b := c.Bindings[rel]
+		p := b.Upstream
+		if b.Action.Skill == skill && p.Repo == u.Repo && p.Path == u.Path && p.Ref == u.Ref && p.ContentHash == hash {
+			return &p
+		}
+	}
+	return nil
 }
 
 // embeddedSkill finds a skill the built-in catalog ships (catalog/<category>/skills/<name>).
@@ -333,23 +415,28 @@ func isFile(fsys fs.FS, name string) bool {
 }
 
 // ruleFileName is "<skill>--<action id>", the id cut to file-name characters; the action's
-// position stands in for a missing id.
+// position stands in for a missing id. An id that had to change gets a short hash of the
+// original, so two ids that cut to the same text still get different files.
 func ruleFileName(skill string, id any, i int) string {
-	s := ""
+	raw := ""
 	switch v := id.(type) {
 	case float64: // a JSON number
-		s = strconv.FormatFloat(v, 'f', -1, 64)
+		raw = strconv.FormatFloat(v, 'f', -1, 64)
 	case string:
-		s = v
+		raw = v
 	}
-	s = strings.Map(func(r rune) rune {
+	s := strings.Map(func(r rune) rune {
 		if r >= 'a' && r <= 'z' || r >= 'A' && r <= 'Z' || r >= '0' && r <= '9' || r == '-' || r == '_' {
 			return r
 		}
 		return '-'
-	}, s)
+	}, raw)
 	if len(s) > 64 {
 		s = s[:64]
+	}
+	if s != raw {
+		sum := sha256.Sum256([]byte(raw))
+		s += "-" + hex.EncodeToString(sum[:4])
 	}
 	if s == "" {
 		s = fmt.Sprint(i + 1)
@@ -394,8 +481,12 @@ func managedRuleFile(skill, name string, a portalAction, digest, dir string) ([]
 	}
 	label := strings.Join(strings.Fields(a.Label), " ")
 	data := []byte("---\n# Written by paws from the portal config; the next sync replaces edits.\n" + string(fm) + "---\n" + label + "\n")
-	if _, err := rule.Parse(data, filepath.Join(dir, name+".md")); err != nil {
+	r, err := rule.Parse(data, filepath.Join(dir, name+".md"))
+	if err != nil {
 		return nil, err
+	}
+	if rule.Kind(r.Event) == rule.KindTool && r.Matches("Skill", "Skill") {
+		return nil, errors.New("it would gate the Skill tool, the call that loads the skill (no tool or matcher set?); not applied")
 	}
 	return data, nil
 }

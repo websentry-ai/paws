@@ -1,6 +1,7 @@
 package cli
 
 import (
+	"context"
 	"net/http"
 	"os"
 	"time"
@@ -13,18 +14,25 @@ const (
 	stopHookTimeout       = 5 * time.Second // per portal request
 )
 
+// stopHookDeadline bounds the Stop hook's whole portal step, skill downloads included. Tests
+// shorten it.
+var stopHookDeadline = 12 * time.Second
+
 // syncAfterTurn is the portal step of the async Stop hook. When logged in it uploads new
 // records (at most every PAWS_SYNC_INTERVAL) and checks the config hash (at most every
 // PAWS_CONFIG_INTERVAL, or at once when an upload reports a new hash). Best effort: errors
-// are dropped and nothing is printed, since the hook's stdout carries its decision.
+// are dropped and nothing is printed, since the hook's stdout carries its decision. A 401
+// logs this machine out (forgetIfRevoked).
 func syncAfterTurn(cwd string) {
 	creds, err := loadCredentials()
 	if err != nil || creds == nil {
 		return
 	}
-	old := portalClient
-	portalClient = &http.Client{Timeout: stopHookTimeout}
-	defer func() { portalClient = old }()
+	ctx, cancel := context.WithTimeout(context.Background(), stopHookDeadline)
+	defer cancel()
+	oldClient, oldCtx := portalClient, portalCtx
+	portalClient, portalCtx = &http.Client{Timeout: stopHookTimeout}, ctx
+	defer func() { portalClient, portalCtx = oldClient, oldCtx }()
 
 	st := loadPortalState()
 	now := time.Now().UTC()
@@ -33,7 +41,11 @@ func syncAfterTurn(cwd string) {
 		if recs, err := pendingRecords(); err == nil && len(recs) > 0 {
 			st.LastUpload = now
 			savePortalState(st) // claim the slot before the network: a parallel session's Stop skips it
-			if res, err := uploadRecords(creds, st.AppliedHash, cwd, recs, false); err == nil {
+			res, err := uploadRecords(creds, st.AppliedHash, cwd, recs, false)
+			if forgetIfRevoked(err) {
+				return
+			}
+			if err == nil {
 				serverHash = res.configHash
 			}
 		}
@@ -43,7 +55,10 @@ func syncAfterTurn(cwd string) {
 	}
 	st.LastConfigCheck = now
 	savePortalState(st)
-	res, _ := pullConfig(creds, &st, serverHash)
+	res, err := pullConfig(creds, &st, serverHash, cwd)
+	if forgetIfRevoked(err) {
+		return
+	}
 	if res == nil {
 		return
 	}

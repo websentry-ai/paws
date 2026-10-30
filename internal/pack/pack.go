@@ -3,6 +3,7 @@
 package pack
 
 import (
+	"context"
 	"fmt"
 	"io/fs"
 	"os"
@@ -290,7 +291,7 @@ func installBindingSkill(c *catalog.Catalog, b *catalog.Binding, skillsDir strin
 		}
 		return installSkill(src, skillsDir, b.Action.Skill, marker{Skill: b.Action.Skill, Source: "catalog:" + catalog.LocalSkillDir(b)})
 	}
-	dir, tmp, hash, err := FetchUpstream(u.Repo, u.Ref, u.Path)
+	dir, tmp, hash, err := FetchUpstream(context.Background(), u.Repo, u.Ref, u.Path)
 	if err != nil {
 		return false, err
 	}

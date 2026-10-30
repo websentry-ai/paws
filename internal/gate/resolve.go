@@ -113,6 +113,11 @@ func evaluate(r *rule.Rule, ev Event) outcome {
 	if a.Type != rule.ActionRequireSkill {
 		return outcome{}
 	}
+	if ev.Kind == rule.KindTool && ev.Tool == "Skill" {
+		// Loading a skill is how a require-skill gate clears; gating the Skill tool would lock
+		// the agent out of the very call that satisfies the rule.
+		return outcome{}
+	}
 	if SkillLoaded(ev.Transcript, a.Skill, DefaultSkillWindow) {
 		return outcome{verdict: Allow, satisfiedBy: skillLoadSatisfied, fired: true}
 	}

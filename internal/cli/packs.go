@@ -2,6 +2,7 @@ package cli
 
 import (
 	"bufio"
+	"context"
 	"encoding/json"
 	"fmt"
 	"os"
@@ -482,7 +483,7 @@ func Pin(args []string) int {
 		key := u.Repo + "@" + u.Ref + ":" + u.Path
 		hash, ok := hashes[key]
 		if !ok {
-			_, tmp, h, err := pack.FetchUpstream(u.Repo, u.Ref, u.Path)
+			_, tmp, h, err := pack.FetchUpstream(context.Background(), u.Repo, u.Ref, u.Path)
 			if err != nil {
 				fmt.Fprintf(os.Stderr, "paws: %s: %v\n", rel, err)
 				failed++

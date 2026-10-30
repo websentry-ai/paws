@@ -73,6 +73,7 @@ type tokenReply struct {
 // Anything else (the first sync after login) goes to portal.
 type deviceFlow struct {
 	t        *testing.T
+	code     string // the /device/code reply; "" is a well-formed one
 	replies  []tokenReply
 	polls    int
 	codeBody map[string]string
@@ -93,6 +94,10 @@ func (d *deviceFlow) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	switch r.URL.Path {
 	case "/paws/v1/device/code":
 		json.NewDecoder(r.Body).Decode(&d.codeBody)
+		if d.code != "" {
+			io.WriteString(w, d.code)
+			return
+		}
 		io.WriteString(w, `{"device_code":"dev-123","user_code":"WXYZ-4823","verification_uri":"https://portal.example/device","interval":3,"expires_in":600}`)
 	case "/paws/v1/device/token":
 		var body map[string]string
@@ -184,6 +189,179 @@ func TestLoginStopsOnDeniedOrExpired(t *testing.T) {
 				t.Errorf("no credentials may be written on %s", name)
 			}
 		})
+	}
+}
+
+// The device flow gives up once expires_in has passed (at most 15 minutes), polling at most
+// every 60 seconds, however the portal answers.
+func TestLoginStopsPollingAtExpiry(t *testing.T) {
+	for name, c := range map[string]struct {
+		code      string
+		polls     int
+		firstWait time.Duration
+	}{
+		"expires_in":       {`{"device_code":"dev-123","user_code":"U","verification_uri":"https://p/d","interval":10,"expires_in":30}`, 3, 10 * time.Second},
+		"capped at 15 min": {`{"device_code":"dev-123","user_code":"U","verification_uri":"https://p/d","interval":5,"expires_in":999999}`, 180, 5 * time.Second},
+		"no expiry":        {`{"device_code":"dev-123","user_code":"U","verification_uri":"https://p/d"}`, 180, 5 * time.Second},
+		"interval clamped": {`{"device_code":"dev-123","user_code":"U","verification_uri":"https://p/d","interval":3600,"expires_in":600}`, 10, 60 * time.Second},
+	} {
+		t.Run(name, func(t *testing.T) {
+			flow := &deviceFlow{t: t, code: c.code, replies: []tokenReply{{428, `{"status":"pending"}`}}}
+			home := portalEnv(t, flow)
+			var slept []time.Duration
+			sleep = func(d time.Duration) { slept = append(slept, d) }
+			code, errOut := capture(t, &os.Stderr, func() int {
+				code, _ := captureStdout(t, func() int { return Login(nil) })
+				return code
+			})
+			if code != 1 || !strings.Contains(errOut, "the code expired") {
+				t.Errorf("exit %d, stderr %q", code, errOut)
+			}
+			if flow.polls != c.polls || len(slept) == 0 || slept[0] != c.firstWait {
+				t.Errorf("polls=%d first wait=%v; want %d polls %v apart", flow.polls, slept[:min(1, len(slept))], c.polls, c.firstWait)
+			}
+			if _, err := os.Stat(filepath.Join(home, "credentials.json")); !os.IsNotExist(err) {
+				t.Error("credentials written for an expired code")
+			}
+		})
+	}
+}
+
+// What the portal sends for display can't carry terminal escapes or extra lines.
+func TestLoginStripsControlCharacters(t *testing.T) {
+	flow := &deviceFlow{t: t, code: `{"device_code":"dev-123","user_code":"AB\u001b[2JCD\nforged","verification_uri":"https://p/d\u001b]8;;x","interval":1,"expires_in":5}`,
+		replies: []tokenReply{{500, `{"error":"bad\u001b[31m\nforged"}`}}}
+	portalEnv(t, flow)
+	var out string
+	_, errOut := capture(t, &os.Stderr, func() int {
+		var code int
+		code, out = captureStdout(t, func() int { return Login(nil) })
+		return code
+	})
+	if !strings.Contains(out, "Open https://p/d]8;;x and confirm code AB[2JCDforged\n") {
+		t.Errorf("stdout %q", out)
+	}
+	if !strings.Contains(errOut, "portal: bad[31mforged (HTTP 500)") {
+		t.Errorf("stderr %q", errOut)
+	}
+	if strings.ContainsRune(out+errOut, 0x1b) {
+		t.Errorf("an escape reached the terminal: %q %q", out, errOut)
+	}
+}
+
+// The portal address must be https, except plain http to this machine, which warns.
+func TestLoginRequiresHTTPS(t *testing.T) {
+	srv := &fakePortal{t: t}
+	home := portalEnv(t, srv)
+	for _, api := range []string{"http://portal.example.com", "http://127.0.0.1.evil.com", "ftp://localhost", "portal.example.com"} {
+		t.Setenv("PAWS_PORTAL_API", api)
+		code, errOut := capture(t, &os.Stderr, func() int { return Login([]string{"--key", "pk_abc"}) })
+		if code != 1 || !strings.Contains(errOut, "must use https") && !strings.Contains(errOut, "not a URL") {
+			t.Errorf("%s: exit %d, stderr %q", api, code, errOut)
+		}
+	}
+	if srv.count("") != 0 {
+		t.Errorf("requests made to a refused address: %v", srv.requests)
+	}
+	if _, err := os.Stat(filepath.Join(home, "credentials.json")); !os.IsNotExist(err) {
+		t.Error("credentials written for a refused address")
+	}
+	// Loopback http works, with a warning.
+	t.Setenv("PAWS_PORTAL_API", strings.Replace(srvURL(t, srv), "127.0.0.1", "localhost", 1))
+	code, errOut := capture(t, &os.Stderr, func() int {
+		code, _ := captureStdout(t, func() int { return Login([]string{"--key", "pk_abc"}) })
+		return code
+	})
+	if code != 0 || !strings.Contains(errOut, "is plain http; use it only for a local portal") {
+		t.Errorf("loopback http: exit %d, stderr %q", code, errOut)
+	}
+}
+
+// srvURL starts another server for h and returns its URL.
+func srvURL(t *testing.T, h http.Handler) string {
+	t.Helper()
+	s := httptest.NewServer(h)
+	t.Cleanup(s.Close)
+	return s.URL
+}
+
+// Credentials saved for a plain-http address are never sent to a host that isn't this machine.
+func TestSyncRefusesHTTPCredentialsForARemoteHost(t *testing.T) {
+	home, srv := syncEnv(t)
+	writePrivate(filepath.Join(home, "credentials.json"), credentials{API: "http://portal.example.com", Token: "tok"})
+	code, errOut := capture(t, &os.Stderr, func() int {
+		code, _ := captureStdout(t, func() int { return Sync(nil) })
+		return code
+	})
+	if code != 1 || !strings.Contains(errOut, "must use https") || !strings.Contains(errOut, "run `paws login` again") {
+		t.Errorf("exit %d, stderr %q", code, errOut)
+	}
+	// The Stop hook stays silent and offline too.
+	oldTransport := http.DefaultTransport
+	http.DefaultTransport = failingTransport{t}
+	defer func() { http.DefaultTransport = oldTransport }()
+	if out := runGate(t, map[string]any{"hook_event_name": "Stop", "cwd": t.TempDir()}); out != "{}" {
+		t.Errorf("Stop must answer {}, got %q", out)
+	}
+	if srv.count("") != 0 {
+		t.Errorf("requests made: %v", srv.requests)
+	}
+}
+
+// `paws login --key -` reads the key from stdin, keeping it out of shell history.
+func TestLoginReadsKeyFromStdin(t *testing.T) {
+	srv := &fakePortal{t: t}
+	portalEnv(t, srv)
+	withStdin := func(data string, fn func() int) int {
+		path := filepath.Join(t.TempDir(), "stdin")
+		os.WriteFile(path, []byte(data), 0o600)
+		f, err := os.Open(path)
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer f.Close()
+		old := os.Stdin
+		os.Stdin = f
+		defer func() { os.Stdin = old }()
+		return fn()
+	}
+	code, errOut := capture(t, &os.Stderr, func() int {
+		return withStdin("\n", func() int { return Login([]string{"--key", "-"}) })
+	})
+	if code != 1 || !strings.Contains(errOut, "no key on stdin") {
+		t.Errorf("empty stdin: exit %d, stderr %q", code, errOut)
+	}
+	code = withStdin("  pk_abc  \n", func() int {
+		code, _ := captureStdout(t, func() int { return Login([]string{"--key", "-"}) })
+		return code
+	})
+	if code != 0 || srv.keyBody["key"] != "pk_abc" {
+		t.Errorf("exit %d, key sent %q", code, srv.keyBody["key"])
+	}
+}
+
+// Logging out removes every rule and digest the portal config wrote, and its state.
+func TestLogoutRemovesPortalRules(t *testing.T) {
+	home, srv := syncEnv(t)
+	srv.configHash = "h1"
+	srv.config = configJSON(t, "h1", backupRule())
+	if code, _ := captureStdout(t, func() int { return Sync(nil) }); code != 0 || len(portalFiles(t, home)) == 0 {
+		t.Fatal("setup: sync wrote no portal rules")
+	}
+	if deny(t, `psql -c "delete from users"`) == "" {
+		t.Fatal("setup: the portal rule should deny")
+	}
+	if code, out := captureStdout(t, func() int { return Logout(nil) }); code != 0 || !strings.Contains(out, "Logged out.") {
+		t.Fatalf("logout exit %d, output %q", code, out)
+	}
+	if got := portalFiles(t, home); len(got) != 0 {
+		t.Errorf("portal rules left after logout: %v", got)
+	}
+	if _, err := os.Stat(filepath.Join(home, "portal", "state.json")); !os.IsNotExist(err) {
+		t.Error("state.json left after logout")
+	}
+	if deny(t, `psql -c "delete from users"`) != "" {
+		t.Error("a portal rule still denies after logout")
 	}
 }
 

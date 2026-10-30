@@ -122,16 +122,19 @@ Nothing leaves the machine until you run `paws login`.
 ```bash
 paws login              # confirm a code in the browser; saves ~/.paws/credentials.json
 paws login --key pk_... # a machine with no browser: a one-time key made in the portal
+paws login --key -      # the same, reading the key from stdin
 paws sync --dry-run     # print exactly what the next upload holds, send nothing
 paws sync               # upload and pull settings now
-paws logout
+paws logout             # forget the token and remove the portal's rules
 ```
 
 What leaves the machine once you are logged in:
 
 - counts: each time a rule fired, its skill and verdict, and whether the
   skill was already loaded;
-- the commands Claude ran, with secrets redacted and cut to 500 characters;
+- the commands Claude ran, with secrets redacted (passwords, tokens, API keys,
+  auth headers, JWTs; [the list](docs/telemetry.md#redaction)) and cut to 500
+  characters;
 - MCP calls: server, tool and action class (send, create, update, delete);
 - tool actions as a short key, such as `git commit`, `gh pr create`,
   `edit migrations/**` or `DELETE`;
@@ -147,11 +150,18 @@ When: after Claude finishes a turn, from the async Stop hook, at most every
 Settings come down from the portal: the skills you turn on in the browser
 and the actions each one runs before. The Stop hook checks for a change at
 most every 15 minutes (`PAWS_CONFIG_INTERVAL`), then writes them as rule files
-under `~/.paws/portal/`. Catalog skills install into `~/.claude/skills` at
-their pinned commit and are refused if their content hash differs; a skill
+under `~/.paws/portal/`. Only skills in the catalog this paws version ships
+can install, into `~/.claude/skills` at their pinned commit, and are refused
+if their content hash differs; the portal can't name other code to download.
+A skill's rules are written only once the skill is installed; a skill
 directory you wrote or edited is never replaced. The gate itself stays
 offline: it reads those files like any other rule, and a tool call is never
-held up by the network. `PAWS_PORTAL_API` sets the portal address.
+held up by the network. `paws logout`, or a login revoked in the portal,
+removes those rules.
+
+`PAWS_PORTAL_API` sets the portal address (default
+`https://backend.getunbound.ai`). It must be https; plain http is accepted
+only for `localhost`, `127.0.0.1` or `::1`, with a warning.
 
 ## Install details
 

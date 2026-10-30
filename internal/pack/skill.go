@@ -1,6 +1,7 @@
 package pack
 
 import (
+	"context"
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
@@ -13,6 +14,7 @@ import (
 	"path/filepath"
 	"sort"
 	"strings"
+	"time"
 
 	"gopkg.in/yaml.v3"
 
@@ -33,8 +35,9 @@ type marker struct {
 }
 
 // Fetch checks out repo (a host path, validated by the catalog) at ref (a commit SHA) into
-// dest, an empty directory. Tests replace it.
-var Fetch = func(repo, ref, dest string) error {
+// dest, an empty directory. git never prompts for credentials, and ctx ending kills it.
+// Tests replace it.
+var Fetch = func(ctx context.Context, repo, ref, dest string) error {
 	if !catalog.RepoRe.MatchString(repo) || !catalog.RefRe.MatchString(ref) {
 		return fmt.Errorf("refusing to fetch %q at %q: want github.com/owner/repo and a commit SHA", repo, ref)
 	}
@@ -44,8 +47,12 @@ var Fetch = func(repo, ref, dest string) error {
 		{"fetch", "-q", "--depth", "1", "--", "https://" + repo, ref},
 		{"-c", "advice.detachedHead=false", "checkout", "-q", "FETCH_HEAD"},
 	} {
-		cmd := exec.Command("git", args...)
+		cmd := exec.CommandContext(ctx, "git", args...)
 		cmd.Dir = dest
+		// An empty GIT_ASKPASS overrides any askpass helper; with no terminal prompt either,
+		// a repo that wants credentials fails at once instead of waiting for input.
+		cmd.Env = append(os.Environ(), "GIT_TERMINAL_PROMPT=0", "GIT_ASKPASS=")
+		cmd.WaitDelay = time.Second // don't wait on a killed git's children holding the output pipe
 		if out, err := cmd.CombinedOutput(); err != nil {
 			return fmt.Errorf("git %s: %v: %s", args[0], err, strings.TrimSpace(string(out)))
 		}
@@ -97,12 +104,12 @@ func HashSkill(fsys fs.FS) (string, error) {
 
 // FetchUpstream checks out an upstream skill and returns its directory inside a temp dir
 // (caller removes tmp) and its content hash.
-func FetchUpstream(repo, ref, skillPath string) (dir, tmp, hash string, err error) {
+func FetchUpstream(ctx context.Context, repo, ref, skillPath string) (dir, tmp, hash string, err error) {
 	tmp, err = os.MkdirTemp("", "paws-skill-")
 	if err != nil {
 		return "", "", "", err
 	}
-	if err := Fetch(repo, ref, tmp); err != nil {
+	if err := Fetch(ctx, repo, ref, tmp); err != nil {
 		os.RemoveAll(tmp)
 		return "", "", "", err
 	}
@@ -299,7 +306,7 @@ const UpstreamMismatch = "hash-mismatch"
 // InstallUpstreamSkill installs skill name from repo@ref (skillPath is its SKILL.md), refusing
 // content that doesn't hash to want. Same rules as `paws add`: a user's own or edited copy is
 // kept, and a paws copy already at this source and hash is not fetched again.
-func InstallUpstreamSkill(skillsDir, name, repo, skillPath, ref, want string) (string, error) {
+func InstallUpstreamSkill(ctx context.Context, skillsDir, name, repo, skillPath, ref, want string) (string, error) {
 	if !catalog.ValidSkillName(name) {
 		return "", fmt.Errorf("invalid skill name %q", name)
 	}
@@ -312,7 +319,7 @@ func InstallUpstreamSkill(skillsDir, name, repo, skillPath, ref, want string) (s
 			return BundledCurrent, nil
 		}
 	}
-	dir, tmp, hash, err := FetchUpstream(repo, ref, skillPath)
+	dir, tmp, hash, err := FetchUpstream(ctx, repo, ref, skillPath)
 	if err != nil {
 		return "", err
 	}

@@ -83,8 +83,8 @@ Usage:
   paws index [--portal] [-o file]                The catalog as JSON (website, local UI); --portal: the portal's /catalog.
   paws validate [root]                           Check root/catalog bindings and root/packs manifests.
   paws pin [root]                                Fetch upstream skills and pin their content hashes.
-  paws login [--key <one-time-key>]              Link this machine to the paws portal (opt-in); --key for no browser.
-  paws logout                                    Forget the portal login.
+  paws login [--key <one-time-key>|-]            Link this machine to the paws portal (opt-in); --key for no browser (- reads stdin).
+  paws logout                                    Forget the portal login and remove its rules.
   paws sync [--dry-run]                          Upload new records and pull portal settings now; --dry-run prints the upload.
   paws version                                   Print version.
 
@@ -94,6 +94,6 @@ directory up to the repo root (or $HOME if no repo), plus ~/.paws.
 Nothing leaves the machine unless you run paws login. Once logged in, the
 async Stop hook uploads records and pulls portal settings after Claude's
 turns (throttled); the gate itself never uses the network. The portal
-address is $PAWS_PORTAL_API (default http://localhost:8000).
+address is $PAWS_PORTAL_API (default https://backend.getunbound.ai).
 `)
 }

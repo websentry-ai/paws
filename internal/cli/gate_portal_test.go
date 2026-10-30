@@ -2,6 +2,7 @@ package cli
 
 import (
 	"bufio"
+	"context"
 	"encoding/json"
 	"errors"
 	"net/http"
@@ -10,6 +11,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/websentry-ai/paws/internal/pack"
 )
 
 // runGate feeds one hook event to `paws gate` and returns what it printed.
@@ -250,31 +253,29 @@ func TestStopHookThrottlesUploadAndConfigCheck(t *testing.T) {
 }
 
 func TestStopHookIsBestEffort(t *testing.T) {
-	for name, status := range map[string]int{"server error": http.StatusInternalServerError, "revoked": http.StatusUnauthorized} {
-		t.Run(name, func(t *testing.T) {
-			home, srv := syncEnv(t)
-			srv.failWith = status
-			appendLines(t, filepath.Join(home, "audit.log"), actionLine("2026-10-01T10:00:00Z", `"tool":"Bash","action":"ls"`))
-			code, errOut := capture(t, &os.Stderr, func() int {
-				if out := runGate(t, map[string]any{"hook_event_name": "Stop", "cwd": t.TempDir()}); out != "{}" {
-					t.Errorf("Stop must answer exactly {}, got %q", out)
-				}
-				return 0
-			})
-			if code != 0 || errOut != "" {
-				t.Errorf("Stop must stay silent, stderr %q", errOut)
+	t.Run("server error", func(t *testing.T) {
+		home, srv := syncEnv(t)
+		srv.failWith = http.StatusInternalServerError
+		appendLines(t, filepath.Join(home, "audit.log"), actionLine("2026-10-01T10:00:00Z", `"tool":"Bash","action":"ls"`))
+		code, errOut := capture(t, &os.Stderr, func() int {
+			if out := runGate(t, map[string]any{"hook_event_name": "Stop", "cwd": t.TempDir()}); out != "{}" {
+				t.Errorf("Stop must answer exactly {}, got %q", out)
 			}
-			if srv.count("") == 0 {
-				t.Error("Stop should have tried the portal")
-			}
-			if _, err := os.Stat(filepath.Join(home, "sync-state.json")); !os.IsNotExist(err) {
-				t.Error("a failed upload must not move the cursor")
-			}
-			if st := loadPortalState(); st.AppliedHash != "" || st.LastUpload.IsZero() {
-				t.Errorf("state after a failed round: %+v", st)
-			}
+			return 0
 		})
-	}
+		if code != 0 || errOut != "" {
+			t.Errorf("Stop must stay silent, stderr %q", errOut)
+		}
+		if srv.count("") == 0 {
+			t.Error("Stop should have tried the portal")
+		}
+		if _, err := os.Stat(filepath.Join(home, "sync-state.json")); !os.IsNotExist(err) {
+			t.Error("a failed upload must not move the cursor")
+		}
+		if st := loadPortalState(); st.AppliedHash != "" || st.LastUpload.IsZero() {
+			t.Errorf("state after a failed round: %+v", st)
+		}
+	})
 	t.Run("portal unreachable", func(t *testing.T) {
 		home := portalEnv(t, http.NotFoundHandler())
 		writePrivate(filepath.Join(home, "credentials.json"), credentials{API: "http://127.0.0.1:1", Token: "t"})
@@ -292,4 +293,103 @@ func TestStopHookIsBestEffort(t *testing.T) {
 			t.Errorf("logged out, Stop made requests: %v", srv.requests)
 		}
 	})
+}
+
+// A require-skill rule that matches every tool call must not deny the Skill call that would
+// satisfy it, or the agent can never get past it. The gate never gates the Skill tool.
+func TestGateNeverDeniesTheSkillTool(t *testing.T) {
+	home := portalEnv(t, http.NotFoundHandler())
+	writeRule(t, filepath.Join(home, "catch-all.md"), "name: catch-all\nevent: pre-tool\naction:\n  type: require-skill\n  skill: deployer\n")
+	writeRule(t, filepath.Join(home, "skill-only.md"), "name: skill-only\nevent: pre-tool\nmatcher:\n  tool: Skill\naction:\n  type: require-skill\n  skill: other\n")
+	for _, skill := range []string{"deployer", "other", "unrelated"} {
+		out := runGate(t, map[string]any{"hook_event_name": "PreToolUse", "cwd": t.TempDir(), "session_id": "s",
+			"tool_name": "Skill", "tool_input": map[string]any{"skill": skill}})
+		if strings.Contains(out, "deny") {
+			t.Errorf("Skill(%s) was denied: %s", skill, out)
+		}
+	}
+	// Control: the catch-all still gates other tools.
+	if r := deny(t, "ls"); !strings.Contains(r, `"deployer"`) {
+		t.Errorf("the catch-all should still gate Bash, got %q", r)
+	}
+}
+
+// A 401 from the Stop hook logs the machine out: portal rules, state and credentials go, and
+// `paws sync` then says why.
+func TestStopHookForgetsARevokedLogin(t *testing.T) {
+	home, srv := syncEnv(t)
+	srv.configHash = "h1"
+	srv.config = configJSON(t, "h1", backupRule())
+	if code, _ := captureStdout(t, func() int { return Sync(nil) }); code != 0 {
+		t.Fatal("setup sync failed")
+	}
+	if len(portalFiles(t, home)) == 0 {
+		t.Fatal("setup: no portal rules written")
+	}
+	srv.failWith = http.StatusUnauthorized
+	appendLines(t, filepath.Join(home, "audit.log"), actionLine("2026-10-01T10:00:00Z", `"tool":"Bash","action":"ls"`))
+	setState(t, func(st *portalState) { st.LastUpload = time.Time{} })
+	code, errOut := capture(t, &os.Stderr, func() int {
+		if out := runGate(t, map[string]any{"hook_event_name": "Stop", "cwd": t.TempDir()}); out != "{}" {
+			t.Errorf("Stop must answer exactly {}, got %q", out)
+		}
+		return 0
+	})
+	if code != 0 || errOut != "" {
+		t.Errorf("Stop must stay silent, stderr %q", errOut)
+	}
+	if got := portalFiles(t, home); len(got) != 0 {
+		t.Errorf("portal rules left after a 401: %v", got)
+	}
+	if _, err := os.Stat(filepath.Join(home, "credentials.json")); !os.IsNotExist(err) {
+		t.Error("credentials.json kept after a 401")
+	}
+	if st := loadPortalState(); !st.Revoked || st.AppliedHash != "" {
+		t.Errorf("state after a 401: %+v", st)
+	}
+	if deny(t, `psql -c "delete from users"`) != "" {
+		t.Error("a revoked login's rule still denies")
+	}
+	code, errOut = capture(t, &os.Stderr, func() int { return Sync(nil) })
+	if code != 1 || !strings.Contains(errOut, "Your login was revoked") {
+		t.Errorf("sync after revocation: exit %d, stderr %q", code, errOut)
+	}
+}
+
+// A skill download that hangs can't hold the Stop hook past its deadline, and leaves no
+// temp or staging directory behind.
+func TestStopHookHasADeadline(t *testing.T) {
+	home, srv := syncEnv(t)
+	tmp := t.TempDir()
+	t.Setenv("TMPDIR", tmp)
+	pinned := "sha256:" + strings.Repeat("a", 64)
+	pinCatalog(t, pinned)
+	orig, origDeadline := pack.Fetch, stopHookDeadline
+	fetched := false
+	pack.Fetch = func(ctx context.Context, repo, ref, dest string) error {
+		fetched = true
+		<-ctx.Done()
+		return ctx.Err()
+	}
+	stopHookDeadline = 200 * time.Millisecond
+	t.Cleanup(func() { pack.Fetch, stopHookDeadline = orig, origDeadline })
+	srv.configHash = "h1"
+	srv.config = configJSON(t, "h1", humanizerSkill(pinned))
+	setState(t, func(st *portalState) {})
+
+	start := time.Now()
+	runGate(t, map[string]any{"hook_event_name": "Stop", "cwd": t.TempDir()})
+	if d := time.Since(start); !fetched || d > 5*time.Second {
+		t.Fatalf("Stop took %v with a hung download (fetch called: %v)", d, fetched)
+	}
+	if left, _ := filepath.Glob(filepath.Join(tmp, "*")); len(left) != 0 {
+		t.Errorf("temp dirs left behind: %v", left)
+	}
+	skills := filepath.Join(os.Getenv("HOME"), ".claude", "skills")
+	if left, _ := filepath.Glob(filepath.Join(skills, "*")); len(left) != 0 {
+		t.Errorf("skills dir after a failed download: %v", left)
+	}
+	if got := portalFiles(t, home); len(got) != 0 {
+		t.Errorf("rules written for a skill that never installed: %v", got)
+	}
 }

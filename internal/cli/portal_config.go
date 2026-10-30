@@ -72,6 +72,7 @@ type applyResult struct {
 	Hash    string
 	Applied []string // skills whose rule files are in place
 	Skipped []string // "<skill>: <reason>"
+	Pending bool     // a skill waits for its SKILL.md; keep checking instead of recording the hash
 }
 
 // catalogFS is the catalog this binary ships: the only skills a portal config can install.
@@ -202,7 +203,7 @@ func pullConfig(creds *credentials, st *portalState, known, cwd string) (*applyR
 	}
 	res, err := applyConfig(cfg, cwd)
 	st.Skills = res.Applied
-	if err == nil {
+	if err == nil && !res.Pending {
 		st.AppliedHash = cfg.ConfigHash
 	}
 	return &res, err
@@ -249,6 +250,7 @@ func applyConfig(cfg portalConfig, cwd string) (applyResult, error) {
 		}
 		if len(files) > 0 && s.Load != "rule" && !hasSkill(s.Name, skillsDir, projectSkills) {
 			files, skip = nil, "skill not installed"
+			res.Pending = true
 		}
 		if skip != "" {
 			res.Skipped = append(res.Skipped, s.Name+": "+skip)

@@ -392,13 +392,12 @@ func TestSyncWithholdsRulesUntilTheSkillIsInstalled(t *testing.T) {
 		t.Error("a missing skill's rule denies")
 	}
 
-	// The skill in the project's .claude/skills (sync runs from the repo) counts.
+	// The skill in the project's .claude/skills (sync runs from the repo) counts, and the
+	// unchanged config applies: a skipped missing skill doesn't mark the hash as applied.
 	cwd, _ := os.Getwd()
 	os.MkdirAll(filepath.Join(cwd, ".git"), 0o755)
 	os.MkdirAll(filepath.Join(cwd, ".claude", "skills", "deployer"), 0o755)
 	os.WriteFile(filepath.Join(cwd, ".claude", "skills", "deployer", "SKILL.md"), []byte("# deployer\n"), 0o644)
-	srv.configHash = "h2"
-	srv.config = configJSON(t, "h2", customSkill("deployer", action))
 	if code, out := captureStdout(t, func() int { return Sync(nil) }); code != 0 || !strings.Contains(out, "Config: 1 skill (deployer) applied.") {
 		t.Fatalf("second sync exit %d, output %q", code, out)
 	}

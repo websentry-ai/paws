@@ -2,6 +2,7 @@ package cli
 
 import (
 	"bufio"
+	"context"
 	"encoding/json"
 	"fmt"
 	"os"
@@ -20,6 +21,7 @@ import (
 // packFlags are the flags shared by the pack commands.
 type packFlags struct {
 	project bool
+	portal  bool // index: the portal's /catalog shape
 	catalog string
 	picks   map[string]string
 	out     string
@@ -49,6 +51,9 @@ func parsePackFlags(args []string, allowed ...string) (packFlags, error) {
 		switch a {
 		case "--project":
 			f.project = true
+			continue
+		case "--portal":
+			f.portal = true
 			continue
 		}
 		if i+1 >= len(args) {
@@ -321,8 +326,9 @@ func Search(args []string) int {
 }
 
 // Index writes the catalog as JSON for the website and the local UI: `paws index [-o file]`.
+// With --portal it writes the portal's /catalog shape: one entry per skill.
 func Index(args []string) int {
-	f, err := parsePackFlags(args, "--catalog", "-o")
+	f, err := parsePackFlags(args, "--catalog", "-o", "--portal")
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "paws: %v\n", err)
 		return 2
@@ -332,7 +338,11 @@ func Index(args []string) int {
 		fmt.Fprintf(os.Stderr, "paws: %v\n", err)
 		return 1
 	}
-	b, _ := json.MarshalIndent(buildIndex(c), "", "  ")
+	var index any = buildIndex(c)
+	if f.portal {
+		index = buildPortalCatalog(c)
+	}
+	b, _ := json.MarshalIndent(index, "", "  ")
 	b = append(b, '\n')
 	if f.out == "" {
 		os.Stdout.Write(b)
@@ -473,7 +483,7 @@ func Pin(args []string) int {
 		key := u.Repo + "@" + u.Ref + ":" + u.Path
 		hash, ok := hashes[key]
 		if !ok {
-			_, tmp, h, err := pack.FetchUpstream(u.Repo, u.Ref, u.Path)
+			_, tmp, h, err := pack.FetchUpstream(context.Background(), u.Repo, u.Ref, u.Path)
 			if err != nil {
 				fmt.Fprintf(os.Stderr, "paws: %s: %v\n", rel, err)
 				failed++

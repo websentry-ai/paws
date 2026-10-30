@@ -13,8 +13,9 @@ paws checks the session transcript for the skill. If it isn't loaded, the call
 is denied once with a message naming the skill; the agent loads it and
 retries, and the retry goes through. Husky, for agents.
 
-paws guarantees the skill was loaded; the skill governs the behaviour. It
-never rewrites tool input, reads tool output, or calls the network.
+paws guarantees the skill was loaded; the skill governs the behaviour. The
+hook never rewrites tool input or reads tool output, and the gate that decides
+each tool call never calls the network.
 
 Apache-2.0 · Claude Code · no account.
 
@@ -102,8 +103,8 @@ The full reference: [docs/rules.md](docs/rules.md).
 ## What paws does and doesn't do
 
 - **Local only.** The hook reads rule files and the session transcript and
-  writes `~/.paws/audit.log`. Nothing leaves the machine
-  ([docs/telemetry.md](docs/telemetry.md)).
+  writes `~/.paws/audit.log`. Nothing leaves the machine unless you run
+  `paws login` ([docs/telemetry.md](docs/telemetry.md)).
 - **Fails open.** A rule that doesn't parse is skipped with a one-line
   notice; an internal error allows the call. A hook that wedges your terminal
   gets uninstalled within the hour.
@@ -113,6 +114,54 @@ The full reference: [docs/rules.md](docs/rules.md).
 - **Not a sandbox.** Regex rules match command text, not shell semantics.
   A gate makes an agent that follows instructions load the skill; it doesn't
   stop an adversary.
+
+## Portal (optional)
+
+Nothing leaves the machine until you run `paws login`.
+
+```bash
+paws login              # confirm a code in the browser; saves ~/.paws/credentials.json
+paws login --key pk_... # a machine with no browser: a one-time key made in the portal
+paws login --key -      # the same, reading the key from stdin
+paws sync --dry-run     # print exactly what the next upload holds, send nothing
+paws sync               # upload and pull settings now
+paws logout             # forget the token and remove the portal's rules
+```
+
+What leaves the machine once you are logged in:
+
+- counts: each time a rule fired, its skill and verdict, and whether the
+  skill was already loaded;
+- the commands Claude ran, with secrets redacted (passwords, tokens, API keys,
+  auth headers, JWTs; [the list](docs/telemetry.md#redaction)) and cut to 500
+  characters;
+- MCP calls: server, tool and action class (send, create, update, delete);
+- tool actions as a short key, such as `git commit`, `gh pr create`,
+  `edit migrations/**` or `DELETE`;
+- file paths relative to the repo root (a path outside the repo is left out);
+- the names of your installed skills and the paws rules in scope.
+
+Never prompts, replies, file contents, tool output, absolute paths or session
+ids. Field by field: [docs/telemetry.md](docs/telemetry.md#portal-upload).
+
+When: after Claude finishes a turn, from the async Stop hook, at most every
+10 minutes (`PAWS_SYNC_INTERVAL`); on `paws sync`; and once at `paws login`.
+
+Settings come down from the portal: the skills you turn on in the browser
+and the actions each one runs before. The Stop hook checks for a change at
+most every 15 minutes (`PAWS_CONFIG_INTERVAL`), then writes them as rule files
+under `~/.paws/portal/`. Only skills in the catalog this paws version ships
+can install, into `~/.claude/skills` at their pinned commit, and are refused
+if their content hash differs; the portal can't name other code to download.
+A skill's rules are written only once the skill is installed; a skill
+directory you wrote or edited is never replaced. The gate itself stays
+offline: it reads those files like any other rule, and a tool call is never
+held up by the network. `paws logout`, or a login revoked in the portal,
+removes those rules.
+
+`PAWS_PORTAL_API` sets the portal address (default
+`https://backend.getunbound.ai`). It must be https; plain http is accepted
+only for `localhost`, `127.0.0.1` or `::1`, with a warning.
 
 ## Install details
 

@@ -1,6 +1,7 @@
 package pack
 
 import (
+	"context"
 	"os"
 	"path/filepath"
 	"strings"
@@ -52,7 +53,7 @@ func copyTree(src, dest string) error {
 func fakeFetch(t *testing.T, repos map[string]string) {
 	t.Helper()
 	orig := Fetch
-	Fetch = func(repo, ref, dest string) error {
+	Fetch = func(_ context.Context, repo, ref, dest string) error {
 		src, ok := repos[repo]
 		if !ok {
 			return os.ErrNotExist
@@ -326,8 +327,18 @@ func TestFetchRefusesUnsafeInputs(t *testing.T) {
 		{"file:///tmp/evil", sha},
 		{"ext::sh -c touch% /tmp/x", sha},
 	} {
-		if err := Fetch(c[0], c[1], t.TempDir()); err == nil || !strings.Contains(err.Error(), "refusing to fetch") {
+		if err := Fetch(context.Background(), c[0], c[1], t.TempDir()); err == nil || !strings.Contains(err.Error(), "refusing to fetch") {
 			t.Errorf("Fetch(%q, %q) should refuse, got %v", c[0], c[1], err)
 		}
+	}
+}
+
+// Fetch runs git under ctx: once ctx ends, nothing runs (the Stop hook's deadline relies on it).
+func TestFetchStopsWithItsContext(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	err := Fetch(ctx, "github.com/a/b", "0123456789abcdef0123456789abcdef01234567", t.TempDir())
+	if err == nil || !strings.Contains(err.Error(), "context canceled") {
+		t.Errorf("Fetch with a canceled context: %v", err)
 	}
 }

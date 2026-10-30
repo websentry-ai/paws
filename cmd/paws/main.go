@@ -94,6 +94,6 @@ directory up to the repo root (or $HOME if no repo), plus ~/.paws.
 Nothing leaves the machine unless you run paws login. Once logged in, the
 async Stop hook uploads records and pulls portal settings after Claude's
 turns (throttled); the gate itself never uses the network. The portal
-address is $PAWS_PORTAL_API (default https://backend.getunbound.ai).
+address is $PAWS_PORTAL_API (default https://api.paws.getunbound.ai).
 `)
 }

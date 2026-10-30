@@ -160,7 +160,7 @@ held up by the network. `paws logout`, or a login revoked in the portal,
 removes those rules.
 
 `PAWS_PORTAL_API` sets the portal address (default
-`https://backend.getunbound.ai`). It must be https; plain http is accepted
+`https://api.paws.getunbound.ai`). It must be https; plain http is accepted
 only for `localhost`, `127.0.0.1` or `::1`, with a warning.
 
 ## Install details

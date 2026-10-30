@@ -1,6 +1,6 @@
 {
   "name": "unbound-paws",
-  "version": "0.2.0",
+  "version": "0.2.1",
   "description": "paws: skills that actually fire. A Claude Code hook that makes sure the right skill is loaded before your agent commits, opens a PR, or runs a risky command.",
   "license": "Apache-2.0",
   "repository": {

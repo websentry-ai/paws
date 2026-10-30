@@ -23,7 +23,7 @@ import (
 // hook talk to it. The PreToolUse gate never does.
 
 // defaultPortalAPI is a placeholder until the hosted portal's address is final.
-const defaultPortalAPI = "https://backend.getunbound.ai"
+const defaultPortalAPI = "https://api.paws.getunbound.ai"
 
 // Test seams: tests replace these so polling doesn't wait and no browser opens.
 var (

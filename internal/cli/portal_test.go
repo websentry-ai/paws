@@ -416,3 +416,57 @@ func TestLoginWithUsedKeyFails(t *testing.T) {
 		t.Errorf("--key with no value: exit %d, want 2", code)
 	}
 }
+
+// A portal that names the account: login says which one (both flows), credentials.json keeps
+// it, and `paws sync` leads with it. Control characters never reach the terminal or the file.
+func TestLoginShowsTheAccount(t *testing.T) {
+	for name, login := range map[string]func(t *testing.T) func() int{
+		"device flow": func(t *testing.T) func() int {
+			portalEnv(t, &deviceFlow{t: t, replies: []tokenReply{
+				{200, `{"status":"ok","token":"tok-abc","device_id":"d-1","account_email":"alice@example.com\u001b[2J\n"}`},
+			}})
+			return func() int { return Login(nil) }
+		},
+		"one-time key": func(t *testing.T) func() int {
+			portalEnv(t, &fakePortal{t: t, keyEmail: "alice@example.com\u001b[2J\n"})
+			return func() int { return Login([]string{"--key", "pk_abc"}) }
+		},
+	} {
+		t.Run(name, func(t *testing.T) {
+			code, out := captureStdout(t, login(t))
+			if code != 0 || !strings.Contains(out, "Logged in as alice@example.com[2J.\nNothing new to upload.") {
+				t.Fatalf("login exit %d, output %q", code, out)
+			}
+			c, err := loadCredentials()
+			if err != nil || c == nil || c.AccountEmail != "alice@example.com[2J" {
+				t.Fatalf("credentials: %+v %v", c, err)
+			}
+			code, out = captureStdout(t, func() int { return Sync(nil) })
+			if code != 0 || !strings.HasPrefix(out, "Account: alice@example.com[2J\nNothing new to upload.") {
+				t.Errorf("sync exit %d, output %q", code, out)
+			}
+			code, out = captureStdout(t, func() int { return Sync([]string{"--dry-run"}) })
+			if code != 0 || !strings.HasPrefix(out, "{") {
+				t.Errorf("sync --dry-run must print only JSON on stdout, exit %d, output %q", code, out)
+			}
+			if strings.ContainsRune(out, 0x1b) {
+				t.Errorf("an escape reached the terminal: %q", out)
+			}
+		})
+	}
+}
+
+// An older portal sends no account_email: login and sync print what they always did.
+func TestLoginWithoutAccountEmail(t *testing.T) {
+	home := portalEnv(t, &fakePortal{t: t})
+	if code, out := captureStdout(t, func() int { return Login([]string{"--key", "pk_abc"}) }); code != 0 || !strings.Contains(out, "Logged in.\nNothing new to upload.") {
+		t.Fatalf("login exit %d, output %q", code, out)
+	}
+	data, _ := os.ReadFile(filepath.Join(home, "credentials.json"))
+	if strings.Contains(string(data), "account_email") {
+		t.Errorf("credentials.json: %s", data)
+	}
+	if code, out := captureStdout(t, func() int { return Sync(nil) }); code != 0 || !strings.HasPrefix(out, "Nothing new to upload.") {
+		t.Errorf("sync exit %d, output %q", code, out)
+	}
+}

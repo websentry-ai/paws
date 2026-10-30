@@ -103,7 +103,10 @@ func Sync(args []string) int {
 	}
 	cwd, _ := os.Getwd()
 	if dry {
-		return printDryRun(cwd)
+		return printDryRun(cwd) // stdout stays pure JSON
+	}
+	if creds.AccountEmail != "" {
+		fmt.Printf("Account: %s\n", printable(creds.AccountEmail))
 	}
 	rep, err := syncNow(creds, cwd)
 	if errors.Is(err, errRevoked) {

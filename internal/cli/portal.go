@@ -67,6 +67,8 @@ type credentials struct {
 	Token     string          `json:"token"`
 	DeviceID  json.RawMessage `json:"device_id,omitempty"` // kept as the portal sent it
 	CreatedAt string          `json:"created_at"`
+	// AccountEmail is the account this machine joined; empty when the portal predates it.
+	AccountEmail string `json:"account_email,omitempty"`
 }
 
 func credentialsPath() string {
@@ -178,9 +180,10 @@ type deviceCode struct {
 }
 
 type deviceToken struct {
-	Status   string          `json:"status"`
-	Token    string          `json:"token"`
-	DeviceID json.RawMessage `json:"device_id"`
+	Status       string          `json:"status"`
+	Token        string          `json:"token"`
+	DeviceID     json.RawMessage `json:"device_id"`
+	AccountEmail string          `json:"account_email"`
 }
 
 // printable drops control characters (escape sequences, newlines) from text the portal sent,
@@ -234,7 +237,8 @@ func Login(args []string) int {
 		fmt.Fprintf(os.Stderr, "paws: %v\n", err)
 		return 1
 	}
-	c := credentials{API: api, Token: tok.Token, DeviceID: tok.DeviceID, CreatedAt: time.Now().UTC().Format(time.RFC3339)}
+	c := credentials{API: api, Token: tok.Token, DeviceID: tok.DeviceID, CreatedAt: time.Now().UTC().Format(time.RFC3339),
+		AccountEmail: strings.TrimSpace(printable(tok.AccountEmail))}
 	if err := writePrivate(path, c); err != nil {
 		fmt.Fprintf(os.Stderr, "paws: saving credentials: %v\n", err)
 		return 1
@@ -243,7 +247,11 @@ func Login(args []string) int {
 		st.Revoked = false
 		savePortalState(st)
 	}
-	fmt.Println("Logged in.")
+	if c.AccountEmail != "" {
+		fmt.Printf("Logged in as %s.\n", c.AccountEmail)
+	} else {
+		fmt.Println("Logged in.")
+	}
 	cwd, _ := os.Getwd()
 	rep, err := syncNow(&c, cwd)
 	if err != nil {

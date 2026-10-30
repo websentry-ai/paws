@@ -86,8 +86,9 @@ It is a heuristic: a secret in a shape not listed here is written as it is.
 
 ## Portal upload
 
-Opt-in. Nothing is sent until you run `paws login`, which stores a token in
-`~/.paws/credentials.json` (0600). The portal address (`PAWS_PORTAL_API`)
+Opt-in. Nothing is sent until you run `paws login`, which stores a token, and
+the account's email when the portal sends it, in `~/.paws/credentials.json`
+(0600). The portal address (`PAWS_PORTAL_API`)
 must be https; plain http works only for `localhost`, `127.0.0.1` or `::1`,
 and credentials saved for any other http address are refused. From then on:
 

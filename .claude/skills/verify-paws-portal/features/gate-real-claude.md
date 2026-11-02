@@ -21,7 +21,7 @@ Preconditions:
 - `portal.sh up` (test mode) and `doctor` ok; `claude` on PATH and logged in. For isolated mode, a token at `~/.config/paws-verify/claude-token` (see SKILL.md); otherwise the fallback runs with the normal login and the rule skill only.
 
 - **Setup.** Run `portal.sh run claude-gate` (or `VERIFY_SKIP_CLAUDE=1 portal.sh run claude-gate` to check setup without model calls). A scratch repo with a staged `notes.txt`, `paws init` (project scope), portal user `verify-claude` with the skills on, `paws login --key`, `paws sync`.
-- **Run.** `claude -p "Commit the staged change…" --setting-sources project --output-format stream-json --verbose --allowedTools "Bash(git:*)" Skill`. The turn ends with a `result` event that is not an error.
+- **Run.** `claude -p "Commit the staged change…" --output-format stream-json --verbose --allowedTools "Bash(git:*)" Skill` (the fallback adds `--setting-sources project`, which also hides user skills). The turn ends with a `result` event that is not an error.
 - **Proof.** `claude-gate/audit.jsonl` has a deny on the `caveman-commit--*` rule; a tool result contains the token; `git-log.txt` starts with `<token>:`; isolated mode also has a `Skill` tool_use for `git` and a `git--*` allow with `satisfied_by: skill-load`; `GET /skills` (user `verify-claude`) headline `about_to_act > 0`.
 
 ## Gotchas

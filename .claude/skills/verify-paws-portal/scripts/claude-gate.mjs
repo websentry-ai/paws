@@ -78,7 +78,9 @@ if (process.env.VERIFY_SKIP_CLAUDE === "1") {
 
 step("Claude commits the staged change");
 const args = ["-p", "Commit the staged change in this repo with a short message. Do it now, without asking.", "--model", process.env.VERIFY_MODEL || "sonnet",
-  "--setting-sources", "project", "--output-format", "stream-json", "--verbose",
+  // --setting-sources project also hides user skills (CLAUDE_CONFIG_DIR/skills), where paws installs them,
+  // so only the fallback uses it, to keep the developer's own hooks out. The isolated config has none.
+  ...(isolated ? [] : ["--setting-sources", "project"]), "--output-format", "stream-json", "--verbose",
   "--allowedTools", "Bash(git:*)", "Skill", "--disallowedTools", "Edit(~/.paws/**)", "Edit(~/.claude/**)"];
 const run = spawnSync("claude", args, { cwd: proj, env: env(), encoding: "utf8", timeout: 300000, maxBuffer: 64 << 20 });
 writeFileSync(join(out, "stream.jsonl"), run.stdout || "");

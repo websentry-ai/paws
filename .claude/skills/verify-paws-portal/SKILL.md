@@ -73,7 +73,7 @@ Starts its own portal user (`verify-claude`) and scratch repo, runs `paws init` 
 turns on skills through the API, logs the scratch laptop in with a one-time key, then runs
 
 ```
-claude -p "Commit the staged change…" --setting-sources project --output-format stream-json --verbose \
+claude -p "Commit the staged change…" --output-format stream-json --verbose \
   --allowedTools "Bash(git:*)" Skill --disallowedTools "Edit(~/.paws/**)" "Edit(~/.claude/**)"
 ```
 
@@ -91,6 +91,8 @@ the portal counted the run.
 - **Fallback** (no token): the developer's normal login (macOS keeps it in the Keychain for the default
   config dir, so a scratch `CLAUDE_CONFIG_DIR` is logged out). Only the rule skill is turned on, so paws
   installs nothing into the real `~/.claude`; `--setting-sources project` keeps the user's own hooks out.
+  That flag also hides user skills (where paws installs full skills), which is why the isolated mode, with no
+  user settings to hide, runs without it.
   Claude Code itself still writes its session transcript under `~/.claude/projects/` in this mode.
 - `VERIFY_SKIP_CLAUDE=1 portal.sh run claude-gate` checks everything up to the `claude` call (init, portal
   skills, login, sync) without spending model calls.

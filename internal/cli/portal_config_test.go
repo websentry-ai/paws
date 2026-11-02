@@ -279,6 +279,47 @@ func TestSyncRefusesUpstreamNotInCatalog(t *testing.T) {
 	}
 }
 
+// A user deletes a portal skill, or its rule files, by hand. Until the next config check the
+// gate lets the action through (Claude would have no skill to load); then the check re-applies
+// the config even though its hash hasn't changed.
+func TestSyncRepairsSkillsAndRulesDeletedByHand(t *testing.T) {
+	home, srv := syncEnv(t)
+	v1 := fakeUpstream(t, "# humanizer\n")
+	pinCatalog(t, v1)
+	srv.configHash = "h1"
+	srv.config = configJSON(t, "h1", humanizerSkill(v1), backupRule())
+	if code, out := captureStdout(t, func() int { return Sync(nil) }); code != 0 {
+		t.Fatalf("first sync exit %d, output %q", code, out)
+	}
+	skill := filepath.Join(os.Getenv("HOME"), ".claude", "skills", "humanizer")
+
+	os.RemoveAll(skill)
+	if r := deny(t, "gh pr create --title x"); r != "" {
+		t.Errorf("denied with the skill gone, a dead end for the agent: %q", r)
+	}
+	code, out := captureStdout(t, func() int { return Sync(nil) })
+	if code != 0 || !strings.Contains(out, "Config: 2 skills (backup-first, humanizer) applied.") {
+		t.Fatalf("sync after deleting the skill: exit %d, output %q", code, out)
+	}
+	if _, err := os.Stat(filepath.Join(skill, "SKILL.md")); err != nil {
+		t.Errorf("skill not reinstalled: %v", err)
+	}
+	if r := deny(t, "gh pr create --title x"); !strings.Contains(r, `"humanizer"`) {
+		t.Errorf("gate after the reinstall: %q", r)
+	}
+
+	os.Remove(filepath.Join(home, "portal", "backup-first--2.md"))
+	if code, out := captureStdout(t, func() int { return Sync(nil) }); code != 0 || !strings.Contains(out, "applied") {
+		t.Fatalf("sync after deleting a rule file: exit %d, output %q", code, out)
+	}
+	if got := fmt.Sprint(portalFiles(t, home)); got != "[backup-first--2.md digests/backup-first.md humanizer--a1.md]" {
+		t.Errorf("portal files %s", got)
+	}
+	if code, out := captureStdout(t, func() int { return Sync(nil) }); code != 0 || !strings.Contains(out, "Config: up to date") {
+		t.Errorf("nothing drifted: want up to date, got exit %d, output %q", code, out)
+	}
+}
+
 // An update approved in the portal moves the pin to a newer commit of the same repo and path;
 // the laptop installs it once the download hashes to the approved content.
 func TestSyncInstallsAnApprovedUpdate(t *testing.T) {

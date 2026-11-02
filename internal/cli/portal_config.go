@@ -194,7 +194,7 @@ func pullConfig(creds *credentials, st *portalState, known, cwd string) (*applyR
 		}
 		hash = h.ConfigHash
 	}
-	if hash == "" || hash == st.AppliedHash {
+	if hash == "" || hash == st.AppliedHash && !portalDrifted(st, cwd) {
 		return nil, nil
 	}
 	var cfg portalConfig
@@ -207,6 +207,31 @@ func pullConfig(creds *credentials, st *portalState, known, cwd string) (*applyR
 		st.AppliedHash = cfg.ConfigHash
 	}
 	return &res, err
+}
+
+// portalDrifted reports whether this laptop lost part of the applied config since it was
+// applied, say by a user deleting a skill or a rule file: a skill with no rule files left, or a
+// full skill (no digest) whose SKILL.md is gone. The config is then re-applied though its hash
+// hasn't changed.
+func portalDrifted(st *portalState, cwd string) bool {
+	dir := portalDir()
+	if dir == "" {
+		return false
+	}
+	skillsDir := pack.UserTarget(gate.UserDir()).SkillsDir
+	projectSkills := pack.ProjectTarget(projectRoot(cwd)).SkillsDir
+	for _, name := range st.Skills {
+		if rules, _ := filepath.Glob(filepath.Join(dir, name+"--*.md")); len(rules) == 0 {
+			return true
+		}
+		if _, err := os.Stat(filepath.Join(dir, "digests", name+".md")); err == nil {
+			continue // load=rule: nothing to install
+		}
+		if !hasSkill(name, skillsDir, projectSkills) {
+			return true
+		}
+	}
+	return false
 }
 
 func portalGet(creds *credentials, path string, v any) error {

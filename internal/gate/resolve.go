@@ -7,6 +7,7 @@ import (
 	"strings"
 	"unicode/utf8"
 
+	"github.com/websentry-ai/paws/internal/pack"
 	"github.com/websentry-ai/paws/internal/rule"
 )
 
@@ -122,6 +123,12 @@ func evaluate(r *rule.Rule, ev Event) outcome {
 		return outcome{verdict: Allow, satisfiedBy: skillLoadSatisfied, fired: true}
 	}
 	digest, digestErr := loadDigest(r)
+	if digest == "" && portalSkillMissing(r, ev.Cwd) {
+		// A portal rule whose skill isn't on this laptop (deleted by hand, or not installed
+		// yet): the agent has nothing to load, so denying would be a dead end. The next config
+		// check reinstalls the skill.
+		return outcome{}
+	}
 	if digest != "" && DenyDelivered(ev.Transcript, digestMarker(r), DefaultSkillWindow) {
 		// The digest already rode in a deny this window: the agent has the rules, let the retry through.
 		return outcome{verdict: Allow, satisfiedBy: digestSatisfied, fired: true}
@@ -137,6 +144,29 @@ func evaluate(r *rule.Rule, ev Event) outcome {
 		return outcome{verdict: Deny, reason: digestReason(r, digest), fired: true}
 	}
 	return outcome{verdict: Deny, reason: msgOr(a.DenyMessage, skillReason(a)), fired: true, digestErr: digestErr}
+}
+
+// portalSkillMissing reports whether r is a portal rule (under UserDir()/portal) whose skill
+// has no SKILL.md in the user's skills directory or cwd's project. paws installs every portal
+// skill there, so unlike a local rule (whose skill may come from a plugin) absence is certain.
+func portalSkillMissing(r *rule.Rule, cwd string) bool {
+	user := UserDir()
+	if user == "" {
+		return false
+	}
+	root := user // loadDir resolves symlinks, so SourcePath is under the resolved dir
+	if resolved, err := filepath.EvalSymlinks(user); err == nil {
+		root = resolved
+	}
+	if !strings.HasPrefix(r.SourcePath, filepath.Join(root, "portal")+string(filepath.Separator)) {
+		return false
+	}
+	for _, dir := range []string{pack.UserTarget(user).SkillsDir, pack.ProjectTarget(repoRoot(cwd)).SkillsDir} {
+		if st, err := os.Stat(filepath.Join(dir, r.Action.Skill, "SKILL.md")); err == nil && st.Mode().IsRegular() {
+			return false
+		}
+	}
+	return true
 }
 
 // loadDigest returns the rule's digest when on_miss is digest. On a missing, unreadable or

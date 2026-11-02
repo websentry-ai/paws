@@ -229,8 +229,8 @@ func TestSyncRefusesMismatchedSkillsAndKeepsUserCopies(t *testing.T) {
 	}
 }
 
-// A compromised portal can't make a laptop download code: an upstream skill installs only at a
-// pin this binary's catalog carries, matched on repo, path, ref and content hash.
+// A compromised portal can't make a laptop download code from anywhere else: an upstream skill
+// installs only from the repo and path this binary's catalog pins for it, at a commit SHA.
 func TestSyncRefusesUpstreamNotInCatalog(t *testing.T) {
 	home, srv := syncEnv(t)
 	pinned := "sha256:" + strings.Repeat("a", 64)
@@ -253,12 +253,10 @@ func TestSyncRefusesUpstreamNotInCatalog(t *testing.T) {
 	srv.configHash = "h1"
 	srv.config = configJSON(t, "h1",
 		variant("evil", func(u map[string]any) { u["repo"] = "github.com/evil/skills" }),
-		variant("humanizer", func(u map[string]any) { u["ref"] = strings.Repeat("b", 40) }),
+		variant("humanizer", func(u map[string]any) { u["ref"] = "main" }),
 		variant("renamed", func(u map[string]any) {}),
 		variant("gitlab", func(u map[string]any) { u["repo"] = "gitlab.com/blader/humanizer" }),
-		map[string]any{"name": "humanizer", "kind": "skill", "load": "full", "status": "on", "content_hash": "sha256:" + strings.Repeat("c", 64),
-			"upstream": map[string]any{"repo": "github.com/blader/humanizer", "path": "SKILL.md", "ref": humanizerRef},
-			"actions":  []map[string]any{{"id": "a2", "label": "x", "event": "pre-tool", "tool": "Bash", "command_regex": "x"}}},
+		variant("humanizer", func(u map[string]any) { u["path"] = "evil/SKILL.md" }),
 	)
 
 	code, out := captureStdout(t, func() int { return Sync(nil) })
@@ -278,6 +276,78 @@ func TestSyncRefusesUpstreamNotInCatalog(t *testing.T) {
 		if _, err := os.Stat(filepath.Join(os.Getenv("HOME"), ".claude", "skills", name)); !os.IsNotExist(err) {
 			t.Errorf("skill %s was installed", name)
 		}
+	}
+}
+
+// An update approved in the portal moves the pin to a newer commit of the same repo and path;
+// the laptop installs it once the download hashes to the approved content.
+func TestSyncInstallsAnApprovedUpdate(t *testing.T) {
+	home, srv := syncEnv(t)
+	pinCatalog(t, "sha256:"+strings.Repeat("a", 64))
+	approved := fakeUpstream(t, "# humanizer v2\n")
+	newRef := strings.Repeat("b", 40)
+	var fetched []string
+	fetch := pack.Fetch
+	pack.Fetch = func(ctx context.Context, repo, ref, dest string) error {
+		fetched = append(fetched, repo+"@"+ref)
+		return fetch(ctx, repo, ref, dest)
+	}
+	t.Cleanup(func() { pack.Fetch = fetch })
+	s := humanizerSkill(approved)
+	s["upstream"].(map[string]any)["ref"] = newRef
+	srv.configHash = "h2"
+	srv.config = configJSON(t, "h2", s)
+
+	code, out := captureStdout(t, func() int { return Sync(nil) })
+	if code != 0 || !strings.Contains(out, "Config: 1 skill (humanizer) applied.") {
+		t.Fatalf("sync exit %d, output %q", code, out)
+	}
+	if got := fmt.Sprint(fetched); got != "[github.com/blader/humanizer@"+newRef+"]" {
+		t.Errorf("fetched %s", got)
+	}
+	if data, _ := os.ReadFile(filepath.Join(os.Getenv("HOME"), ".claude", "skills", "humanizer", "SKILL.md")); string(data) != "# humanizer v2\n" {
+		t.Errorf("installed SKILL.md %q", data)
+	}
+	if got := fmt.Sprint(portalFiles(t, home)); got != "[humanizer--a1.md]" {
+		t.Errorf("portal files %s", got)
+	}
+	if st := loadPortalState(); st.AppliedHash != "h2" {
+		t.Errorf("applied hash %q, want h2", st.AppliedHash)
+	}
+}
+
+// An update whose download doesn't hash to the approved content is refused, and the version
+// already installed keeps serving: its rules stay, and the config isn't reported as applied.
+func TestSyncKeepsTheInstalledVersionWhenAnUpdateFails(t *testing.T) {
+	home, srv := syncEnv(t)
+	v1 := fakeUpstream(t, "# humanizer v1\n")
+	pinCatalog(t, v1)
+	srv.configHash = "h1"
+	srv.config = configJSON(t, "h1", humanizerSkill(v1))
+	if code, out := captureStdout(t, func() int { return Sync(nil) }); code != 0 {
+		t.Fatalf("first sync exit %d, output %q", code, out)
+	}
+
+	fakeUpstream(t, "# humanizer v2, not what was approved\n")
+	s := humanizerSkill("sha256:" + strings.Repeat("d", 64))
+	s["upstream"].(map[string]any)["ref"] = strings.Repeat("b", 40)
+	srv.configHash = "h2"
+	srv.config = configJSON(t, "h2", s)
+	code, errOut := capture(t, &os.Stderr, func() int {
+		code, _ := captureStdout(t, func() int { return Sync(nil) })
+		return code
+	})
+	if code != 1 || !strings.Contains(errOut, "content hash mismatch at the pinned ref; not installed; keeping the installed version") {
+		t.Fatalf("exit %d, stderr %q", code, errOut)
+	}
+	if data, _ := os.ReadFile(filepath.Join(os.Getenv("HOME"), ".claude", "skills", "humanizer", "SKILL.md")); string(data) != "# humanizer v1\n" {
+		t.Errorf("installed SKILL.md %q, want v1 kept", data)
+	}
+	if got := fmt.Sprint(portalFiles(t, home)); got != "[humanizer--a1.md]" {
+		t.Errorf("portal files %s; the installed version's rules must stay", got)
+	}
+	if st := loadPortalState(); st.AppliedHash != "h1" {
+		t.Errorf("applied hash %q, want h1 until the update installs", st.AppliedHash)
 	}
 }
 

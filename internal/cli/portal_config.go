@@ -318,15 +318,19 @@ func hasSkill(name string, skillsDirs ...string) bool {
 // rules must not be written; an error with no skip means an older copy serves meanwhile.
 func prepareSkill(s portalSkill, skillsDir string, embedded *catalog.Catalog) (string, error) {
 	outcome, err := installPortalSkill(s, skillsDir, embedded)
+	_, serr := os.Stat(filepath.Join(skillsDir, s.Name))
 	switch {
+	case outcome == pack.UpstreamMismatch && serr == nil:
+		// An update that didn't check out: the installed version keeps serving, and the error
+		// keeps this config from being reported as applied.
+		return "", errors.New("content hash mismatch at the pinned ref; not installed; keeping the installed version")
 	case outcome == pack.UpstreamMismatch:
 		return "content hash mismatch at the pinned ref; not installed", nil
 	case outcome == notInCatalog:
 		return "not in this paws version's catalog — update paws", nil
 	case err == nil:
 		return "", nil
-	}
-	if _, serr := os.Stat(filepath.Join(skillsDir, s.Name)); serr != nil {
+	case serr != nil:
 		return "not installed: " + err.Error(), err
 	}
 	return "", err
@@ -351,10 +355,10 @@ func actionFiles(s portalSkill, digest, dir string) (map[string][]byte, []string
 // notInCatalog: the config names an upstream skill this binary's catalog doesn't pin.
 const notInCatalog = "not-in-catalog"
 
-// installPortalSkill installs a full skill: from upstream at a pin this binary's catalog
-// carries, or from the catalog inside this binary, checked against the config's content hash
-// either way. The portal can only pick among those pins, never name new code to download. A
-// custom skill (neither) is the user's to provide; "" with no error.
+// installPortalSkill installs a full skill: from the upstream repo and path this binary's
+// catalog pins for it, or from the catalog inside this binary, checked against the config's
+// content hash either way. The portal picks the commit (an approved update) but can never point
+// at another repo or path. A custom skill (neither) is the user's to provide; "" with no error.
 func installPortalSkill(s portalSkill, skillsDir string, embedded *catalog.Catalog) (string, error) {
 	want := s.ContentHash
 	if u := s.Upstream; u != nil && u.Repo != "" {
@@ -377,16 +381,19 @@ func installPortalSkill(s portalSkill, skillsDir string, embedded *catalog.Catal
 	return pack.InstallBundledSkill(fsys, skillsDir, s.Name, source)
 }
 
-// catalogPin returns the catalog binding's upstream pin for skill when the config's repo, path,
-// ref and content hash all match it exactly; only github.com repos qualify.
+// catalogPin returns where to install skill from: the repo and path this binary's catalog pins
+// for it, at the config's ref and content hash. The ref may differ from the catalog's when the
+// user approved an update in the portal; it must still be a commit SHA, and the download must
+// hash to the approved content. Only github.com repos qualify.
 func catalogPin(c *catalog.Catalog, skill string, u rule.Upstream, hash string) *rule.Upstream {
-	if c == nil || !strings.HasPrefix(u.Repo, "github.com/") {
+	if c == nil || hash == "" || !strings.HasPrefix(u.Repo, "github.com/") || !catalog.RefRe.MatchString(u.Ref) {
 		return nil
 	}
 	for _, rel := range sortedKeys(c.Bindings) {
 		b := c.Bindings[rel]
 		p := b.Upstream
-		if b.Action.Skill == skill && p.Repo == u.Repo && p.Path == u.Path && p.Ref == u.Ref && p.ContentHash == hash {
+		if b.Action.Skill == skill && p.Repo == u.Repo && p.Path == u.Path {
+			p.Ref, p.ContentHash = u.Ref, hash
 			return &p
 		}
 	}

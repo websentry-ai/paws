@@ -9,10 +9,12 @@ import (
 	"github.com/websentry-ai/paws/internal/rule"
 )
 
-// Result is the rules in scope, plus per-file parse errors and the .paws dirs consulted (nearest-first).
+// Result is the rules in scope, plus per-file parse errors, per-file warnings (rules that loaded but
+// carry unknown keys) and the .paws dirs consulted (nearest-first).
 type Result struct {
 	Rules []*rule.Rule
 	Errs  []FileError
+	Warns []FileError
 	Dirs  []string
 }
 
@@ -129,6 +131,11 @@ func loadDir(dir string, res *Result) {
 			return nil
 		}
 		res.Rules = append(res.Rules, r)
+		// Parse ignores unknown keys so a newer rule file still loads; a misspelled matcher key
+		// (comand_regex) would otherwise widen the rule without a word. Load it, but say so.
+		if err := rule.CheckKnownFields(data); err != nil {
+			res.Warns = append(res.Warns, FileError{path, err})
+		}
 		return nil
 	})
 }

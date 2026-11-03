@@ -1,6 +1,7 @@
 package gate
 
 import (
+	"strings"
 	"os"
 	"path/filepath"
 	"testing"
@@ -184,5 +185,22 @@ func TestLoadSkipsSkillsDigestsAndReadmes(t *testing.T) {
 	loadDir(dir, &res)
 	if len(res.Errs) != 0 || len(res.Rules) != 1 {
 		t.Errorf("want 1 rule and no errors, got %d rules, errs %v", len(res.Rules), res.Errs)
+	}
+}
+
+func TestLoadDirWarnsOnUnknownKeys(t *testing.T) {
+	pawsDir := filepath.Join(t.TempDir(), ".paws")
+	mustMkdir(t, pawsDir)
+	// comand_regex is a typo: the rule still loads (Parse is lenient) but must be reported.
+	mustWrite(t, filepath.Join(pawsDir, "typo.md"), "---\nname: typo\nevent: pre-tool\nmatcher:\n  tool: Bash\n  comand_regex: deploy\naction:\n  type: require-skill\n  skill: s\n---\n")
+	mustWrite(t, filepath.Join(pawsDir, "clean.md"), "---\nname: clean\nevent: pre-tool\nmatcher:\n  tool: Bash\n  command_regex: deploy\naction:\n  type: require-skill\n  skill: s\n---\n")
+
+	var res Result
+	loadDir(pawsDir, &res)
+	if len(res.Rules) != 2 || len(res.Errs) != 0 {
+		t.Fatalf("both rules should load: rules=%d errs=%v", len(res.Rules), res.Errs)
+	}
+	if len(res.Warns) != 1 || filepath.Base(res.Warns[0].Path) != "typo.md" || !strings.Contains(res.Warns[0].Err.Error(), "comand_regex") {
+		t.Fatalf("want one warning naming comand_regex in typo.md, got %v", res.Warns)
 	}
 }

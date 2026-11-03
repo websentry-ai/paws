@@ -86,9 +86,11 @@ escapes and break the rule.
 
 `require-skill` + `skill` is the only action: deny until the skill was
 invoked in the last 20 turns. Optional `deny_message` replaces the deny text.
-With `on_miss: digest` and `digest: <path from the rule, under 7000 bytes>`,
-the deny carries the digest text instead. A rule with any other action is
-skipped.
+With `on_miss: digest` and `digest: <path>`, the deny carries the digest
+text instead (under 7000 bytes). The path is relative to the rule file's own
+folder and must stay inside it (no `..`): copy the text next to the rule, e.g.
+`.paws/pre-tool/digests/s3.md` with `digest: digests/s3.md`. A rule with any
+other action is skipped.
 
 ## Check it
 
@@ -101,6 +103,10 @@ paws explain --event session-start startup
 
 `paws explain` has no transcript: a skill never counts as loaded,
 `agent-count` never holds and `no-edit-matching` always does.
+
+A line starting with `!` is a problem to fix: a file that was skipped, an
+unknown key (a typo like `comand_regex` is ignored, so the rule matches more
+than you meant), or a digest that couldn't be read.
 
 ## When a gate fires on you
 

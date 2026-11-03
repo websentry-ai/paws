@@ -76,6 +76,9 @@ func Explain(args []string) int {
 	for _, fe := range res.Errs {
 		fmt.Printf("  ! skipped %s: %v\n", fe.Path, fe.Err)
 	}
+	for _, fe := range res.Warns {
+		fmt.Printf("  ! unknown key in %s (ignored): %s\n", fe.Path, oneLine(fe.Err))
+	}
 
 	fmt.Println("\nrules:")
 	for _, r := range res.Rules {
@@ -84,6 +87,11 @@ func Explain(args []string) int {
 			mark = "→ "
 		}
 		fmt.Printf("  %s%-24s event=%-12s action=%-14s [%s]\n", mark, r.Name, r.Event, r.Action.Type, r.SourcePath)
+		if mark == "→ " {
+			if p := gate.DigestProblem(r); p != "" {
+				fmt.Printf("      ! digest not used, the deny names the skill instead: %s\n", p)
+			}
+		}
 	}
 	if len(res.Rules) == 0 {
 		fmt.Println("  (no rules loaded)")
@@ -91,6 +99,11 @@ func Explain(args []string) int {
 
 	printDecision(gate.Decide(ev, res.Rules))
 	return 0
+}
+
+// oneLine flattens a multi-line YAML error ("unmarshal errors:\n  line 6: field x not found").
+func oneLine(err error) string {
+	return strings.Join(strings.Fields(err.Error()), " ")
 }
 
 func printDecision(d gate.Decision) {

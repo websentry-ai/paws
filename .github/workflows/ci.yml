@@ -73,6 +73,7 @@ jobs:
       cancel-in-progress: false
     permissions:
       contents: write
+      id-token: write # npm trusted publishing: npm exchanges this OIDC token, no npm secret
     env:
       GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       RELEASE_VERSION: ${{ needs.test.outputs.version }}
@@ -89,17 +90,7 @@ jobs:
           node-version: 24
           registry-url: https://registry.npmjs.org
       - name: Check release prerequisites
-        env:
-          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
-          PUBLISH_NPM: ${{ inputs.publish_npm }}
         run: |
-          if [ "$PUBLISH_NPM" = true ]; then
-            if [ -z "$NODE_AUTH_TOKEN" ]; then
-              echo "::error::Add the NPM_TOKEN repository secret before publishing to npm."
-              exit 1
-            fi
-            npm whoami --registry=https://registry.npmjs.org/
-          fi
           if [ "$(gh api "repos/$GITHUB_REPOSITORY" --jq '.private')" != false ]; then
             echo "::error::The npm installer needs public GitHub release downloads. Make the repository public before releasing."
             exit 1
@@ -140,6 +131,7 @@ jobs:
       - name: Publish npm package
         if: inputs.publish_npm
         working-directory: npm
-        env:
-          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
-        run: npm publish --access public --tag "$NPM_TAG"
+        # Trusted publishing needs npm 11.5.1 or newer; it also attaches provenance on its own.
+        run: |
+          npm install -g npm@^11.5.1
+          npm publish --access public --tag "$NPM_TAG"

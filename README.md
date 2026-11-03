@@ -213,19 +213,14 @@ content hash changes; nothing is redistributed from this repo.
 go test ./...
 go run ./cmd/paws validate .                     # catalog bindings and packs
 go run ./cmd/paws pin .                          # pin upstream skill hashes
-python3 .claude/skills/verify-paws/scripts/drive.py run --all        # live Claude Code e2e
-python3 .claude/skills/verify-paws/scripts/drive.py run --npm launch-journey
+python3 .github/release/smoke.py                 # build every archive, test the npm install
 ```
-
-`.claude/skills/verify-paws/` drives a real headless Claude Code session per
-case against a freshly built paws and grades the transcript, the audit log
-and repo side effects.
 
 Releases run manually through the **CI and release** workflow on `main`.
 The workflow requires a newer version in `npm/package.json`, runs checks,
 then releases binaries and publishes to npm. Pushes and pull requests run
 checks only. See [Release paws](docs/releases.md) for the first release,
-the npm token setup, and installation checks.
+npm publishing setup, and installation checks.
 
 ```
 cmd/paws          CLI entrypoint

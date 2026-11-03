@@ -6,14 +6,54 @@ import json
 import os
 from pathlib import Path
 import shutil
+import subprocess
 import sys
 import tarfile
 import tempfile
 import zipfile
 
 REPO = Path(__file__).resolve().parents[2]
-sys.path.insert(0, str(REPO / ".claude/skills/verify-paws/scripts"))
-from drive import Installer, sh
+
+
+def sh(cmd, cwd, env=None, timeout=120):
+    return subprocess.run(cmd, cwd=cwd, env=env, shell=isinstance(cmd, str), capture_output=True, text=True, timeout=timeout)
+
+
+class Installer:
+    """The ship path: a GoReleaser snapshot at the npm package's version, served locally, then npx init."""
+
+    def __init__(self, init, env, cleanup):
+        self.init, self.env, self.cleanup = init, env, cleanup
+
+    @staticmethod
+    def npm(run_dir):
+        version = json.loads((REPO / "npm" / "package.json").read_text())["version"]
+        run_dir.mkdir(parents=True, exist_ok=True)
+        dist, cfg = run_dir / "dist", run_dir / "goreleaser.yaml"
+        base_cfg = (REPO / ".goreleaser.yaml").read_text()
+        if "\nsnapshot:" in base_cfg or "\ndist:" in base_cfg:
+            raise SystemExit(".goreleaser.yaml now sets snapshot: or dist:; update Installer.npm to merge them")
+        cfg.write_text(base_cfg + f'\ndist: "{dist}"\nsnapshot:\n  version_template: "{version}"\n')
+        r = sh(["goreleaser", "release", "--snapshot", "--clean", "--config", str(cfg)], REPO, timeout=600)
+        if r.returncode != 0:
+            raise SystemExit(f"goreleaser snapshot failed:\n{r.stdout[-2000:]}{r.stderr[-2000:]}")
+        r = sh(["npm", "pack", "--pack-destination", str(run_dir)], REPO / "npm")
+        if r.returncode != 0:
+            raise SystemExit(f"npm pack failed:\n{r.stderr}")
+        tgz = run_dir / f"unbound-paws-{version}.tgz"
+        server = subprocess.Popen([sys.executable, "-u", "-m", "http.server", "0", "--bind", "127.0.0.1", "--directory", str(dist)],
+                                  stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, text=True)  # request logs go to stderr
+        line = server.stdout.readline()  # "Serving HTTP on 127.0.0.1 port N ..."
+        if " port " not in line:
+            server.kill()
+            raise SystemExit(f"local release server did not start: {line!r}")
+        port = line.split(" port ")[1].split()[0]
+        env = {"PAWS_DOWNLOAD_BASE": f"http://127.0.0.1:{port}", "npm_config_update_notifier": "false"}
+
+        def cleanup():
+            server.terminate()
+            server.wait(timeout=10)
+        return Installer(["npx", "--yes", "--package", str(tgz), "unbound-paws", "init"], env, cleanup)
 
 
 def run(command, project, env):

@@ -59,16 +59,6 @@ a fresh npm cache, runs `init`, and confirms the hook binary survives cache
 removal. It also rejects corrupted checksums and verifies a retry works
 after the checksums are restored. Nothing is published.
 
-With a working Claude Code login and available usage, run the live journey:
-
-```bash
-python3 .claude/skills/verify-paws/scripts/drive.py run --npm launch-journey
-```
-
-This builds all release archives, serves them locally, installs the packed
-npm wrapper with a fresh npm cache, and drives a Claude Code session through
-the writing pack's commit gate. It does not publish anything.
-
 After publishing, use a new device with Node 18 or newer and Claude Code:
 
 ```bash

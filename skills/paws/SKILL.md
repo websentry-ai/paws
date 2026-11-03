@@ -14,10 +14,12 @@ reads every rule on every tool call, so a saved rule is live.
    the same action, edit it instead of adding a second.
 2. **Pin the request to concrete commands, files or MCP tools.** For a vague
    request, pick the narrowest reading and name it in your reply. paws only
-   makes a skill load before a call. When asked for anything else (stopping
-   a call for good, asking the user, recording calls, editing a command or
-   its output), say so and offer a rule that loads a skill carrying the
-   instruction.
+   makes a skill load before a call, and every rule holds back the first
+   matching call until that skill is loaded. When asked for anything else
+   (stopping a call for good, asking the user, recording or counting calls,
+   letting a call through untouched, editing a command or its output), write
+   no rule and no skill: say paws can't do that, and offer a rule that loads
+   a skill carrying the instruction. Build it only if the user says yes.
 3. **Write one file per rule.** Repo: `.paws/<event>/<name>.md`. "All my
    repos": the user dir, the last path on the `.paws :` line of
    `paws explain` (`$PAWS_HOME` when set, else `~/.paws`).

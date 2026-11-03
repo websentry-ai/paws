@@ -167,11 +167,7 @@ func askPick(g catalog.PickOne) string {
 // hookRegistered reports whether this repo's or the global settings run paws.
 func hookRegistered() bool {
 	cwd, _ := os.Getwd()
-	claude := os.Getenv("CLAUDE_CONFIG_DIR")
-	if claude == "" {
-		home, _ := os.UserHomeDir()
-		claude = filepath.Join(home, ".claude")
-	}
+	claude := userClaudeDir()
 	for _, p := range []string{
 		filepath.Join(projectRoot(cwd), ".claude", "settings.json"),
 		filepath.Join(projectRoot(cwd), ".claude", "settings.local.json"),

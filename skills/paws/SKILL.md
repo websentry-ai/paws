@@ -65,8 +65,10 @@ PR bodies read like a person wrote them.
   JSON. Start Bash patterns with `(^|[;&|\n])\s*` so chained commands
   match and quoted or echoed text doesn't; add `(sudo\s+)?` or
   `(\w+=\S*\s+)*` for prefixed forms. Cover every spelling of a flag: `rm -rf`
-  is also `-fr`, `-Rf`, `-r -f` and `--recursive --force`. RE2 has no lookahead,
-  so list the forms you want: `--force(\s|$)` spares `--force-with-lease`.
+  is also `-fr`, `-Rf`, `-r -f` and `--recursive --force`. End a word with
+  `(\s|$)`, not `\b`: `publish\b` also matches `npm run publish-docs`. RE2 has
+  no lookahead, so list the forms you want: `--force(\s|$)` spares
+  `--force-with-lease`.
 - `file_glob`: `**`, `*`, `?`, `{a,b}`. A relative glob matches at any
   directory (`*.py` is every Python file). It matches Read too; add
   `tool: Write|Edit` to gate changes only.

@@ -126,6 +126,9 @@ func TestGlobalSettingsFollowClaudeConfigDir(t *testing.T) {
 	if got, code := settingsTarget([]string{"--global"}); code != -1 || got != filepath.Join(cfg, "settings.json") {
 		t.Errorf("with CLAUDE_CONFIG_DIR: got %q (%d), want %q", got, code, filepath.Join(cfg, "settings.json"))
 	}
+	if got := pawsSkillDir(filepath.Join(cfg, "settings.json")); got != filepath.Join(cfg, "skills") {
+		t.Errorf("paws skill beside CLAUDE_CONFIG_DIR settings: got %q", got)
+	}
 	t.Setenv("CLAUDE_CONFIG_DIR", "")
 	if got, _ := settingsTarget([]string{"--global"}); got != filepath.Join(home, ".claude", "settings.json") {
 		t.Errorf("without CLAUDE_CONFIG_DIR: got %q", got)

@@ -228,10 +228,11 @@ func sameFile(a, b string) (bool, error) {
 }
 
 // pawsSkillDir is the skills directory Claude Code reads beside settingsPath, or "" when the
-// settings file isn't in a .claude directory (a --settings path elsewhere, managed settings).
+// settings file isn't in a .claude directory or $CLAUDE_CONFIG_DIR (a --settings path elsewhere,
+// managed settings).
 func pawsSkillDir(settingsPath string) string {
 	dir := filepath.Dir(settingsPath)
-	if filepath.Base(dir) != ".claude" {
+	if filepath.Base(dir) != ".claude" && dir != userClaudeDir() {
 		return ""
 	}
 	return filepath.Join(dir, "skills")

@@ -113,11 +113,19 @@ func settingsTarget(args []string) (path string, code int) {
 		return explicit, -1
 	}
 	if global {
-		home, _ := os.UserHomeDir()
-		return filepath.Join(home, ".claude", "settings.json"), -1
+		return filepath.Join(userClaudeDir(), "settings.json"), -1
 	}
 	root, _ := os.Getwd()
 	return filepath.Join(projectRoot(root), ".claude", "settings.json"), -1
+}
+
+// userClaudeDir is Claude Code's user config dir: $CLAUDE_CONFIG_DIR when set, else ~/.claude.
+func userClaudeDir() string {
+	if dir := os.Getenv("CLAUDE_CONFIG_DIR"); dir != "" {
+		return dir
+	}
+	home, _ := os.UserHomeDir()
+	return filepath.Join(home, ".claude")
 }
 
 // projectRoot walks up to the git repo root so init from a subdirectory writes the file Claude Code actually reads.
@@ -220,10 +228,11 @@ func sameFile(a, b string) (bool, error) {
 }
 
 // pawsSkillDir is the skills directory Claude Code reads beside settingsPath, or "" when the
-// settings file isn't in a .claude directory (a --settings path elsewhere, managed settings).
+// settings file isn't in a .claude directory or $CLAUDE_CONFIG_DIR (a --settings path elsewhere,
+// managed settings).
 func pawsSkillDir(settingsPath string) string {
 	dir := filepath.Dir(settingsPath)
-	if filepath.Base(dir) != ".claude" {
+	if filepath.Base(dir) != ".claude" && dir != userClaudeDir() {
 		return ""
 	}
 	return filepath.Join(dir, "skills")

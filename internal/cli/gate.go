@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"strings"
 
 	"github.com/websentry-ai/paws/internal/gate"
 	"github.com/websentry-ai/paws/internal/hook"
@@ -60,8 +61,15 @@ func Gate() (code int) {
 	cwd := in.CWD
 	res := gate.Collect(cwd)
 	out := hook.Render(in.HookEventName, gate.Decide(ev, res.Rules))
+	var problems []string
 	if n := len(res.Errs); n > 0 {
-		out.SystemMessage = fmt.Sprintf("paws: %d rule file(s) failed to parse (run `paws explain` for details)", n)
+		problems = append(problems, fmt.Sprintf("%d rule file(s) failed to parse", n))
+	}
+	if n := len(res.Warns); n > 0 {
+		problems = append(problems, fmt.Sprintf("%d rule file(s) have unknown keys", n))
+	}
+	if len(problems) > 0 {
+		out.SystemMessage = "paws: " + strings.Join(problems, ", ") + " (run `paws explain` for details)"
 	}
 	wrote = true
 	emit(out)

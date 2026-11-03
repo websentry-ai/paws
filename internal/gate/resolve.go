@@ -187,6 +187,13 @@ func loadDigest(r *rule.Rule) (string, string) {
 	return strings.TrimSpace(string(data)), ""
 }
 
+// DigestProblem says why r's on_miss digest can't be used, or "" when it can (or r has none).
+// The gate then falls back to naming the skill; explain shows this so the fallback isn't silent.
+func DigestProblem(r *rule.Rule) string {
+	_, problem := loadDigest(r)
+	return problem
+}
+
 // digestMarker tags a digest deny so the transcript shows the agent already received it.
 func digestMarker(r *rule.Rule) string {
 	return fmt.Sprintf("paws digest (%s):", r.Name)

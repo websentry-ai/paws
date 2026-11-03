@@ -197,6 +197,15 @@ func TestDigestFallsBackToLoadRequired(t *testing.T) {
 		if d.Verdict != Deny || strings.Contains(d.Reason, "paws digest") || !strings.Contains(d.Reason, "Invoke it with the Skill tool") {
 			t.Errorf("%s: want the load-required deny, got %+v", name, d)
 		}
+		if DigestProblem(r) == "" {
+			t.Errorf("%s: DigestProblem must say why the digest wasn't used", name)
+		}
+	}
+}
+
+func TestDigestProblemEmptyWhenUsable(t *testing.T) {
+	if p := DigestProblem(digestRule(t, "rules")); p != "" {
+		t.Errorf("a readable digest has no problem, got %q", p)
 	}
 }
 

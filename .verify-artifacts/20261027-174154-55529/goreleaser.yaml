@@ -1,0 +1,39 @@
+# Release builds for paws. The npm wrapper (npm/) downloads these assets by name,
+# so keep the archive name template and checksums file in sync with npm/install.js.
+version: 2
+
+project_name: paws
+
+builds:
+  - main: ./cmd/paws
+    binary: paws
+    env:
+      - CGO_ENABLED=0
+    goos: [darwin, linux, windows]
+    goarch: [amd64, arm64]
+    flags: [-trimpath]
+    ldflags:
+      - -s -w -X main.version={{.Version}}
+
+archives:
+  - name_template: "{{ .ProjectName }}_{{ .Version }}_{{ .Os }}_{{ .Arch }}"
+    formats: [tar.gz]
+    format_overrides:
+      - goos: windows
+        formats: [zip]
+    files: [LICENSE, README.md]
+
+checksum:
+  name_template: checksums.txt
+  algorithm: sha256
+
+changelog:
+  use: github
+  sort: asc
+
+release:
+  prerelease: auto
+
+dist: "/Users/vishnnu/.plan/worktrees/unbound-157f13a7/vv-v2/paws/.verify-artifacts/20261027-174154-55529/dist"
+snapshot:
+  version_template: "0.2.0"

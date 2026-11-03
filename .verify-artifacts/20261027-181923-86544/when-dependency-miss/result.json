@@ -1,0 +1,30 @@
+{
+  "case": "when-dependency-miss",
+  "verdict": "PASS",
+  "seconds": 15.4,
+  "tools": [
+    "Bash"
+  ],
+  "checks": [
+    {
+      "check": "skill not invoked: payments-review",
+      "pass": true,
+      "detail": "invoked=[]"
+    },
+    {
+      "check": "audit absent: {'rule': 'stripe-commit'}",
+      "pass": true,
+      "detail": "0 matching"
+    },
+    {
+      "check": "shell: git log -1 --format=%s | grep -q 'initial'",
+      "pass": true,
+      "detail": ""
+    },
+    {
+      "check": "shell: ! git log -1 --format=%s | grep -q 'PAY-OK'",
+      "pass": true,
+      "detail": ""
+    }
+  ]
+}

@@ -1,0 +1,24 @@
+[
+  {
+    "kind": "tool_use",
+    "name": "Bash",
+    "input": {
+      "command": "git commit --allow-empty -m \"initial\n\nCo-Authored-By: Claude Sonnet 5.5 <noreply@anthropic.com>\"",
+      "description": "Create empty git commit"
+    }
+  },
+  {
+    "kind": "tool_result",
+    "text": "[master (root-commit) 921c8fe] initial",
+    "is_error": false
+  },
+  {
+    "kind": "text",
+    "text": "I created an empty commit with the message \"initial\" on `master`. It's the root commit, `921c8fe`. The message ends with the Co-Authored-By line."
+  },
+  {
+    "kind": "result",
+    "text": "I created an empty commit with the message \"initial\" on `master`. It's the root commit, `921c8fe`. The message ends with the Co-Authored-By line.",
+    "is_error": false
+  }
+]

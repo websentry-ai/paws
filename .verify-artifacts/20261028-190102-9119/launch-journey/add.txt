@@ -1,0 +1,2 @@
+prose (Which de-slop skill to use.): pick one of humanizer, stop-slop [humanizer]: Added writing (3 binding(s)) to /private/var/folders/pw/2f89rc8j59bdr8rg82d7lmjr0000gn/T/paws-verify-launch-journey-wcw52ln7/proj/.paws/packs/writing
+  skill humanizer installed in /private/var/folders/pw/2f89rc8j59bdr8rg82d7lmjr0000gn/T/paws-verify-launch-journey-wcw52ln7/proj/.claude/skills

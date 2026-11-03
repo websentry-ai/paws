@@ -1,0 +1,24 @@
+[
+  {
+    "kind": "tool_use",
+    "name": "Bash",
+    "input": {
+      "command": "git status",
+      "description": "Show working tree status"
+    }
+  },
+  {
+    "kind": "tool_result",
+    "text": "On branch master\n\nNo commits yet\n\nUntracked files:\n  (use \"git add <file>...\" to include in what will be committed)\n\t.claude/\n\t.paws/\n\nnothing added to commit but untracked files present (use \"git add\" to track)",
+    "is_error": false
+  },
+  {
+    "kind": "text",
+    "text": "The branch is `master`. It has no commits yet, and `.claude/` and `.paws/` are untracked."
+  },
+  {
+    "kind": "result",
+    "text": "The branch is `master`. It has no commits yet, and `.claude/` and `.paws/` are untracked.",
+    "is_error": false
+  }
+]

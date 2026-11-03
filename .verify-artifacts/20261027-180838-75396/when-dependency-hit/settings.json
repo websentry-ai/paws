@@ -1,0 +1,38 @@
+{
+  "hooks": {
+    "PreToolUse": [
+      {
+        "hooks": [
+          {
+            "command": "PAWS_MANAGED=1 '/var/folders/pw/2f89rc8j59bdr8rg82d7lmjr0000gn/T/paws-verify-when-dependency-hit-dn18lc5z/paws-home/bin/paws' gate",
+            "timeout": 15,
+            "type": "command"
+          }
+        ],
+        "matcher": "*"
+      }
+    ],
+    "SessionStart": [
+      {
+        "hooks": [
+          {
+            "command": "PAWS_MANAGED=1 '/var/folders/pw/2f89rc8j59bdr8rg82d7lmjr0000gn/T/paws-verify-when-dependency-hit-dn18lc5z/paws-home/bin/paws' gate",
+            "timeout": 15,
+            "type": "command"
+          }
+        ]
+      }
+    ],
+    "UserPromptSubmit": [
+      {
+        "hooks": [
+          {
+            "command": "PAWS_MANAGED=1 '/var/folders/pw/2f89rc8j59bdr8rg82d7lmjr0000gn/T/paws-verify-when-dependency-hit-dn18lc5z/paws-home/bin/paws' gate",
+            "timeout": 15,
+            "type": "command"
+          }
+        ]
+      }
+    ]
+  }
+}

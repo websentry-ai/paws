@@ -1,0 +1,32 @@
+{
+  "case": "catalog-humanizer-commit",
+  "verdict": "PASS",
+  "seconds": 22.7,
+  "tools": [
+    "Bash",
+    "Skill",
+    "Bash"
+  ],
+  "checks": [
+    {
+      "check": "skill invoked: humanizer",
+      "pass": true,
+      "detail": "invoked=['humanizer']"
+    },
+    {
+      "check": "audit sequence",
+      "pass": true,
+      "detail": "2 records in order"
+    },
+    {
+      "check": "audit at most 1: {'rule': 'humanizer-commit', 'verdict': 'deny'}",
+      "pass": true,
+      "detail": "1 matching"
+    },
+    {
+      "check": "shell: git log -1 --format=%B | grep -q 'Humanized: yes'",
+      "pass": true,
+      "detail": ""
+    }
+  ]
+}

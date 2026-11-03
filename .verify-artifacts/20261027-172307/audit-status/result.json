@@ -1,0 +1,30 @@
+{
+  "case": "audit-status",
+  "verdict": "PASS",
+  "seconds": 11.0,
+  "tools": [
+    "Bash"
+  ],
+  "checks": [
+    {
+      "check": "tool result absent: 'paws rule'",
+      "pass": true,
+      "detail": ""
+    },
+    {
+      "check": "tool result absent: 'hook error'",
+      "pass": true,
+      "detail": ""
+    },
+    {
+      "check": "audit sequence",
+      "pass": true,
+      "detail": "1 records in order"
+    },
+    {
+      "check": "audit absent: {'verdict': 'deny'}",
+      "pass": true,
+      "detail": "0 matching"
+    }
+  ]
+}

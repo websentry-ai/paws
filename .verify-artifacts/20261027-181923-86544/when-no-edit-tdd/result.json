@@ -1,0 +1,43 @@
+{
+  "case": "when-no-edit-tdd",
+  "verdict": "PASS",
+  "seconds": 13.9,
+  "tools": [
+    "Write",
+    "Skill",
+    "Write",
+    "Write"
+  ],
+  "checks": [
+    {
+      "check": "skill invoked: tdd-probe",
+      "pass": true,
+      "detail": "invoked=['tdd-probe']"
+    },
+    {
+      "check": "audit sequence",
+      "pass": true,
+      "detail": "1 records in order"
+    },
+    {
+      "check": "audit at most 1: {'rule': 'tests-first', 'verdict': 'deny'}",
+      "pass": true,
+      "detail": "1 matching"
+    },
+    {
+      "check": "shell: test -f tests/test_add.py",
+      "pass": true,
+      "detail": ""
+    },
+    {
+      "check": "shell: grep -q 'TDD-OK' tests/test_add.py",
+      "pass": true,
+      "detail": ""
+    },
+    {
+      "check": "shell: test -f src/add.py",
+      "pass": true,
+      "detail": ""
+    }
+  ]
+}

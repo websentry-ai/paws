@@ -1,0 +1,5 @@
+Installed paws binary to /var/folders/pw/2f89rc8j59bdr8rg82d7lmjr0000gn/T/paws-verify-launch-journey-wcw52ln7/paws-home/bin/paws
+Registered paws in /private/var/folders/pw/2f89rc8j59bdr8rg82d7lmjr0000gn/T/paws-verify-launch-journey-wcw52ln7/proj/.claude/settings.json
+  command: PAWS_MANAGED=1 '/var/folders/pw/2f89rc8j59bdr8rg82d7lmjr0000gn/T/paws-verify-launch-journey-wcw52ln7/paws-home/bin/paws' gate
+Installed the paws skill in /private/var/folders/pw/2f89rc8j59bdr8rg82d7lmjr0000gn/T/paws-verify-launch-journey-wcw52ln7/proj/.claude/skills/paws
+Open a Claude Code session in this project to activate it.

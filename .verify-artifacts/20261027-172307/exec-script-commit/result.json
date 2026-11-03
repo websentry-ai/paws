@@ -1,0 +1,26 @@
+{
+  "case": "exec-script-commit",
+  "verdict": "PASS",
+  "seconds": 14.1,
+  "tools": [
+    "Bash",
+    "Bash"
+  ],
+  "checks": [
+    {
+      "check": "tool result contains: 'must reference a ticket'",
+      "pass": true,
+      "detail": ""
+    },
+    {
+      "check": "audit sequence",
+      "pass": true,
+      "detail": "1 records in order"
+    },
+    {
+      "check": "shell: git log -1 --format=%s | grep -Eq 'PAWS-[0-9]+'",
+      "pass": true,
+      "detail": ""
+    }
+  ]
+}

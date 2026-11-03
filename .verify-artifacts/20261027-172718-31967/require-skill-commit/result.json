@@ -1,0 +1,37 @@
+{
+  "case": "require-skill-commit",
+  "verdict": "PASS",
+  "seconds": 20.8,
+  "tools": [
+    "Bash",
+    "Skill",
+    "Bash"
+  ],
+  "checks": [
+    {
+      "check": "skill invoked: house-style",
+      "pass": true,
+      "detail": "invoked=['house-style']"
+    },
+    {
+      "check": "tool result contains: 'house-style'",
+      "pass": true,
+      "detail": ""
+    },
+    {
+      "check": "audit sequence",
+      "pass": true,
+      "detail": "2 records in order"
+    },
+    {
+      "check": "audit at most 1: {'rule': 'commit-house-style', 'verdict': 'deny'}",
+      "pass": true,
+      "detail": "1 matching"
+    },
+    {
+      "check": "shell: git log -1 --format=%s | grep -q '^PROBE-7Q: '",
+      "pass": true,
+      "detail": ""
+    }
+  ]
+}

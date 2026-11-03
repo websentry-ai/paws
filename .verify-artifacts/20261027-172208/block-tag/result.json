@@ -1,0 +1,25 @@
+{
+  "case": "block-tag",
+  "verdict": "PASS",
+  "seconds": 8.1,
+  "tools": [
+    "Bash"
+  ],
+  "checks": [
+    {
+      "check": "tool result contains: 'Tags are cut by the release pipeline'",
+      "pass": true,
+      "detail": ""
+    },
+    {
+      "check": "audit sequence",
+      "pass": true,
+      "detail": "1 records in order"
+    },
+    {
+      "check": "shell: test -z \"$(git tag)\"",
+      "pass": true,
+      "detail": ""
+    }
+  ]
+}

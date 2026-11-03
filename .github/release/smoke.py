@@ -16,7 +16,7 @@ REPO = Path(__file__).resolve().parents[2]
 
 
 def sh(cmd, cwd, env=None, timeout=120):
-    return subprocess.run(cmd, cwd=cwd, env=env, shell=isinstance(cmd, str), capture_output=True, text=True, timeout=timeout)
+    return subprocess.run(cmd, cwd=cwd, env=env, capture_output=True, text=True, timeout=timeout)
 
 
 class Installer:

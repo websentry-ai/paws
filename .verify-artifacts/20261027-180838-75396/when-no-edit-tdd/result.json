@@ -1,0 +1,38 @@
+{
+  "case": "when-no-edit-tdd",
+  "verdict": "FAIL",
+  "seconds": 34.8,
+  "tools": [
+    "Write",
+    "Skill",
+    "Write",
+    "Write"
+  ],
+  "checks": [
+    {
+      "check": "skill invoked: tdd-probe",
+      "pass": true,
+      "detail": "invoked=['tdd-probe']"
+    },
+    {
+      "check": "audit sequence",
+      "pass": false,
+      "detail": "first unmatched: {'rule': 'tests-first', 'verdict': 'allow', 'satisfied_by': 'skill-load'}"
+    },
+    {
+      "check": "shell: test -f tests/test_add.py",
+      "pass": true,
+      "detail": ""
+    },
+    {
+      "check": "shell: grep -q 'TDD-OK' tests/test_add.py",
+      "pass": true,
+      "detail": ""
+    },
+    {
+      "check": "shell: test -f src/add.py",
+      "pass": true,
+      "detail": ""
+    }
+  ]
+}

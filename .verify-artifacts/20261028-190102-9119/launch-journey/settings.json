@@ -1,0 +1,63 @@
+{
+  "hooks": {
+    "PostToolUse": [
+      {
+        "hooks": [
+          {
+            "async": true,
+            "command": "PAWS_MANAGED=1 '/var/folders/pw/2f89rc8j59bdr8rg82d7lmjr0000gn/T/paws-verify-launch-journey-wcw52ln7/paws-home/bin/paws' gate",
+            "timeout": 15,
+            "type": "command"
+          }
+        ],
+        "matcher": "*"
+      }
+    ],
+    "PreToolUse": [
+      {
+        "hooks": [
+          {
+            "command": "PAWS_MANAGED=1 '/var/folders/pw/2f89rc8j59bdr8rg82d7lmjr0000gn/T/paws-verify-launch-journey-wcw52ln7/paws-home/bin/paws' gate",
+            "timeout": 15,
+            "type": "command"
+          }
+        ],
+        "matcher": "*"
+      }
+    ],
+    "SessionStart": [
+      {
+        "hooks": [
+          {
+            "command": "PAWS_MANAGED=1 '/var/folders/pw/2f89rc8j59bdr8rg82d7lmjr0000gn/T/paws-verify-launch-journey-wcw52ln7/paws-home/bin/paws' gate",
+            "timeout": 15,
+            "type": "command"
+          }
+        ]
+      }
+    ],
+    "Stop": [
+      {
+        "hooks": [
+          {
+            "async": true,
+            "command": "PAWS_MANAGED=1 '/var/folders/pw/2f89rc8j59bdr8rg82d7lmjr0000gn/T/paws-verify-launch-journey-wcw52ln7/paws-home/bin/paws' gate",
+            "timeout": 15,
+            "type": "command"
+          }
+        ]
+      }
+    ],
+    "UserPromptSubmit": [
+      {
+        "hooks": [
+          {
+            "command": "PAWS_MANAGED=1 '/var/folders/pw/2f89rc8j59bdr8rg82d7lmjr0000gn/T/paws-verify-launch-journey-wcw52ln7/paws-home/bin/paws' gate",
+            "timeout": 15,
+            "type": "command"
+          }
+        ]
+      }
+    ]
+  }
+}

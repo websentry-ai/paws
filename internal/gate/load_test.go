@@ -1,9 +1,9 @@
 package gate
 
 import (
-	"strings"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 

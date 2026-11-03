@@ -1,0 +1,1 @@
+{"action": "audit", "agent": "claude-code", "event": "pre-tool", "rule": "watch-status", "session": "5cc8bfd9-4cc8-40b5-9baf-4aa9ddbb5223", "source": "/private/var/folders/pw/2f89rc8j59bdr8rg82d7lmjr0000gn/T/paws-verify-audit-status-x6f11u8v/proj/.paws/pre-tool/watch-status.md", "target": "git status", "tool": "Bash", "ts": "2026-10-27T11:52:14Z", "verdict": "allow"}

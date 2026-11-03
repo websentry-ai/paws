@@ -1,0 +1,11 @@
+[
+  {
+    "kind": "text",
+    "text": "2 + 2 is 4.\n\nZEBRA-42"
+  },
+  {
+    "kind": "result",
+    "text": "2 + 2 is 4.\n\nZEBRA-42",
+    "is_error": false
+  }
+]

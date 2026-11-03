@@ -1,0 +1,27 @@
+{
+  "hooks": {
+    "PreToolUse": [
+      {
+        "hooks": [
+          {
+            "command": "PAWS_MANAGED=1 '/Users/vishnnu/.plan/worktrees/unbound-157f13a7/vv-v2/paws/.verify-artifacts/20261027-172307/bin/paws' gate",
+            "timeout": 15,
+            "type": "command"
+          }
+        ],
+        "matcher": "*"
+      }
+    ],
+    "UserPromptSubmit": [
+      {
+        "hooks": [
+          {
+            "command": "PAWS_MANAGED=1 '/Users/vishnnu/.plan/worktrees/unbound-157f13a7/vv-v2/paws/.verify-artifacts/20261027-172307/bin/paws' gate",
+            "timeout": 15,
+            "type": "command"
+          }
+        ]
+      }
+    ]
+  }
+}

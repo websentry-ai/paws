@@ -1,0 +1,11 @@
+[
+  {
+    "kind": "text",
+    "text": "You've hit your 5-hour limit \u00b7 resets 8:30pm (Asia/Calcutta)"
+  },
+  {
+    "kind": "result",
+    "text": "You've hit your 5-hour limit \u00b7 resets 8:30pm (Asia/Calcutta)",
+    "is_error": true
+  }
+]

@@ -1,0 +1,24 @@
+[
+  {
+    "kind": "tool_use",
+    "name": "Bash",
+    "input": {
+      "command": "git status",
+      "description": "Show working tree status"
+    }
+  },
+  {
+    "kind": "tool_result",
+    "text": "On branch master\n\nNo commits yet\n\nUntracked files:\n  (use \"git add <file>...\" to include in what will be committed)\n\t.claude/\n\t.paws/\n\nnothing added to commit but untracked files present (use \"git add\" to track)",
+    "is_error": false
+  },
+  {
+    "kind": "text",
+    "text": "The repo is on the branch **master**. It has no commits yet, and the only untracked items are `.claude/` and `.paws/`.\n\nYour git status snapshot lists `main` as the main branch for PRs. That branch doesn't exist yet, because nothing has been committed."
+  },
+  {
+    "kind": "result",
+    "text": "The repo is on the branch **master**. It has no commits yet, and the only untracked items are `.claude/` and `.paws/`.\n\nYour git status snapshot lists `main` as the main branch for PRs. That branch doesn't exist yet, because nothing has been committed.",
+    "is_error": false
+  }
+]

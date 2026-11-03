@@ -1,0 +1,27 @@
+{
+  "case": "when-dependency-hit",
+  "verdict": "PASS",
+  "seconds": 19.0,
+  "tools": [
+    "Bash",
+    "Skill",
+    "Bash"
+  ],
+  "checks": [
+    {
+      "check": "skill invoked: payments-review",
+      "pass": true,
+      "detail": "invoked=['payments-review']"
+    },
+    {
+      "check": "audit sequence",
+      "pass": true,
+      "detail": "2 records in order"
+    },
+    {
+      "check": "shell: git log -1 --format=%s | grep -q '^PAY-OK: '",
+      "pass": true,
+      "detail": ""
+    }
+  ]
+}

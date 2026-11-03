@@ -1,0 +1,1 @@
+{"action": "block", "agent": "claude-code", "event": "pre-tool", "rule": "no-manual-tags", "session": "2e5e8092-7111-418a-95a0-41dc2437545d", "source": "/private/var/folders/pw/2f89rc8j59bdr8rg82d7lmjr0000gn/T/paws-verify-block-tag-ytnkmddn/proj/.paws/pre-tool/no-tags.md", "target": "git tag v1.0.0 HEAD", "tool": "Bash", "ts": "2026-10-27T11:52:20Z", "verdict": "deny"}

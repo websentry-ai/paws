@@ -1,0 +1,27 @@
+{
+  "hooks": {
+    "PreToolUse": [
+      {
+        "hooks": [
+          {
+            "command": "PAWS_MANAGED=1 '/var/folders/pw/2f89rc8j59bdr8rg82d7lmjr0000gn/T/paws-verify-catalog-humanizer-commit-etg6fylw/paws-home/bin/paws' gate",
+            "timeout": 15,
+            "type": "command"
+          }
+        ],
+        "matcher": "*"
+      }
+    ],
+    "UserPromptSubmit": [
+      {
+        "hooks": [
+          {
+            "command": "PAWS_MANAGED=1 '/var/folders/pw/2f89rc8j59bdr8rg82d7lmjr0000gn/T/paws-verify-catalog-humanizer-commit-etg6fylw/paws-home/bin/paws' gate",
+            "timeout": 15,
+            "type": "command"
+          }
+        ]
+      }
+    ]
+  }
+}

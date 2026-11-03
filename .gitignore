@@ -5,7 +5,6 @@
 /testproject/
 
 .DS_Store
-/.verify-artifacts/
 
 # goreleaser output
 /dist/

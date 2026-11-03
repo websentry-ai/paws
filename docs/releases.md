@@ -22,22 +22,24 @@ to `latest`. Prereleases publish to `next`.
 Make the repository public before a release. The workflow checks visibility
 because npm users need anonymous access to GitHub release downloads.
 
-## npm token
+## npm trusted publishing
 
-The workflow publishes with an npm token, as unbound-cli does. A repository
-admin adds it once:
+The workflow publishes with npm trusted publishing: npm trusts this repository's
+`ci.yml` through GitHub's OIDC token, so there is no npm token to store, leak or
+rotate, and every version gets a provenance statement. An owner of `unbound-paws`
+sets it up once on npmjs.com:
 
-1. On npmjs.com, as the account that owns `unbound-paws`, create a granular
-   access token with read and write access to packages, and allow it to
-   bypass two-factor authentication so CI can publish.
-2. Save it as the `NPM_TOKEN` repository secret:
+1. Open the package's **Settings**, then **Trusted Publisher**, and choose
+   **GitHub Actions**.
+2. Enter organization `websentry-ai`, repository `paws`, workflow filename
+   `ci.yml`, and leave the environment empty. Save.
+3. Optional, once a release has gone out this way: under **Publishing access**,
+   choose **Require two-factor authentication and disallow tokens**, then delete
+   the old `NPM_TOKEN` repository secret.
 
-   ```bash
-   gh secret set NPM_TOKEN -R websentry-ai/paws
-   ```
-
-The release job stops before tagging if the secret is missing, and runs
-`npm whoami` with it first. To release binaries without npm, run the
+If the trusted publisher is missing, `npm publish` fails with a 404 or an
+authentication error after the GitHub release is made; add it and rerun the
+same workflow run (see below). To release binaries without npm, run the
 workflow with **Publish to npm after releasing the binaries** unchecked:
 
 ```bash
@@ -71,7 +73,7 @@ and make a commit. Confirm that the humanizer skill loads before the commit.
 
 ## Retry a failed npm publication
 
-If binaries were released but npm publication failed, fix npm authentication
-and rerun the same workflow run. It reuses the existing GitHub release.
+If binaries were released but npm publication failed, fix the trusted
+publisher setting and rerun the same workflow run. It reuses the existing GitHub release.
 An existing tag must point at the tested commit. After a version has been
 published to npm, bump `npm/package.json` before another release.

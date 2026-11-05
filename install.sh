@@ -2,6 +2,8 @@
 # Installs unbound-paws (the paws CLI and Claude Code hook) into ~/.local/bin:
 #
 #   curl -fsSL https://paws.getunbound.ai/install.sh | bash          # latest release
+#
+# The site redirects to the copy attached to the latest GitHub release.
 #   curl -fsSL https://paws.getunbound.ai/install.sh | bash -s 0.3.1 # a given version
 #
 # It downloads the release archive for this OS and CPU from GitHub, checks it against the

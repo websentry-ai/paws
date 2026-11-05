@@ -2,6 +2,7 @@ package cli
 
 import (
 	"bytes"
+	"encoding/json"
 	"fmt"
 	"io"
 	"io/fs"
@@ -40,6 +41,12 @@ func Init(args []string) int {
 		}
 		command = hookCommand(bin)
 	}
+	// Project and user settings must carry the same line or Claude Code runs the gate twice. A
+	// user-level `unbound-paws gate` means it's on PATH where Claude Code runs, so reuse it.
+	user := filepath.Join(userClaudeDir(), "settings.json")
+	if filepath.Clean(settingsPath) != filepath.Clean(user) && pawsCommandIn(user) == cliName+" gate" {
+		command = cliName + " gate"
+	}
 
 	doc, err := readSettings(settingsPath)
 	if err != nil {
@@ -60,7 +67,41 @@ func Init(args []string) int {
 		return 1
 	}
 	fmt.Printf("Registered paws in %s\n  command: %s\n", settingsPath, command)
+	other := user
+	if filepath.Clean(settingsPath) == filepath.Clean(user) {
+		cwd, _ := os.Getwd()
+		other = filepath.Join(projectRoot(cwd), ".claude", "settings.json")
+	}
+	if c := pawsCommandIn(other); c != "" && c != command {
+		fmt.Printf("%s registers paws as `%s`; run `%s init` there too, so Claude Code runs paws once.\n", other, c, cliName)
+	}
 	return 0
+}
+
+// pawsCommandIn is the paws hook command a settings file registers for PreToolUse, or "".
+func pawsCommandIn(path string) string {
+	doc, err := readSettings(path)
+	if err != nil {
+		return ""
+	}
+	hooks, err := hooksBlock(doc)
+	if err != nil {
+		return ""
+	}
+	var list []struct {
+		Hooks []struct {
+			Command string `json:"command"`
+		} `json:"hooks"`
+	}
+	json.Unmarshal(hooks["PreToolUse"], &list)
+	for _, e := range list {
+		for _, h := range e.Hooks {
+			if isPawsCommand(h.Command) {
+				return h.Command
+			}
+		}
+	}
+	return ""
 }
 
 // cliName is the command people type and the hook runs: the installer (and npm) put it on PATH.

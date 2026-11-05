@@ -274,3 +274,33 @@ func TestOnPathIgnoresNpxBin(t *testing.T) {
 		t.Error("onPath trusted an npx node_modules/.bin")
 	}
 }
+
+// A project init from npx (not on PATH) reuses the global `unbound-paws gate`, so the two
+// registrations stay one hook; a global init warns about a project line that differs.
+func TestInitKeepsProjectAndGlobalOnOneLine(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	t.Setenv("PAWS_HOME", filepath.Join(home, ".paws"))
+	cfg := filepath.Join(home, ".claude")
+	t.Setenv("CLAUDE_CONFIG_DIR", cfg)
+	t.Setenv("PATH", "")
+	doc := settingsDoc{}
+	ensureHooks(doc, "unbound-paws gate")
+	writeSettings(filepath.Join(cfg, "settings.json"), doc)
+	repo := filepath.Join(home, "repo")
+	os.MkdirAll(filepath.Join(repo, ".git"), 0o755)
+	t.Chdir(repo)
+	if code := Init(nil); code != 0 {
+		t.Fatalf("init exit %d", code)
+	}
+	if got := pawsCommandIn(filepath.Join(repo, ".claude", "settings.json")); got != "unbound-paws gate" {
+		t.Errorf("project init should reuse the global line, got %q", got)
+	}
+
+	// A global init (off PATH here) next to a project line it can't match says so.
+	os.Remove(filepath.Join(cfg, "settings.json"))
+	code, out := captureStdout(t, func() int { return Init([]string{"--global"}) })
+	if code != 0 || !strings.Contains(out, "run `unbound-paws init` there too") {
+		t.Errorf("global init should warn about the differing project line: %d %q", code, out)
+	}
+}

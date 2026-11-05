@@ -93,6 +93,15 @@ install -m 0755 "$tmp/paws" "$INSTALL_DIR/.unbound-paws.$$"
 mv -f "$INSTALL_DIR/.unbound-paws.$$" "$INSTALL_DIR/unbound-paws"
 echo "Installed $("$INSTALL_DIR/unbound-paws" version) at $INSTALL_DIR/unbound-paws"
 
+# `unbound-paws init` run before the folder was on PATH copied the binary here for the hook; keep
+# that copy current too (only your own regular file, never through a link).
+hook_copy="${PAWS_HOME:-$HOME/.paws}/bin/paws"
+if [ -f "$hook_copy" ] && [ ! -L "$hook_copy" ] && [ -O "$hook_copy" ]; then
+  install -m 0755 "$tmp/paws" "$hook_copy.$$"
+  mv -f "$hook_copy.$$" "$hook_copy"
+  echo "Updated the hook's copy at $hook_copy"
+fi
+
 case ":$PATH:" in
   *":$INSTALL_DIR:"*) on_path=1 ;;
   *) on_path=0 ;;

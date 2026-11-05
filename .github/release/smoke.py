@@ -99,8 +99,15 @@ def main():
                 ienv = {**os.environ, **installer.env, "HOME": str(home), "SHELL": "/bin/zsh",
                         "PATH": "/usr/bin:/bin:/usr/sbin:/sbin"}
                 ienv.pop("PAWS_INSTALL_DIR", None)
+                ienv.pop("PAWS_HOME", None)
+                hook_copy = home / ".paws/bin/paws"  # left by an init run before ~/.local/bin was on PATH
+                hook_copy.parent.mkdir(parents=True)
+                hook_copy.write_text("#!/bin/sh\necho stale\n")
+                hook_copy.chmod(0o755)
                 for _ in range(2):  # the second run is an upgrade in place
                     run(["bash", str(REPO / "install.sh"), version], scratch, ienv)
+                if run([str(hook_copy), "version"], scratch, ienv) != f"paws {version}":
+                    raise RuntimeError("install.sh did not refresh the hook's copy in ~/.paws/bin")
                 installed = home / ".local/bin/unbound-paws"
                 if run([str(installed), "version"], scratch, ienv) != f"paws {version}":
                     raise RuntimeError("install.sh did not install a working unbound-paws")

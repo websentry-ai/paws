@@ -23,8 +23,8 @@ Apache-2.0 · no account · Claude Code today; other coding agents to follow.
 
 ```bash
 curl -fsSL https://paws.getunbound.ai/install.sh | bash   # installs ~/.local/bin/unbound-paws
-unbound-paws init          # registers the hook in this repo's .claude/settings.json
-unbound-paws add writing   # humanizer before PR bodies, commits and MCP sends
+unbound-paws init                                         # registers the hook in this repo's .claude/settings.json
+unbound-paws add writing                                  # humanizer before PR bodies, commits and MCP sends
 ```
 
 (Or `npm i -g unbound-paws`: the same `unbound-paws` command.)

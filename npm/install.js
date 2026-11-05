@@ -125,10 +125,12 @@ function newer(a, b) {
 function refreshHookCopy(bin) {
   const home = process.env.PAWS_HOME && path.isAbsolute(process.env.PAWS_HOME) ? process.env.PAWS_HOME : path.join(os.homedir(), ".paws");
   const copy = path.join(home, "bin", EXE);
-  if (!fs.existsSync(copy)) return;
+  // Windows has no owner check to make, and an elevated install must not run a user-writable binary:
+  // there `npx unbound-paws@latest init` does the upgrade.
+  if (process.platform === "win32" || !fs.existsSync(copy)) return;
   // Never run or replace another user's copy, e.g. root (`sudo npm i -g`) touching a binary the user
   // can write to.
-  if (process.getuid && fs.statSync(copy).uid !== process.getuid()) return;
+  if (fs.statSync(copy).uid !== process.getuid()) return;
   let current = null;
   try {
     current = execFileSync(copy, ["version"], { encoding: "utf8", timeout: 5000 });
@@ -137,16 +139,12 @@ function refreshHookCopy(bin) {
   }
   if (current !== null) {
     const m = /^paws (\d+\.\d+\.\d+(-\S+)?)$/.exec(current.trim());
-    if (!m || !newer(pkg.version, m[1])) return;
+    // A source build (0.2.0-dev, dev) is someone's own; leave it.
+    if (!m || /dev/.test(m[1]) || !newer(pkg.version, m[1])) return;
   }
   const staged = path.join(path.dirname(copy), `.${EXE}.${process.pid}`);
   fs.copyFileSync(bin, staged);
   fs.chmodSync(staged, 0o755);
-  if (process.platform === "win32") {
-    // A running .exe can't be replaced, only renamed; init does the same.
-    fs.rmSync(copy + ".old", { force: true });
-    fs.renameSync(copy, copy + ".old");
-  }
   fs.renameSync(staged, copy);
   console.log(`updated the paws hook binary at ${copy}`);
 }

@@ -34,7 +34,9 @@ func Init(args []string) int {
 		fmt.Fprintf(os.Stderr, "paws: install binary: %v\n", err)
 		return 1
 	}
-	command := hookCommand(bin)
+	// Project settings get the portable "$HOME/..." form; user-level settings get the absolute
+	// path, so a repo's settings env can't repoint the hook that runs everywhere.
+	command := hookCommand(bin, settingsPath != filepath.Join(userClaudeDir(), "settings.json"))
 
 	doc, err := readSettings(settingsPath)
 	if err != nil {
@@ -66,11 +68,12 @@ func runPaws() string {
 	return "npx unbound-paws"
 }
 
-// hookCommand is the settings.json command that runs bin as the gate. A binary under $HOME is
-// written as "$HOME/..." so a committed project settings.json works on every teammate's machine.
-func hookCommand(bin string) string {
+// hookCommand is the settings.json command that runs bin as the gate. With portable, a binary
+// under $HOME is written as "$HOME/..." so a committed project settings.json works on every
+// teammate's machine.
+func hookCommand(bin string, portable bool) string {
 	home, _ := os.UserHomeDir()
-	if rel, err := filepath.Rel(home, bin); runtime.GOOS != "windows" && home != "" && err == nil &&
+	if rel, err := filepath.Rel(home, bin); portable && runtime.GOOS != "windows" && home != "" && err == nil &&
 		filepath.IsLocal(rel) && !strings.ContainsAny(rel, "\"$`\\") {
 		return `"$HOME/` + filepath.ToSlash(rel) + `" gate`
 	}

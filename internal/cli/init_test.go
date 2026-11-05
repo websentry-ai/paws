@@ -89,13 +89,16 @@ func TestInstallSelfWithoutUserDirUsesSelf(t *testing.T) {
 func TestHookCommandUsesHomeVariable(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("HOME", home)
-	if got, want := hookCommand(filepath.Join(home, ".paws", "bin", "paws")), `"$HOME/.paws/bin/paws" gate`; got != want {
+	if got, want := hookCommand(filepath.Join(home, ".paws", "bin", "paws"), true), `"$HOME/.paws/bin/paws" gate`; got != want {
 		t.Errorf("binary under HOME: got %s, want %s", got, want)
 	}
-	if got, want := hookCommand("/opt/paws"), `'/opt/paws' gate`; got != want {
+	if got, want := hookCommand(filepath.Join(home, ".paws", "bin", "paws"), false), shellQuote(filepath.Join(home, ".paws", "bin", "paws"))+" gate"; got != want {
+		t.Errorf("user-level settings get the absolute path: got %s, want %s", got, want)
+	}
+	if got, want := hookCommand("/opt/paws", true), `'/opt/paws' gate`; got != want {
 		t.Errorf("binary outside HOME: got %s, want %s", got, want)
 	}
-	if got, want := hookCommand(filepath.Join(home, "we$ird", "paws")), shellQuote(filepath.Join(home, "we$ird", "paws"))+" gate"; got != want {
+	if got, want := hookCommand(filepath.Join(home, "we$ird", "paws"), true), shellQuote(filepath.Join(home, "we$ird", "paws"))+" gate"; got != want {
 		t.Errorf("path a double-quoted string would expand: got %s, want %s", got, want)
 	}
 }

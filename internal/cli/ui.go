@@ -15,6 +15,7 @@ import (
 
 	"github.com/websentry-ai/paws"
 	"github.com/websentry-ai/paws/internal/pack"
+	"github.com/websentry-ai/paws/internal/rule"
 )
 
 // UI serves the local picker: `paws ui [--port N] [--no-open]`. Read-only by design: it shows
@@ -22,7 +23,7 @@ import (
 // to 127.0.0.1 and answers only requests addressed to that host, so another site can't read
 // it through DNS rebinding.
 func UI(args []string) int {
-	port, open := 0, true
+	port, open := -1, true
 	for i := 0; i < len(args); i++ {
 		switch args[i] {
 		case "--no-open":
@@ -40,11 +41,11 @@ func UI(args []string) int {
 			port = n
 			i++
 		default:
-			fmt.Fprintf(os.Stderr, "paws: unknown flag %q\nusage: paws ui [--port N] [--no-open]\n", args[i])
+			fmt.Fprintf(os.Stderr, "paws: unknown flag %q\nusage: unbound-paws ui [--port N] [--no-open]\n", args[i])
 			return 2
 		}
 	}
-	ln, err := net.Listen("tcp", net.JoinHostPort("127.0.0.1", strconv.Itoa(port)))
+	ln, err := listenUI(port)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "paws: %v\n", err)
 		return 1
@@ -60,6 +61,20 @@ func UI(args []string) int {
 		return 1
 	}
 	return 0
+}
+
+// defaultUIPort keeps the page at one bookmarkable address; another free port is used if it's taken.
+const defaultUIPort = 4747
+
+// listenUI binds 127.0.0.1:port, or with port -1 (no --port) the default port, else any free one.
+func listenUI(port int) (net.Listener, error) {
+	if port >= 0 {
+		return net.Listen("tcp", net.JoinHostPort("127.0.0.1", strconv.Itoa(port)))
+	}
+	if ln, err := net.Listen("tcp", net.JoinHostPort("127.0.0.1", strconv.Itoa(defaultUIPort))); err == nil {
+		return ln, nil
+	}
+	return net.Listen("tcp", "127.0.0.1:0")
 }
 
 // uiHandler serves the embedded page and its JSON endpoints for a server listening on addr.
@@ -79,6 +94,9 @@ func uiHandler(addr string) http.Handler {
 	})
 	mux.HandleFunc("/api/installed", func(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, installedView())
+	})
+	mux.HandleFunc("/api/portal", func(w http.ResponseWriter, r *http.Request) {
+		writeJSON(w, portalView())
 	})
 	mux.HandleFunc("/api/stats", func(w http.ResponseWriter, r *http.Request) {
 		st, log := localStats()
@@ -122,7 +140,7 @@ func installedView() []installedPack {
 		fires[r.Rule] = r.Fires
 	}
 	out := []installedPack{}
-	for _, project := range []bool{false, true} {
+	for _, project := range packScopes() {
 		t := target(project)
 		state, err := pack.LoadState(t.StateFile)
 		if err != nil {
@@ -143,6 +161,55 @@ func installedView() []installedPack {
 		}
 	}
 	return out
+}
+
+type portalSkillView struct {
+	Name     string             `json:"name"`
+	Bindings []installedBinding `json:"bindings"`
+}
+
+type portalStatus struct {
+	LoggedIn      bool              `json:"logged_in"`
+	Account       string            `json:"account,omitempty"`
+	API           string            `json:"api,omitempty"`
+	SyncMinutes   int               `json:"sync_minutes"`
+	ConfigMinutes int               `json:"config_minutes"` // how often portal changes are checked
+	Run           string            `json:"run"`            // how to run paws in a shell, for the page's hints
+	Skills        []portalSkillView `json:"skills"`
+}
+
+// portalView is the portal link as the CLI sees it: credentials.json, and the skills the applied
+// config turned on with their rule files under $PAWS_HOME/portal and local fire counts.
+func portalView() portalStatus {
+	v := portalStatus{SyncMinutes: int(defaultSyncInterval.Minutes()), ConfigMinutes: int(defaultConfigInterval.Minutes()),
+		Run: cliName, Skills: []portalSkillView{}}
+	if c, err := loadCredentials(); err == nil && c != nil {
+		v.LoggedIn, v.Account, v.API = true, c.AccountEmail, c.API
+	}
+	dir := portalDir()
+	if dir == "" {
+		return v
+	}
+	st, _ := localStats()
+	fires := map[string]int{}
+	for _, r := range st.Rules {
+		fires[r.Rule] = r.Fires
+	}
+	for _, name := range loadPortalState().Skills {
+		sv := portalSkillView{Name: name, Bindings: []installedBinding{}}
+		files, _ := filepath.Glob(filepath.Join(dir, name+"--*.md"))
+		for _, f := range files {
+			// The prefix also matches skill foo--bar's files for skill foo; the rule names its skill.
+			data, err := os.ReadFile(f)
+			r, perr := rule.Parse(data, f)
+			if err != nil || perr != nil || r.Action.Skill != name {
+				continue
+			}
+			sv.Bindings = append(sv.Bindings, installedBinding{Path: filepath.Base(f), Name: r.Name, Fires: fires[r.Name]})
+		}
+		v.Skills = append(v.Skills, sv)
+	}
+	return v
 }
 
 func writeJSON(w http.ResponseWriter, v any) {

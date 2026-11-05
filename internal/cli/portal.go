@@ -94,13 +94,13 @@ func loadCredentials() (*credentials, error) {
 	}
 	var c credentials
 	if err := json.Unmarshal(data, &c); err != nil {
-		return nil, fmt.Errorf("%s is unreadable (%v); run `paws login` again", path, err)
+		return nil, fmt.Errorf("%s is unreadable (%v); run `%s login` again", path, err, cliName)
 	}
 	if c.Token == "" || c.API == "" {
 		return nil, nil
 	}
 	if _, err := checkPortalAPI(c.API); err != nil {
-		return nil, fmt.Errorf("%s: %v; run `paws login` again", path, err)
+		return nil, fmt.Errorf("%s: %v; run `%s login` again", path, err, cliName)
 	}
 	return &c, nil
 }
@@ -168,6 +168,10 @@ func portalError(status int, body []byte) error {
 	if json.Unmarshal(body, &e) == nil && e.Error != "" {
 		return fmt.Errorf("portal: %s (HTTP %d)", printable(e.Error), status)
 	}
+	if status == http.StatusForbidden && bytes.Contains(bytes.ToLower(body[:min(len(body), 512)]), []byte("<html")) {
+		// A web page, not the portal's JSON: a firewall or proxy in front of it refused the request.
+		return fmt.Errorf("portal: the request was blocked before it reached the paws portal (HTTP 403 from a firewall or proxy); try again later, and report it if it keeps happening")
+	}
 	return fmt.Errorf("portal: unexpected HTTP %d", status)
 }
 
@@ -204,7 +208,7 @@ func printable(s string) string {
 func Login(args []string) int {
 	key, ok := loginKey(args)
 	if !ok {
-		fmt.Fprintln(os.Stderr, "usage: paws login [--key <one-time-key> | --key -]")
+		fmt.Fprintln(os.Stderr, "usage: unbound-paws login [--key <one-time-key> | --key -]")
 		return 2
 	}
 	path := credentialsPath()
@@ -255,10 +259,13 @@ func Login(args []string) int {
 	cwd, _ := os.Getwd()
 	rep, err := syncNow(&c, cwd)
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "paws: first sync failed: %v (run `paws sync` to retry)\n", err)
+		fmt.Fprintf(os.Stderr, "paws: first sync failed: %v (run `%s sync` to retry)\n", err, cliName)
 		return 0
 	}
 	printSyncReport(rep)
+	if !hasPawsHook(filepath.Join(userClaudeDir(), "settings.json")) {
+		fmt.Printf("Skills you turn on in the portal apply only where paws is registered. To use them in every project: %s init --global\n", cliName)
+	}
 	return 0
 }
 
@@ -373,7 +380,7 @@ func pollDeviceToken(api string, dc deviceCode) (deviceToken, error) {
 		case http.StatusForbidden:
 			return tok, errors.New("the login was denied")
 		case http.StatusGone:
-			return tok, errors.New("the code expired; run `paws login` again")
+			return tok, fmt.Errorf("the code expired; run `%s login` again", cliName)
 		case http.StatusOK:
 			if tok.Status == "ok" && tok.Token != "" {
 				return tok, nil
@@ -383,13 +390,13 @@ func pollDeviceToken(api string, dc deviceCode) (deviceToken, error) {
 			return tok, portalError(status, resp)
 		}
 	}
-	return deviceToken{}, errors.New("the code expired; run `paws login` again")
+	return deviceToken{}, fmt.Errorf("the code expired; run `%s login` again", cliName)
 }
 
 // Logout forgets the portal token and everything the portal config put in place: `paws logout`.
 func Logout(args []string) int {
 	if len(args) != 0 {
-		fmt.Fprintln(os.Stderr, "usage: paws logout")
+		fmt.Fprintln(os.Stderr, "usage: unbound-paws logout")
 		return 2
 	}
 	path := credentialsPath()

@@ -33,3 +33,7 @@ changelog:
 
 release:
   prerelease: auto
+  # paws.getunbound.ai/install.sh redirects to releases/latest/download/install.sh, so the
+  # script people pipe into bash is the one that shipped with the release, not main's.
+  extra_files:
+    - glob: ./install.sh

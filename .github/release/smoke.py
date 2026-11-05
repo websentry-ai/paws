@@ -93,6 +93,32 @@ def main():
                         raise RuntimeError(f"Missing archive contents in {asset}")
             print("PASS: all six archives, contents, and SHA-256 checksums", flush=True)
 
+            if sys.platform != "win32":
+                home = scratch / "install-home"
+                home.mkdir()
+                ienv = {**os.environ, **installer.env, "HOME": str(home), "SHELL": "/bin/zsh",
+                        "PATH": "/usr/bin:/bin:/usr/sbin:/sbin"}
+                ienv.pop("PAWS_INSTALL_DIR", None)
+                ienv.pop("PAWS_HOME", None)
+                hook_copy = home / ".paws/bin/paws"  # left by an init run before ~/.local/bin was on PATH
+                hook_copy.parent.mkdir(parents=True)
+                hook_copy.write_text("#!/bin/sh\necho stale\n")
+                hook_copy.chmod(0o755)
+                for _ in range(2):  # the second run is an upgrade in place
+                    run(["bash", str(REPO / "install.sh"), version], scratch, ienv)
+                if run([str(hook_copy), "version"], scratch, ienv) != f"paws {version}":
+                    raise RuntimeError("install.sh did not refresh the hook's copy in ~/.paws/bin")
+                hook_copy.write_text("#!/bin/sh\necho 'paws 999.0.0'\n")
+                run(["bash", str(REPO / "install.sh"), version], scratch, ienv)
+                if run([str(hook_copy), "version"], scratch, ienv) != "paws 999.0.0":
+                    raise RuntimeError("install.sh replaced a newer hook copy with an older release")
+                installed = home / ".local/bin/unbound-paws"
+                if run([str(installed), "version"], scratch, ienv) != f"paws {version}":
+                    raise RuntimeError("install.sh did not install a working unbound-paws")
+                if (home / ".zshrc").read_text().count('export PATH="$HOME/.local/bin:$PATH"') != 1:
+                    raise RuntimeError("install.sh should add ~/.local/bin to PATH in .zshrc exactly once")
+                print("PASS: install.sh installs ~/.local/bin/unbound-paws and puts it on PATH once", flush=True)
+
             project = scratch / "project"
             project.mkdir()
             env = {**os.environ, **installer.env,
@@ -103,10 +129,15 @@ def main():
             version_command = [*installer.init[:-1], "version"]
             if run(version_command, project, env) != f"paws {version}":
                 raise RuntimeError("npm wrapper ran the wrong version")
+            if sys.platform != "win32":
+                launchers = list((scratch / "npm-cache").glob("_npx/*/node_modules/unbound-paws/bin/paws.js"))
+                if not launchers or launchers[0].read_bytes()[:2] == b"#!":
+                    raise RuntimeError("npm install kept the Node launcher instead of the native binary")
+                print("PASS: npm install puts the native binary behind the unbound-paws command", flush=True)
             run(installer.init, project, env)
             settings = json.loads((project / ".claude/settings.json").read_text())
             command = settings["hooks"]["PreToolUse"][0]["hooks"][0]["command"]
-            if "PAWS_MANAGED=1" not in command or "paws-home" not in command:
+            if not command.endswith(" gate") or "paws-home" not in command:
                 raise RuntimeError("Hook does not point to the installed binary")
             binary = scratch / "paws-home/bin" / ("paws.exe" if sys.platform == "win32" else "paws")
             shutil.rmtree(scratch / "npm-cache")
@@ -114,7 +145,29 @@ def main():
                 raise RuntimeError("Installed binary failed after clearing the npm cache")
             print("PASS: fresh npm install, init, hook registration, and cache-independent binary", flush=True)
 
+            # The installer refreshes the hook's copy only as its unprivileged owner, never on Windows.
+            if sys.platform != "win32" and os.geteuid() != 0:
+                binary.write_bytes(b"stale")
+                run(version_command, project, env)  # the npm cache is empty again, so this install runs postinstall
+                if run([str(binary), "version"], project, env) != f"paws {version}":
+                    raise RuntimeError("npm install did not refresh the hook's binary copy")
+                print("PASS: npm install refreshes the hook's binary copy", flush=True)
+
+                shutil.rmtree(scratch / "npm-cache")
+                binary.write_text("#!/bin/sh\necho 'paws 999.0.0'\n")
+                binary.chmod(0o755)
+                run(version_command, project, env)
+                if run([str(binary), "version"], project, env) != "paws 999.0.0":
+                    raise RuntimeError("npm install replaced a newer hook binary with an older one")
+                print("PASS: npm install never downgrades the hook's binary copy", flush=True)
+                shutil.rmtree(scratch / "npm-cache")  # the checksum checks below need a fresh download
+
             sums_path.write_text("\n".join(f"{'0' * 64}  {name}" for name in sums) + "\n")
+            if sys.platform != "win32":
+                bad = sh(["bash", str(REPO / "install.sh"), version], scratch,
+                         {**ienv, "PAWS_INSTALL_DIR": str(scratch / "bad-bin")})
+                if bad.returncode == 0 or "checksum mismatch" not in bad.stderr:
+                    raise RuntimeError("install.sh accepted a corrupted checksum")
             rejected = sh(version_command, project, env, timeout=300)
             if rejected.returncode == 0 or "checksum mismatch" not in rejected.stderr:
                 raise RuntimeError("npm wrapper accepted corrupted checksums")

@@ -1,6 +1,6 @@
 ---
 name: paws
-description: Any request that mentions paws, or a paws rule, is a rule to write in .paws/*.md, even when worded as an instruction to you ("load X before you edit Y, via paws"). Use to write, change or debug paws rules, the hook that gates Claude Code tool calls; when the user wants a skill loaded before a command, file edit, MCP call or session start; or asks why a paws gate fired.
+description: Any request that mentions paws, or a paws rule, is a rule to write in .paws/*.md, even when worded as an instruction to you ("load X before you edit Y, via paws"). Use to write, change or debug paws rules, the hook that gates Claude Code tool calls; when the user wants a skill loaded before a command, file edit, MCP call or session start; or asks why a unbound-paws gate fired.
 ---
 
 # paws rules
@@ -22,15 +22,16 @@ reads every rule on every tool call, so a saved rule is live.
    a skill carrying the instruction. Build it only if the user says yes.
 3. **Write one file per rule.** Repo: `.paws/<event>/<name>.md`. "All my
    repos": the user dir, the last path on the `.paws :` line of
-   `paws explain` (`$PAWS_HOME` when set, else `~/.paws`).
-4. **Check it** with `paws explain` on one command that must match and one
+   `unbound-paws explain` (`$PAWS_HOME` when set, else `~/.paws`).
+4. **Check it** with `unbound-paws explain` on one command that must match and one
    near-miss; for a Bash rule, make the near-miss that command inside
    `echo '...'`. Done when the first shows `→` on the rule and `DENY` naming
    the skill, the second shows neither, and no `! skipped` line appears.
 5. **Report** the path and what the rule does.
 
-Run each `paws explain` as its own plain Bash call, nothing chained. If `paws`
-isn't on PATH, use `$PAWS_HOME/bin/paws` or `~/.paws/bin/paws`. If the new
+Run each `unbound-paws explain` as its own plain Bash call, nothing chained. If
+`unbound-paws` isn't on PATH, use the binary the hook runs: the path in the
+`gate` command of `.claude/settings.json` (often `~/.paws/bin/paws`). If the new
 rule denies your own check, that deny proves the match; check the near-miss.
 
 ```markdown
@@ -90,9 +91,11 @@ escapes and break the rule.
 ## Action
 
 `require-skill` + `skill` is the only action: deny until the skill was
-invoked in the last 20 turns. Optional `deny_message` replaces the deny text.
-With `on_miss: digest` and `digest: <path>`, the deny carries the digest
-text instead (under 7000 bytes). The path is relative to the rule file's own
+invoked in the last 20 turns. Optional `deny_message` (under `action:`)
+replaces the deny text. With `on_miss: digest` and `digest: <path>`, the deny
+carries the digest text instead (under 7000 bytes), and once that deny is in
+the transcript the retry passes even if the skill isn't installed: use it for
+a skill the user may not have. The path is relative to the rule file's own
 folder and must stay inside it (no `..`): copy the text next to the rule, e.g.
 `.paws/pre-tool/digests/s3.md` with `digest: digests/s3.md`. A rule with any
 other action is skipped.
@@ -100,13 +103,13 @@ other action is skipped.
 ## Check it
 
 ```
-paws explain 'git push --force origin main'
-paws explain --tool Edit src/App.tsx
-paws explain --tool mcp__slack__send_message '{}'
-paws explain --event session-start startup
+unbound-paws explain 'git push --force origin main'
+unbound-paws explain --tool Edit src/App.tsx
+unbound-paws explain --tool mcp__slack__send_message '{}'
+unbound-paws explain --event session-start startup
 ```
 
-`paws explain` has no transcript: a skill never counts as loaded,
+`unbound-paws explain` has no transcript: a skill never counts as loaded,
 `agent-count` never holds and `no-edit-matching` always does.
 
 A line starting with `!` is a problem to fix: a file that was skipped, an
@@ -119,5 +122,5 @@ than you meant), or a digest that couldn't be read.
 deny carries the rules: apply them, retry. A repeat deny after loading X:
 stop and name the rule.
 
-Ready-made rules: `paws search`, `paws add <pack>` (`--project` for this
-repo), `paws list`, `paws remove`.
+Ready-made rules: `unbound-paws search`, `unbound-paws add <pack>` (`--project` for this
+repo), `unbound-paws list`, `unbound-paws remove`.

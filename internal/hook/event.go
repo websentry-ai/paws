@@ -40,37 +40,23 @@ func (in *Input) MatchTarget() string {
 	return in.Command()
 }
 
-// Command is the meaningful argument per tool, mirroring unbound.py's selection.
+// inputField is the tool_input key holding each tool's meaningful argument, mirroring unbound.py's selection.
+var inputField = map[string]string{
+	"Bash": "command", "Read": "file_path", "Write": "file_path", "Edit": "file_path",
+	"NotebookEdit": "notebook_path", "Grep": "pattern", "Glob": "pattern",
+	"WebFetch": "url", "WebSearch": "query", "Task": "prompt", "Agent": "prompt",
+}
+
+// InputField is the tool_input key Command reads for tool, "" for tools matched another way.
+func InputField(tool string) string { return inputField[tool] }
+
+// Command is the meaningful argument per tool: the inputField value, an MCP call's whole input
+// as JSON, else the tool name.
 func (in *Input) Command() string {
 	ti := in.ToolInput
-	switch in.ToolName {
-	case "Bash":
-		if c, ok := ti["command"].(string); ok {
-			return c
-		}
-	case "Read", "Write", "Edit":
-		if p, ok := ti["file_path"].(string); ok {
-			return p
-		}
-	case "NotebookEdit":
-		if p, ok := ti["notebook_path"].(string); ok {
-			return p
-		}
-	case "Grep", "Glob":
-		if p, ok := ti["pattern"].(string); ok {
-			return p
-		}
-	case "WebFetch":
-		if u, ok := ti["url"].(string); ok {
-			return u
-		}
-	case "WebSearch":
-		if q, ok := ti["query"].(string); ok {
-			return q
-		}
-	case "Task", "Agent":
-		if p, ok := ti["prompt"].(string); ok {
-			return p
+	if f := inputField[in.ToolName]; f != "" {
+		if s, ok := ti[f].(string); ok {
+			return s
 		}
 	}
 	if strings.HasPrefix(in.ToolName, "mcp__") {

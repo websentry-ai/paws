@@ -312,7 +312,7 @@ func TestSyncBatchesAndResumesAfterRevokedLogin(t *testing.T) {
 	appendLines(t, filepath.Join(home, "audit.log"), lines...)
 
 	code, errOut := capture(t, &os.Stderr, func() int { return Sync(nil) })
-	if code != 1 || !strings.Contains(errOut, "Your login was revoked and its portal rules were removed. Run `paws login`.") {
+	if code != 1 || !strings.Contains(errOut, "Your login was revoked and its portal rules were removed. Run `") {
 		t.Fatalf("401 must stop the sync: exit %d, stderr %q", code, errOut)
 	}
 	if len(srv.bodies) != 2 {
@@ -384,7 +384,7 @@ func TestSyncRequiresLogin(t *testing.T) {
 	appendLines(t, filepath.Join(home, "audit.log"), ruleRecord("2026-10-01T10:00:00Z", "a", "deny", "", "s", "", "k"))
 
 	code, errOut := capture(t, &os.Stderr, func() int { return Sync(nil) })
-	if code != 1 || !strings.Contains(errOut, "Run `paws login` first.") || len(srv.bodies) != 0 {
+	if code != 1 || !strings.Contains(errOut, "paws login` first.") || len(srv.bodies) != 0 {
 		t.Errorf("not logged in: exit %d, stderr %q, %d requests", code, errOut, len(srv.bodies))
 	}
 }

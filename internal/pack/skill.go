@@ -155,30 +155,39 @@ func installSkill(src fs.FS, skillsDir, name string, m marker) (installed bool, 
 	if !catalog.ValidSkillName(name) {
 		return false, fmt.Errorf("invalid skill name %q", name)
 	}
-	dest := filepath.Join(skillsDir, name)
-	if exists(dest) && !replaceable(dest) {
+	if dest := filepath.Join(skillsDir, name); exists(dest) && !replaceable(dest) {
 		return false, nil
 	}
+	if err := writeSkill(src, skillsDir, name, m); err != nil {
+		return false, err
+	}
+	return true, nil
+}
+
+// writeSkill stages the skill in full beside dest, then swaps it in, so a failed write leaves
+// the copy that was there.
+func writeSkill(src fs.FS, skillsDir, name string, m marker) error {
+	dest := filepath.Join(skillsDir, name)
 	vals, err := placeholders(src)
 	if err != nil {
-		return false, err
+		return err
 	}
 	files, err := skillFiles(src)
 	if err != nil {
-		return false, err
+		return err
 	}
 	if err := os.MkdirAll(skillsDir, 0o755); err != nil {
-		return false, err
+		return err
 	}
 	stage, err := os.MkdirTemp(skillsDir, "."+name+"-")
 	if err != nil {
-		return false, err
+		return err
 	}
 	defer os.RemoveAll(stage)
 	for _, f := range files {
 		data, err := fs.ReadFile(src, f)
 		if err != nil {
-			return false, err
+			return err
 		}
 		if strings.HasSuffix(f, ".md") {
 			for k, v := range vals {
@@ -187,30 +196,30 @@ func installSkill(src fs.FS, skillsDir, name string, m marker) (installed bool, 
 		}
 		out := filepath.Join(stage, filepath.FromSlash(f))
 		if err := os.MkdirAll(filepath.Dir(out), 0o755); err != nil {
-			return false, err
+			return err
 		}
 		mode := os.FileMode(0o644)
 		if st, err := fs.Stat(src, f); err == nil && st.Mode().Perm()&0o111 != 0 {
 			mode = 0o755 // upstream scripts stay runnable
 		}
 		if err := os.WriteFile(out, data, mode); err != nil {
-			return false, err
+			return err
 		}
 	}
 	if m.Installed, err = HashSkill(os.DirFS(stage)); err != nil {
-		return false, err
+		return err
 	}
 	mb, _ := json.MarshalIndent(m, "", "  ")
 	if err := os.WriteFile(filepath.Join(stage, markerFile), mb, 0o644); err != nil {
-		return false, err
+		return err
 	}
 	if err := os.RemoveAll(dest); err != nil {
-		return false, err
+		return err
 	}
 	if err := os.Rename(stage, dest); err != nil {
-		return false, err
+		return err
 	}
-	return true, nil
+	return nil
 }
 
 // pawsOwned reports whether a skill directory carries paws's install marker.
@@ -295,6 +304,19 @@ func InstallBundledSkill(fsys fs.FS, skillsDir, name, source string) (string, er
 		}
 	}
 	if _, err := installSkill(fsys, skillsDir, name, marker{Skill: name, Source: source}); err != nil {
+		return "", err
+	}
+	return BundledInstalled, nil
+}
+
+// ReinstallBundledSkill is InstallBundledSkill for an explicit reinstall: a paws copy is replaced
+// even if the user edited it. A directory paws didn't install (no marker) is still kept.
+func ReinstallBundledSkill(fsys fs.FS, skillsDir, name, source string) (string, error) {
+	dest := filepath.Join(skillsDir, name)
+	if exists(dest) && readMarker(dest).Installed == "" {
+		return BundledKept, nil
+	}
+	if err := writeSkill(fsys, skillsDir, name, marker{Skill: name, Source: source}); err != nil {
 		return "", err
 	}
 	return BundledInstalled, nil

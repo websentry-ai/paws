@@ -293,7 +293,7 @@ func TestSyncRefusesHTTPCredentialsForARemoteHost(t *testing.T) {
 		code, _ := captureStdout(t, func() int { return Sync(nil) })
 		return code
 	})
-	if code != 1 || !strings.Contains(errOut, "must use https") || !strings.Contains(errOut, "run `paws login` again") {
+	if code != 1 || !strings.Contains(errOut, "must use https") || !strings.Contains(errOut, "paws login` again") {
 		t.Errorf("exit %d, stderr %q", code, errOut)
 	}
 	// The Stop hook stays silent and offline too.
@@ -386,6 +386,9 @@ func TestLoginWithOneTimeKey(t *testing.T) {
 	if code != 0 || !strings.Contains(out, "Logged in.\nNothing new to upload.") {
 		t.Fatalf("login --key exit %d, output %q", code, out)
 	}
+	if !strings.Contains(out, "init --global") {
+		t.Errorf("login with no global hook should say how to apply portal skills everywhere: %q", out)
+	}
 	host, _ := os.Hostname()
 	if srv.keyBody["key"] != "pk_abc" || srv.keyBody["device_name"] != host || srv.keyBody["os"] != runtime.GOOS || srv.keyBody["paws_version"] != Version {
 		t.Errorf("POST /device/key body: %v", srv.keyBody)
@@ -468,5 +471,16 @@ func TestLoginWithoutAccountEmail(t *testing.T) {
 	}
 	if code, out := captureStdout(t, func() int { return Sync(nil) }); code != 0 || !strings.HasPrefix(out, "Nothing new to upload.") {
 		t.Errorf("sync exit %d, output %q", code, out)
+	}
+}
+
+// A 403 web page means something in front of the portal refused the request, not the portal.
+func TestPortalErrorNamesAFirewallBlock(t *testing.T) {
+	err := portalError(403, []byte("<!DOCTYPE html>\n<html><title>Attention Required</title></html>"))
+	if err == nil || !strings.Contains(err.Error(), "blocked before it reached the paws portal") {
+		t.Errorf("got %v", err)
+	}
+	if err := portalError(403, []byte(`{"error":"denied"}`)); err == nil || !strings.Contains(err.Error(), "denied") {
+		t.Errorf("a portal 403 should keep its own message, got %v", err)
 	}
 }

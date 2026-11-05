@@ -7,7 +7,7 @@ coding agent decides on every turn whether it's relevant enough to load.
 Often it decides no: the PR body goes out with the AI tells, the tests get
 skipped, the bucket gets created without tags. Installed is not applied.
 
-paws is a small local hook for Claude Code that fixes that one thing. When a
+paws is a small local hook for your coding agent that fixes that one thing. When a
 bound action is about to run (a commit, a PR, a Slack send, an S3 bucket),
 paws checks the session transcript for the skill. If it isn't loaded, the call
 is denied once with a message naming the skill; the agent loads it and
@@ -17,16 +17,17 @@ paws guarantees the skill was loaded; the skill governs the behaviour. The
 hook never rewrites tool input or reads tool output, and the gate that decides
 each tool call never calls the network.
 
-Apache-2.0 · Claude Code · no account.
+Apache-2.0 · no account · Claude Code today; other coding agents to follow.
 
 ## Ten minutes
 
 ```bash
-npx unbound-paws init      # registers the hook in this repo's .claude/settings.json
-paws add writing           # humanizer before PR bodies, commits and MCP sends
+curl -fsSL https://paws.getunbound.ai/install.sh | bash   # installs ~/.local/bin/unbound-paws
+unbound-paws init          # registers the hook in this repo's .claude/settings.json
+unbound-paws add writing   # humanizer before PR bodies, commits and MCP sends
 ```
 
-(If `paws` isn't on your PATH yet, it's at `~/.paws/bin/paws`.)
+(Or `npm i -g unbound-paws`: the same `unbound-paws` command.)
 
 Now ask Claude Code for a commit or a PR. You'll see:
 
@@ -40,21 +41,21 @@ agent invokes humanizer, retries → the commit goes through, humanized
 Dry-run any action without a session:
 
 ```bash
-paws explain 'gh pr create --fill'
+unbound-paws explain 'gh pr create --fill'
 ```
 
 ## Packs
 
 ```bash
-paws search aws            # browse the catalog built into the binary
-paws add writing           # install for you (~/.paws, ~/.claude/skills)
-paws add --project writing # install into this repo, to commit for the team
-paws list                  # what's installed, how often each binding fired
-paws ui                    # all of that as a local page
-paws remove writing
+unbound-paws search aws            # browse the catalog built into the binary
+unbound-paws add writing           # install for you (~/.paws, ~/.claude/skills)
+unbound-paws add --project writing # install into this repo, to commit for the team
+unbound-paws list                  # what's installed, how often each binding fired
+unbound-paws ui                    # all of that as a local page
+unbound-paws remove writing
 ```
 
-`paws add` installs the bindings and the skills they require. Third-party
+`unbound-paws add` installs the bindings and the skills they require. Third-party
 skills are fetched from upstream at a pinned commit and refused if their
 content changed; skills you already have, or have edited, are left alone.
 See [docs/catalog.md](docs/catalog.md).
@@ -78,9 +79,10 @@ action:
 PR titles and bodies read like a person wrote them.
 ```
 
-Or ask Claude Code: "always load humanizer before I open a PR". `paws init`
-installs a `paws` skill that knows the format and checks its work with
-`paws explain`.
+Or ask Claude Code: "always load humanizer before I open a PR". Run
+`unbound-paws skill` (or `unbound-paws skill --global`) once to install the `paws` skill: it
+knows the format and checks its work with `unbound-paws explain`. Re-run it after an
+upgrade to get the current version.
 
 | | |
 |---|---|
@@ -104,7 +106,7 @@ The full reference: [docs/rules.md](docs/rules.md).
 
 - **Local only.** The hook reads rule files and the session transcript and
   writes `~/.paws/audit.log`. Nothing leaves the machine unless you run
-  `paws login` ([docs/telemetry.md](docs/telemetry.md)).
+  `unbound-paws login` ([docs/telemetry.md](docs/telemetry.md)).
 - **Fails open.** A rule that doesn't parse is skipped with a one-line
   notice; an internal error allows the call. A hook that wedges your terminal
   gets uninstalled within the hour.
@@ -113,19 +115,21 @@ The full reference: [docs/rules.md](docs/rules.md).
   call denies once more.
 - **Not a sandbox.** Regex rules match command text, not shell semantics.
   A gate makes an agent that follows instructions load the skill; it doesn't
-  stop an adversary.
+  stop an adversary. The hook runs `unbound-paws gate` from your PATH, so a
+  repo whose `.claude/settings.json` sets `env.PATH` could swap it out in that
+  repo; review `.claude/settings.json` like you review `.paws/`.
 
 ## Portal (optional)
 
-Nothing leaves the machine until you run `paws login`.
+Nothing leaves the machine until you run `unbound-paws login`.
 
 ```bash
-paws login              # confirm a code in the browser; saves ~/.paws/credentials.json
-paws login --key pk_... # a machine with no browser: a one-time key made in the portal
-paws login --key -      # the same, reading the key from stdin
-paws sync --dry-run     # print exactly what the next upload holds, send nothing
-paws sync               # upload and pull settings now
-paws logout             # forget the token and remove the portal's rules
+unbound-paws login              # confirm a code in the browser; saves ~/.paws/credentials.json
+unbound-paws login --key pk_... # a machine with no browser: a one-time key made in the portal
+unbound-paws login --key -      # the same, reading the key from stdin
+unbound-paws sync --dry-run     # print exactly what the next upload holds, send nothing
+unbound-paws sync               # upload and pull settings now
+unbound-paws logout             # forget the token and remove the portal's rules
 ```
 
 What leaves the machine once you are logged in:
@@ -145,18 +149,18 @@ Never prompts, replies, file contents, tool output, absolute paths or session
 ids. Field by field: [docs/telemetry.md](docs/telemetry.md#portal-upload).
 
 When: after Claude finishes a turn, from the async Stop hook, at most every
-10 minutes (`PAWS_SYNC_INTERVAL`); on `paws sync`; and once at `paws login`.
+10 minutes (`PAWS_SYNC_INTERVAL`); on `unbound-paws sync`; and once at `unbound-paws login`.
 
 Settings come down from the portal: the skills you turn on in the browser
 and the actions each one runs before. The Stop hook checks for a change at
 most every 15 minutes (`PAWS_CONFIG_INTERVAL`), then writes them as rule files
-under `~/.paws/portal/`. Only skills in the catalog this paws version ships
+under `~/.paws/portal/`. Only skills in the catalog this unbound-paws version ships
 can install, into `~/.claude/skills` at their pinned commit, and are refused
 if their content hash differs; the portal can't name other code to download.
 A skill's rules are written only once the skill is installed; a skill
 directory you wrote or edited is never replaced. The gate itself stays
 offline: it reads those files like any other rule, and a tool call is never
-held up by the network. `paws logout`, or a login revoked in the portal,
+held up by the network. `unbound-paws logout`, or a login revoked in the portal,
 removes those rules.
 
 `PAWS_PORTAL_API` sets the portal address (default
@@ -166,23 +170,35 @@ only for `localhost`, `127.0.0.1` or `::1`, with a warning.
 ## Install details
 
 ```bash
-npx unbound-paws init            # this repo
-npx unbound-paws init --global   # every repo for this user (~/.claude/settings.json)
-paws uninstall [--global]
+curl -fsSL https://paws.getunbound.ai/install.sh | bash   # install or upgrade
+unbound-paws init                 # this repo (or this folder, outside a repo)
+unbound-paws init --global        # every repo for this user (~/.claude/settings.json)
+unbound-paws uninstall [--global] # removes the hook (and the paws skill, if unedited)
+rm ~/.local/bin/unbound-paws
 ```
 
-The npm package downloads the release binary for your platform and checks it
-against the release's `checksums.txt`. `paws init` copies the binary to
-`~/.paws/bin/paws` and registers that path, so clearing the npm cache never
-breaks the hook; re-run `init` after an upgrade. All repos share that one
-binary. From source: `go build -o paws ./cmd/paws && ./paws init`.
+`install.sh` downloads the release archive for your OS and CPU from GitHub,
+checks it against the release's `checksums.txt`, installs it as
+`~/.local/bin/unbound-paws` (where Claude Code's own installer puts `claude`)
+and, if that folder isn't on your PATH, adds it in your shell's rc file. It
+doesn't touch Claude Code's settings. `bash -s 0.3.1` installs a given version.
 
-Upgrading from 0.1: re-run `paws init` once. 0.2 registers SessionStart
-(for `session-start` rules) and PostToolUse and Stop (for local telemetry,
-async), and drops the UserPromptSubmit hook. 0.2 runs `require-skill` rules
-only; a rule using an older action is skipped with a notice. From a 0.2
-release candidate: re-run `paws init`, then `paws add <pack>` for each
-installed pack.
+`npm i -g unbound-paws` gives the same command: the package downloads and
+checks the same binary, and on macOS and Linux puts it in place of its Node
+launcher. Upgrade with `npm i -g unbound-paws@latest`.
+
+Each hook runs `unbound-paws gate`: the native binary, a few milliseconds per
+tool call, no npm or network. A project and a `--global` registration are the
+same line, so Claude Code runs it once. When `init` runs from somewhere that
+won't last (npx, a source build), it copies the binary to `~/.paws/bin/paws`
+and registers `"$HOME/.paws/bin/paws" gate` instead. From source:
+`go build -o paws ./cmd/paws && ./paws init`.
+
+Upgrading from 0.3.0: install with the line above, then run `unbound-paws init`
+(and `init --global` if you used it) once; it replaces the old
+`PAWS_MANAGED=1 …` hook entry. `init` no longer installs the paws skill: run
+`unbound-paws skill` if you want it. From 0.1 or 0.2: also run
+`unbound-paws add <pack>` for each installed pack.
 
 `$PAWS_HOME`, when set to an absolute path, replaces `~/.paws`. Claude Code
 passes a settings file's `env` to hooks, so a repo's `.claude/settings.json`
@@ -228,11 +244,11 @@ internal/hook     Claude Code adapter (hook I/O, settings entries)
 internal/rule     rule format: parse, match, when-conditions (pure)
 internal/gate     decision engine: load, resolve, transcript scan, audit log
 internal/catalog  catalog bindings and pack manifests (disk or embedded)
-internal/pack     paws add/remove: bindings, skill install, state
+internal/pack     unbound-paws add/remove: bindings, skill install, state
 internal/cli      the commands
 catalog, packs    shipped bindings and packs
-skills/paws       the skill paws init installs
-web               the paws ui React app; web/dist is the committed build
+skills/paws       the skill `unbound-paws skill` installs
+web               the unbound-paws ui React app; web/dist is the committed build
 npm               the unbound-paws npm wrapper
 docs              rules, catalog, telemetry references
 examples          sample .paws rules

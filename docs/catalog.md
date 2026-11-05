@@ -1,7 +1,7 @@
 # Catalog and packs
 
 The catalog is every binding paws ships. A pack is a named set of bindings and
-is what a user installs (`paws add writing`).
+is what a user installs (`unbound-paws add writing`).
 
 ## Layout
 
@@ -37,7 +37,7 @@ upstream:                       # third-party skill, installed at this ref
   repo: github.com/blader/humanizer
   path: SKILL.md
   ref: 8c307f367c91bd974002f10f2be2965d642c13df
-  content_hash: sha256:<64 hex> # required; `paws pin .` writes it
+  content_hash: sha256:<64 hex> # required; `unbound-paws pin .` writes it
 provenance:
   stars: 61292
   license: MIT
@@ -48,7 +48,7 @@ tags: [practice, writing]
 What the binding does, in a sentence or two.
 ```
 
-Rules for a valid binding (`paws validate` checks each one):
+Rules for a valid binding (`unbound-paws validate` checks each one):
 
 - It parses as a paws rule, and every frontmatter key is a known one. The
   runner itself ignores unknown keys; the validator catches typos.
@@ -86,7 +86,7 @@ of them. A binding appears once in what installs together: the top-level
 
 ## Install
 
-`paws add <pack>` reads the catalog embedded in the binary (`--catalog <dir>`
+`unbound-paws add <pack>` reads the catalog embedded in the binary (`--catalog <dir>`
 reads a checkout instead) and:
 
 1. installs each required skill: upstream ones at `upstream.ref`, refused
@@ -95,7 +95,7 @@ reads a checkout instead) and:
    from that directory's `config.yaml` (`placeholders: {NAME: default}`);
 2. copies the bindings (with their digests) to
    `<packs dir>/<pack>/<catalog-relative path>` (a single binding,
-   `paws add writing/humanizer-pr`, goes under `<packs dir>/_bindings/`);
+   `unbound-paws add writing/humanizer-pr`, goes under `<packs dir>/_bindings/`);
 3. records the pack, its picks and the skills it installed in `installed.yaml`.
 
 User mode: `~/.paws/packs`, `~/.claude/skills`, `~/.paws/installed.yaml`.
@@ -107,16 +107,16 @@ marker is there and the content still matches it: your own skills and your
 edits to installed ones are left alone.
 
 `upstream.repo` is a host path (`github.com/owner/repo`, fetched over https)
-and `upstream.ref` a full commit SHA; `paws validate` rejects anything else,
-and `paws add` validates whatever catalog it reads before installing.
+and `upstream.ref` a full commit SHA; `unbound-paws validate` rejects anything else,
+and `unbound-paws add` validates whatever catalog it reads before installing.
 
 The content hash is sha256 over each file's path and bytes, in path order,
-skipping any path segment that starts with `.`. `paws pin .` fetches every
-upstream skill and writes the hash into its bindings; `paws validate`
+skipping any path segment that starts with `.`. `unbound-paws pin .` fetches every
+upstream skill and writes the hash into its bindings; `unbound-paws validate`
 rejects an upstream binding without one.
 
 ## Check it
 
 ```
-paws validate .
+unbound-paws validate .
 ```

@@ -7,7 +7,7 @@ import (
 	"testing"
 )
 
-const pawsCmd = pawsMarker + `'/opt/paws' gate`
+const pawsCmd = `"$HOME/.paws/bin/paws" gate`
 
 func TestEnsureHooksMergesAndIsIdempotent(t *testing.T) {
 	doc := settingsDoc{
@@ -59,10 +59,10 @@ func TestEnsureHooksFromEmpty(t *testing.T) {
 
 func TestEnsureHooksRepointsMovedBinary(t *testing.T) {
 	doc := settingsDoc{}
-	if _, err := ensureHooks(doc, pawsMarker+`'/old/path/paws' gate`); err != nil {
+	if _, err := ensureHooks(doc, `'/old/path/paws' gate`); err != nil {
 		t.Fatal(err)
 	}
-	changed, err := ensureHooks(doc, pawsMarker+`'/new/path/paws' gate`)
+	changed, err := ensureHooks(doc, `'/new/path/paws' gate`)
 	if err != nil || !changed {
 		t.Fatalf("repointing to a new path should report a change: %v %v", changed, err)
 	}
@@ -72,7 +72,7 @@ func TestEnsureHooksRepointsMovedBinary(t *testing.T) {
 	if len(pre) != 1 {
 		t.Fatalf("moved binary should repoint the existing entry, not duplicate it; got %d entries", len(pre))
 	}
-	if !containsCommand(pre, pawsMarker+`'/new/path/paws' gate`) {
+	if !containsCommand(pre, `'/new/path/paws' gate`) {
 		t.Error("entry was not repointed to the new path")
 	}
 }
@@ -99,19 +99,78 @@ func TestEnsureHooksDropsRetiredEvents(t *testing.T) {
 	}
 }
 
-func TestIsPawsCommandRejectsLookalikes(t *testing.T) {
-	lookalikes := []string{
-		`'/opt/paws' gate`,                   // right shape, no marker — pre-fix this matched via basename
+func TestIsPawsCommand(t *testing.T) {
+	for _, c := range []string{
+		pawsCmd,
+		`'/opt/paws' gate`,
+		`'C:\Users\me\.paws\bin\paws.exe' gate`,
+		`PAWS_MANAGED=1 '/Users/me/.paws/bin/paws' gate`, // written by 0.3.0 and earlier
+		`'/opt/O'\''Brien/paws/bin/paws' gate`,           // shellQuote of a path with an apostrophe
+		`PAWS_MANAGED=1 '/home/o'\''neil/.paws/bin/paws' gate`,
+		`PAWS_MANAGED=1 '/Users/me/.paws/bin/paws-dev' gate`, // 0.3.0 kept a source build's name
+	} {
+		if !isPawsCommand(c) {
+			t.Errorf("isPawsCommand(%q) = false, want true", c)
+		}
+	}
+	for _, c := range []string{
 		`'/opt/other/paws-utils/check' gate`, // "paws" only as a path component
 		`echo paws && something gate`,
-	}
-	for _, c := range lookalikes {
+		`'/opt/paws' explain`,
+		`my-scanner --strict; /x/paws gate`, // a chained command is someone else's hook
+		`curl -s x | sh; paws gate`,
+		`'/a/scan' && '/x/paws' gate`,
+		`"$(evil)" "/x/paws" gate`,
+		`"$(some-cmd)/x/paws" gate`, // expands inside double quotes
+		`"$HOME/$(x)/paws" gate`,
+		`/usr/local/bin/paws gate`, // never written by init
+		`'/a'b'/paws' gate`,
+		`'/Users/me/.paws/bin/paws-dev' gate`,          // unmarked: only the name paws counts
+		`PAWS_MANAGED=1 '/x/scan'; '/x/paws-dev' gate`, // marked, but not one quoted path
+	} {
 		if isPawsCommand(c) {
 			t.Errorf("isPawsCommand(%q) = true, want false", c)
 		}
 	}
-	if !isPawsCommand(pawsCmd) {
-		t.Errorf("isPawsCommand(%q) = false, want true", pawsCmd)
+}
+
+// A hook a user put in the same entry as ours survives init (repoint) and uninstall.
+func TestSiblingHookInPawsEntrySurvives(t *testing.T) {
+	entry := `{"matcher":"*","hooks":[{"type":"command","command":"PAWS_MANAGED=1 '/old/paws' gate"},{"type":"command","command":"/x/secret-scan"}]}`
+	doc := settingsDoc{"hooks": json.RawMessage(`{"PreToolUse":[` + entry + `]}`)}
+	if _, err := ensureHooks(doc, pawsCmd); err != nil {
+		t.Fatal(err)
+	}
+	hooks, _ := hooksBlock(doc)
+	var pre []json.RawMessage
+	json.Unmarshal(hooks["PreToolUse"], &pre)
+	if !containsCommand(pre, "/x/secret-scan") || !containsCommand(pre, pawsCmd) || containsCommand(pre, "PAWS_MANAGED=1 '/old/paws' gate") {
+		t.Fatalf("init should repoint paws and keep the sibling hook, got %s", hooks["PreToolUse"])
+	}
+	if _, err := removeHooks(doc); err != nil {
+		t.Fatal(err)
+	}
+	hooks, _ = hooksBlock(doc)
+	json.Unmarshal(hooks["PreToolUse"], &pre)
+	if len(pre) != 1 || !containsCommand(pre, "/x/secret-scan") || containsCommand(pre, pawsCmd) {
+		t.Fatalf("uninstall should leave only the sibling hook, got %s", hooks["PreToolUse"])
+	}
+}
+
+// Re-running init over a 0.3.0 entry replaces it instead of adding a second paws hook.
+func TestEnsureHooksUpgradesLegacyEntry(t *testing.T) {
+	doc := settingsDoc{}
+	if _, err := ensureHooks(doc, `PAWS_MANAGED=1 '/Users/me/.paws/bin/paws' gate`); err != nil {
+		t.Fatal(err)
+	}
+	if changed, err := ensureHooks(doc, pawsCmd); err != nil || !changed {
+		t.Fatalf("ensureHooks: %v %v", changed, err)
+	}
+	hooks, _ := hooksBlock(doc)
+	var pre []json.RawMessage
+	json.Unmarshal(hooks["PreToolUse"], &pre)
+	if len(pre) != 1 || !containsCommand(pre, pawsCmd) {
+		t.Fatalf("want the legacy entry replaced by %s, got %s", pawsCmd, hooks["PreToolUse"])
 	}
 }
 
@@ -152,6 +211,14 @@ func TestReadSettingsMissingIsEmpty(t *testing.T) {
 	doc, err := readSettings(filepath.Join(t.TempDir(), "missing.json"))
 	if err != nil || len(doc) != 0 {
 		t.Fatalf("missing file should yield an empty doc, got %v %v", doc, err)
+	}
+}
+
+func TestReadSettingsEmptyFileIsEmpty(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "settings.json")
+	os.WriteFile(path, []byte(" \n"), 0o644)
+	if doc, err := readSettings(path); err != nil || len(doc) != 0 {
+		t.Fatalf("an empty file should yield an empty doc, got %v %v", doc, err)
 	}
 }
 

@@ -5,6 +5,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"os"
+	"path/filepath"
 	"regexp"
 	"strings"
 	"testing"
@@ -55,6 +56,12 @@ func TestUIHandler(t *testing.T) {
 	if rec := do("GET", "/api/stats", "127.0.0.1:4242"); !strings.Contains(rec.Body.String(), `"rules":[]`) || !strings.Contains(rec.Body.String(), `"dormant":[]`) {
 		t.Errorf("empty stats should serialise lists as []: %s", rec.Body)
 	}
+	if rec := do("GET", "/favicon.svg", "127.0.0.1:4242"); rec.Code != 200 {
+		t.Errorf("favicon: %d", rec.Code)
+	}
+	if rec := do("GET", "/api/portal", "127.0.0.1:4242"); !strings.Contains(rec.Body.String(), `"logged_in":false`) || !strings.Contains(rec.Body.String(), `"skills":[]`) {
+		t.Errorf("logged-out portal view: %s", rec.Body)
+	}
 	for _, p := range []string{"/api/installed", "/api/stats"} {
 		if rec := do("GET", p, "127.0.0.1:4242"); rec.Code != 200 || !json.Valid(rec.Body.Bytes()) {
 			t.Errorf("%s: %d %s", p, rec.Code, rec.Body)
@@ -66,5 +73,60 @@ func TestUIHandler(t *testing.T) {
 	}
 	if rec := do("POST", "/api/installed", "127.0.0.1:4242"); rec.Code != http.StatusMethodNotAllowed {
 		t.Errorf("writes should be refused, got %d", rec.Code)
+	}
+}
+
+func TestUIPortalView(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("PAWS_HOME", home)
+	os.WriteFile(filepath.Join(home, "credentials.json"), []byte(`{"api":"https://paws-api.getunbound.ai","token":"t","account_email":"a@example.com"}`), 0o600)
+	os.MkdirAll(filepath.Join(home, "portal"), 0o700)
+	os.WriteFile(filepath.Join(home, "portal", "state.json"), []byte(`{"skills":["humanizer","humanizer--x"]}`), 0o600)
+	// Skill humanizer--x's file also starts with "humanizer--"; it must not count for humanizer.
+	os.WriteFile(filepath.Join(home, "portal", "humanizer--x--3.md"), []byte("---\nname: humanizer--x--3\nevent: pre-tool\nmatcher:\n  tool: Bash\naction:\n  type: require-skill\n  skill: humanizer--x\n---\n"), 0o600)
+	os.WriteFile(filepath.Join(home, "portal", "humanizer--7.md"), []byte("---\nname: humanizer--7\nevent: pre-tool\nmatcher:\n  tool: Bash\naction:\n  type: require-skill\n  skill: humanizer\n---\n"), 0o600)
+	v := portalView()
+	if !v.LoggedIn || v.Account != "a@example.com" || v.SyncMinutes != 10 {
+		t.Errorf("login state: %+v", v)
+	}
+	if len(v.Skills) != 2 || v.Skills[0].Name != "humanizer" || len(v.Skills[0].Bindings) != 1 || v.Skills[0].Bindings[0].Name != "humanizer--7" ||
+		len(v.Skills[1].Bindings) != 1 || v.Skills[1].Bindings[0].Name != "humanizer--x--3" {
+		t.Errorf("portal skills: %+v", v.Skills)
+	}
+}
+
+func TestListenUIDefaultPortFallsBack(t *testing.T) {
+	first, err := listenUI(-1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer first.Close()
+	if !strings.HasSuffix(first.Addr().String(), ":4747") {
+		t.Skipf("default port already taken by something else: %s", first.Addr())
+	}
+	second, err := listenUI(-1)
+	if err != nil {
+		t.Fatalf("with the default port taken, ui should use another: %v", err)
+	}
+	defer second.Close()
+	if strings.HasSuffix(second.Addr().String(), ":4747") {
+		t.Errorf("second listener got the taken port: %s", second.Addr())
+	}
+	if _, err := listenUI(4747); err == nil {
+		t.Error("an explicit --port that's taken should fail, not move")
+	}
+}
+
+// In $HOME outside a repo the project and user targets are both ~/.paws: list each pack once.
+func TestInstalledViewListsHomePacksOnce(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	t.Setenv("PAWS_HOME", "")
+	t.Setenv("CLAUDE_CONFIG_DIR", "")
+	t.Chdir(home)
+	os.MkdirAll(filepath.Join(home, ".paws"), 0o755)
+	os.WriteFile(filepath.Join(home, ".paws", "installed.yaml"), []byte("packs:\n  writing:\n    at: \"2026-11-05T00:00:00Z\"\n"), 0o644)
+	if got := installedView(); len(got) != 1 || got[0].Scope != "user" {
+		t.Fatalf("want writing once, as user; got %+v", got)
 	}
 }

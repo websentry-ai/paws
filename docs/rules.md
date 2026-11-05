@@ -24,7 +24,7 @@ Loads humanizer before a PR body goes out.
 | `event:` | Fires on | Target the regex sees |
 |---|---|---|
 | `pre-tool` | any tool call | see the table below |
-| `pre-commit` | a Bash call that runs `git commit` (flags and `-C dir` allowed) | the command |
+| `pre-commit` | a Bash call that runs `git commit` or `git commit-tree` (flags and `-C dir` allowed; not `commit-graph`) | the command |
 | `pre-push` | a Bash call that runs `git push` | the command |
 | `session-start` | a session starting | `startup`, `resume`, `clear` or `compact` |
 
@@ -96,7 +96,7 @@ the agent to invoke it and retry the same command. A compaction resets the
 20-turn window, so the next gated call denies once more.
 
 A rule with any other action, or an event not listed above, is skipped with
-a notice, and `paws validate` names it.
+a notice, and `unbound-paws explain` lists it as `! skipped`.
 
 ### on_miss: digest
 
@@ -122,10 +122,10 @@ so a single retry clears them all.
 ## Test a rule
 
 ```
-paws explain 'gh pr create --fill'              # Bash by default
-paws explain --tool Edit src/app/page.tsx
-paws explain --event session-start compact
-echo '<hook event json>' | paws explain -
+unbound-paws explain 'gh pr create --fill'              # Bash by default
+unbound-paws explain --tool Edit src/app/page.tsx
+unbound-paws explain --event session-start compact
+echo '<hook event json>' | unbound-paws explain -
 ```
 
 `explain` prints the rules in scope, marks the ones that apply (matcher and
@@ -137,5 +137,5 @@ paws fails open on its own errors: a rule that fails to parse is skipped
 (Claude Code shows a one-line notice) and an internal error allows the call.
 Missing session state is read as "nothing happened yet": with no transcript,
 a skill counts as not loaded (require-skill denies), no edit is known
-(no-edit-matching holds) and no subagents were spawned (agent-count is 0). `paws validate` checks catalog bindings
+(no-edit-matching holds) and no subagents were spawned (agent-count is 0). `unbound-paws validate` checks catalog bindings
 strictly, including unknown keys.

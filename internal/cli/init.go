@@ -2,10 +2,12 @@ package cli
 
 import (
 	"bytes"
+	"encoding/json"
 	"fmt"
 	"io"
 	"io/fs"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"runtime"
 	"strings"
@@ -28,12 +30,23 @@ func Init(args []string) int {
 		return 1
 	}
 	self, _ = filepath.Abs(self)
-	bin, err := installSelf(self, gate.UserDir())
-	if err != nil {
-		fmt.Fprintf(os.Stderr, "paws: install binary: %v\n", err)
-		return 1
+	// The same command in project and user settings, so Claude Code runs the gate once.
+	command := cliName + " gate"
+	if !onPath(self) {
+		// Not installed on PATH: copy the binary somewhere the npx cache can't clean up.
+		bin, err := installSelf(self, gate.UserDir())
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "paws: install binary: %v\n", err)
+			return 1
+		}
+		command = hookCommand(bin)
 	}
-	command := pawsMarker + shellQuote(bin) + " gate"
+	// Project and user settings must carry the same line or Claude Code runs the gate twice: reuse
+	// a user-level `unbound-paws gate`, as long as unbound-paws is still installed on PATH.
+	user := filepath.Join(userClaudeDir(), "settings.json")
+	if filepath.Clean(settingsPath) != filepath.Clean(user) && pawsCommandIn(user) == cliName+" gate" && cliPath() != "" {
+		command = cliName + " gate"
+	}
 
 	doc, err := readSettings(settingsPath)
 	if err != nil {
@@ -47,7 +60,6 @@ func Init(args []string) int {
 	}
 	if !changed {
 		fmt.Printf("paws already registered in %s\n", settingsPath)
-		installPawsSkill(settingsPath)
 		return 0
 	}
 	if err := writeSettings(settingsPath, doc); err != nil {
@@ -55,9 +67,82 @@ func Init(args []string) int {
 		return 1
 	}
 	fmt.Printf("Registered paws in %s\n  command: %s\n", settingsPath, command)
-	installPawsSkill(settingsPath)
-	fmt.Println("Open a Claude Code session in this project to activate it.")
+	other := user
+	if filepath.Clean(settingsPath) == filepath.Clean(user) {
+		cwd, _ := os.Getwd()
+		other = filepath.Join(projectRoot(cwd), ".claude", "settings.json")
+	}
+	if c := pawsCommandIn(other); c != "" && c != command {
+		fmt.Printf("%s registers paws as `%s`; run `%s init` there too, so Claude Code runs paws once.\n", other, c, cliName)
+	}
 	return 0
+}
+
+// pawsCommandIn is the paws hook command a settings file registers for PreToolUse, or "".
+func pawsCommandIn(path string) string {
+	doc, err := readSettings(path)
+	if err != nil {
+		return ""
+	}
+	hooks, err := hooksBlock(doc)
+	if err != nil {
+		return ""
+	}
+	var list []struct {
+		Hooks []struct {
+			Command string `json:"command"`
+		} `json:"hooks"`
+	}
+	json.Unmarshal(hooks["PreToolUse"], &list)
+	for _, e := range list {
+		for _, h := range e.Hooks {
+			if isPawsCommand(h.Command) {
+				return h.Command
+			}
+		}
+	}
+	return ""
+}
+
+// cliName is the command people type and the hook runs: the installer (and npm) put it on PATH.
+const cliName = "unbound-paws"
+
+// cliPath is where `unbound-paws` resolves on PATH, or "". npx (and npm run) put a
+// node_modules/.bin on PATH only for that run; Claude Code won't have it, so it doesn't count.
+func cliPath() string {
+	p, err := exec.LookPath(cliName)
+	if err != nil || filepath.Base(filepath.Dir(p)) == ".bin" && filepath.Base(filepath.Dir(filepath.Dir(p))) == "node_modules" {
+		return ""
+	}
+	return p
+}
+
+// onPath reports whether init is running as the unbound-paws on PATH, so the hook can name it
+// instead of copying the binary: true for the installer's copy and a native npm install, false
+// for npx, a source build, or an older unbound-paws earlier on PATH.
+func onPath(self string) bool {
+	p := cliPath()
+	if p == "" {
+		return false
+	}
+	a, err := filepath.EvalSymlinks(p)
+	if err != nil {
+		return false
+	}
+	b, err := filepath.EvalSymlinks(self)
+	return err == nil && a == b
+}
+
+// hookCommand is the settings.json command that runs bin as the gate. A binary under $HOME is
+// written as "$HOME/..." so a committed project settings.json works on every teammate's machine.
+// Project and user settings get the same string, so Claude Code runs the gate once, not twice.
+func hookCommand(bin string) string {
+	home, _ := os.UserHomeDir()
+	if rel, err := filepath.Rel(home, bin); runtime.GOOS != "windows" && home != "" && err == nil &&
+		filepath.IsLocal(rel) && !strings.ContainsAny(rel, "\"$`\\") {
+		return `"$HOME/` + filepath.ToSlash(rel) + `" gate`
+	}
+	return shellQuote(bin) + " gate"
 }
 
 // Uninstall removes every paws hook entry from the target settings.json.
@@ -76,16 +161,27 @@ func Uninstall(args []string) int {
 		fmt.Fprintf(os.Stderr, "paws: %s: %v\n", settingsPath, err)
 		return 1
 	}
-	if !changed {
+	if changed {
+		if err := writeSettings(settingsPath, doc); err != nil {
+			fmt.Fprintf(os.Stderr, "paws: %v\n", err)
+			return 1
+		}
+		fmt.Printf("Removed paws from %s\n", settingsPath)
+	} else {
 		fmt.Printf("paws is not registered in %s\n", settingsPath)
-		return 0
 	}
-	if err := writeSettings(settingsPath, doc); err != nil {
-		fmt.Fprintf(os.Stderr, "paws: %v\n", err)
-		return 1
-	}
-	fmt.Printf("Removed paws from %s\n", settingsPath)
+	// The skill goes too, even when `paws skill` ran without init.
 	removePawsSkill(settingsPath)
+	if changed && len(doc) == 0 {
+		os.Remove(settingsPath) // nothing but paws was in it
+	}
+	// Don't leave empty folders behind; os.Remove keeps a folder that still has anything in it.
+	if skillsDir := pawsSkillDir(settingsPath); skillsDir != "" {
+		os.Remove(skillsDir)
+	}
+	if filepath.Base(filepath.Dir(settingsPath)) == ".claude" {
+		os.Remove(filepath.Dir(settingsPath))
+	}
 	return 0
 }
 
@@ -148,14 +244,18 @@ func shellQuote(p string) string {
 	return "'" + strings.ReplaceAll(p, "'", `'\''`) + "'"
 }
 
-// installSelf copies the running binary to <userDir>/bin and returns the path the hook should run.
+// installSelf copies the running binary to <userDir>/bin/paws and returns the path the hook should run.
 // npx and go-run binaries live in caches that get cleaned; a hook pointing there breaks silently.
 // Re-running init after an upgrade replaces the copy atomically. With no user dir, self is used.
 func installSelf(self, userDir string) (string, error) {
 	if userDir == "" {
 		return self, nil
 	}
-	dest := filepath.Join(userDir, "bin", filepath.Base(self))
+	name := "paws"
+	if runtime.GOOS == "windows" {
+		name = "paws.exe"
+	}
+	dest := filepath.Join(userDir, "bin", name)
 	if same, _ := sameFile(self, dest); same {
 		return dest, nil
 	}
@@ -238,32 +338,39 @@ func pawsSkillDir(settingsPath string) string {
 	return filepath.Join(dir, "skills")
 }
 
-// installPawsSkill puts the paws skill in <dir>/.claude/skills/paws beside the settings file,
-// so Claude Code can write and check rules. Best-effort: a failure is reported, never fatal,
-// and a skill the user owns or edited is left alone.
-func installPawsSkill(settingsPath string) {
+// Skill installs the paws skill (how Claude Code writes and checks rules) beside the target
+// settings.json: `paws skill [--global | --settings <path>]`. Re-running it replaces an older or
+// edited paws copy with this version's; a skills/paws directory paws didn't install is left alone.
+func Skill(args []string) int {
+	settingsPath, code := settingsTarget(args)
+	if code >= 0 {
+		return code
+	}
 	skillsDir := pawsSkillDir(settingsPath)
 	if skillsDir == "" {
-		fmt.Printf("Skipped the paws skill: %s is not in a .claude directory\n", settingsPath)
-		return
+		fmt.Fprintf(os.Stderr, "paws: %s is not in a .claude directory; no skills folder to install into\n", settingsPath)
+		return 1
 	}
 	src, err := fs.Sub(paws.Skill, "skills/paws")
 	if err != nil {
-		return
+		fmt.Fprintf(os.Stderr, "paws: %v\n", err)
+		return 1
 	}
-	status, err := pack.InstallBundledSkill(src, skillsDir, "paws", "paws "+Version)
 	dest := filepath.Join(skillsDir, "paws")
+	status, err := pack.ReinstallBundledSkill(src, skillsDir, "paws", "paws "+Version)
 	switch {
 	case err != nil:
-		fmt.Fprintf(os.Stderr, "paws: could not install the paws skill: %v\n", err)
-	case status == pack.BundledInstalled:
-		fmt.Printf("Installed the paws skill in %s\n", dest)
+		fmt.Fprintf(os.Stderr, "paws: install the paws skill: %v\n", err)
+		return 1
 	case status == pack.BundledKept:
-		fmt.Printf("Left %s as is (not installed by paws, or edited); it may describe an older rule format\n", dest)
+		fmt.Fprintf(os.Stderr, "paws: %s wasn't installed by paws; left it alone (move it away and re-run to replace it)\n", dest)
+		return 1
 	}
+	fmt.Printf("Installed the paws skill (paws %s) in %s\n", Version, dest)
+	return 0
 }
 
-// removePawsSkill undoes installPawsSkill on uninstall, keeping a skill the user edited.
+// removePawsSkill undoes `paws skill` on uninstall, keeping a skill the user edited.
 func removePawsSkill(settingsPath string) {
 	if skillsDir := pawsSkillDir(settingsPath); skillsDir != "" {
 		if removed, _ := pack.RemoveBundledSkill(skillsDir, "paws"); removed {

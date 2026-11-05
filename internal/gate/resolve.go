@@ -105,7 +105,7 @@ func capText(s string) string {
 	for cut > 0 && !utf8.RuneStart(s[cut]) {
 		cut--
 	}
-	return s[:cut] + "\n[paws: truncated; run `paws explain` for the full text]"
+	return s[:cut] + "\n[paws: truncated; run `unbound-paws explain` for the full text]"
 }
 
 // evaluate resolves a matched rule to an outcome.

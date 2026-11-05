@@ -15,6 +15,21 @@ export interface InstalledPack {
   bindings: InstalledBinding[];
 }
 
+export interface PortalSkill {
+  name: string;
+  bindings: InstalledBinding[];
+}
+
+export interface Portal {
+  logged_in: boolean;
+  account?: string;
+  api?: string;
+  sync_minutes: number;
+  run: string;
+  config_minutes: number;
+  skills: PortalSkill[];
+}
+
 export interface PickOne {
   name: string;
   description?: string;

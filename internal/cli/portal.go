@@ -259,6 +259,9 @@ func Login(args []string) int {
 		return 0
 	}
 	printSyncReport(rep)
+	if !hasPawsHook(filepath.Join(userClaudeDir(), "settings.json")) {
+		fmt.Println("Skills you turn on in the portal apply only where paws is registered. To use them in every project: paws init --global")
+	}
 	return 0
 }
 

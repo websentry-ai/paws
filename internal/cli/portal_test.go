@@ -386,6 +386,9 @@ func TestLoginWithOneTimeKey(t *testing.T) {
 	if code != 0 || !strings.Contains(out, "Logged in.\nNothing new to upload.") {
 		t.Fatalf("login --key exit %d, output %q", code, out)
 	}
+	if !strings.Contains(out, "paws init --global") {
+		t.Errorf("login with no global hook should say how to apply portal skills everywhere: %q", out)
+	}
 	host, _ := os.Hostname()
 	if srv.keyBody["key"] != "pk_abc" || srv.keyBody["device_name"] != host || srv.keyBody["os"] != runtime.GOOS || srv.keyBody["paws_version"] != Version {
 		t.Errorf("POST /device/key body: %v", srv.keyBody)

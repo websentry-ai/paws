@@ -78,9 +78,10 @@ action:
 PR titles and bodies read like a person wrote them.
 ```
 
-Or ask Claude Code: "always load humanizer before I open a PR". `paws init`
-installs a `paws` skill that knows the format and checks its work with
-`paws explain`.
+Or ask Claude Code: "always load humanizer before I open a PR". Run
+`paws skill` (or `paws skill --global`) once to install the `paws` skill: it
+knows the format and checks its work with `paws explain`. Re-run it after an
+upgrade to get the current version.
 
 | | |
 |---|---|
@@ -168,13 +169,15 @@ only for `localhost`, `127.0.0.1` or `::1`, with a warning.
 ```bash
 npx unbound-paws init            # this repo
 npx unbound-paws init --global   # every repo for this user (~/.claude/settings.json)
-paws uninstall [--global]
+paws uninstall [--global]       # removes the hook (and the paws skill, if unedited)
 ```
 
 The npm package downloads the release binary for your platform and checks it
 against the release's `checksums.txt`. `paws init` copies the binary to
-`~/.paws/bin/paws` and registers that path, so clearing the npm cache never
-breaks the hook; re-run `init` after an upgrade. All repos share that one
+`~/.paws/bin/paws` and registers it as `"$HOME/.paws/bin/paws" gate`, so
+clearing the npm cache never breaks the hook and a committed
+`.claude/settings.json` works for every teammate; re-run `init` after an
+upgrade. All repos share that one
 binary. From source: `go build -o paws ./cmd/paws && ./paws init`.
 
 Upgrading from 0.1: re-run `paws init` once. 0.2 registers SessionStart
@@ -231,7 +234,7 @@ internal/catalog  catalog bindings and pack manifests (disk or embedded)
 internal/pack     paws add/remove: bindings, skill install, state
 internal/cli      the commands
 catalog, packs    shipped bindings and packs
-skills/paws       the skill paws init installs
+skills/paws       the skill `paws skill` installs
 web               the paws ui React app; web/dist is the committed build
 npm               the unbound-paws npm wrapper
 docs              rules, catalog, telemetry references

@@ -173,8 +173,7 @@ func hookRegistered() bool {
 		filepath.Join(projectRoot(cwd), ".claude", "settings.local.json"),
 		filepath.Join(claude, "settings.json"),
 	} {
-		data, err := os.ReadFile(p)
-		if err == nil && strings.Contains(string(data), strings.TrimSpace(pawsMarker)) {
+		if hasPawsHook(p) {
 			return true
 		}
 	}

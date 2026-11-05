@@ -86,36 +86,79 @@ func TestInstallSelfWithoutUserDirUsesSelf(t *testing.T) {
 	}
 }
 
-func TestInstallPawsSkillBesideSettings(t *testing.T) {
+func TestHookCommandUsesHomeVariable(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	if got, want := hookCommand(filepath.Join(home, ".paws", "bin", "paws")), `"$HOME/.paws/bin/paws" gate`; got != want {
+		t.Errorf("binary under HOME: got %s, want %s", got, want)
+	}
+	if got, want := hookCommand("/opt/paws"), `'/opt/paws' gate`; got != want {
+		t.Errorf("binary outside HOME: got %s, want %s", got, want)
+	}
+	if got, want := hookCommand(filepath.Join(home, "we$ird", "paws")), shellQuote(filepath.Join(home, "we$ird", "paws"))+" gate"; got != want {
+		t.Errorf("path a double-quoted string would expand: got %s, want %s", got, want)
+	}
+}
+
+func TestInitRegistersHookOnly(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	t.Setenv("PAWS_HOME", filepath.Join(home, ".paws"))
+	repo := filepath.Join(home, "repo")
+	os.MkdirAll(filepath.Join(repo, ".git"), 0o755)
+	t.Chdir(repo)
+	if code := Init(nil); code != 0 {
+		t.Fatalf("init exit %d", code)
+	}
+	if !hasPawsHook(filepath.Join(repo, ".claude", "settings.json")) {
+		t.Fatal("init did not register the hook")
+	}
+	if _, err := os.Stat(filepath.Join(repo, ".claude", "skills")); err == nil {
+		t.Error("init must not install the paws skill; that's `paws skill`")
+	}
+}
+
+func TestSkillInstallsAndReinstalls(t *testing.T) {
 	dir := t.TempDir()
 	settings := filepath.Join(dir, ".claude", "settings.json")
-	installPawsSkill(settings)
-	data, err := os.ReadFile(filepath.Join(dir, ".claude", "skills", "paws", "SKILL.md"))
-	if err != nil || !strings.Contains(string(data), "name: paws") {
+	skillMD := filepath.Join(dir, ".claude", "skills", "paws", "SKILL.md")
+	if code := Skill([]string{"--settings", settings}); code != 0 {
+		t.Fatalf("paws skill exit %d", code)
+	}
+	if data, err := os.ReadFile(skillMD); err != nil || !strings.Contains(string(data), "name: paws") {
 		t.Fatalf("paws skill not installed: %v", err)
 	}
-	// A user's own paws skill is never replaced.
-	own := filepath.Join(dir, "other", ".claude")
-	if err := os.MkdirAll(filepath.Join(own, "skills", "paws"), 0o755); err != nil {
-		t.Fatal(err)
+	// Reinstall replaces an edited paws copy.
+	os.WriteFile(skillMD, []byte("edited"), 0o644)
+	if code := Skill([]string{"--settings", settings}); code != 0 {
+		t.Fatalf("reinstall exit %d", code)
 	}
-	os.WriteFile(filepath.Join(own, "skills", "paws", "SKILL.md"), []byte("mine"), 0o644)
-	installPawsSkill(filepath.Join(own, "settings.json"))
-	if got, _ := os.ReadFile(filepath.Join(own, "skills", "paws", "SKILL.md")); string(got) != "mine" {
-		t.Error("init replaced a paws skill it did not install")
+	if data, _ := os.ReadFile(skillMD); !strings.Contains(string(data), "name: paws") {
+		t.Error("reinstall kept the edited copy")
 	}
-
-	// A settings file outside .claude gets no skills dir beside it.
-	custom := filepath.Join(dir, "elsewhere", "custom.json")
-	installPawsSkill(custom)
-	if _, err := os.Stat(filepath.Join(dir, "elsewhere", "skills")); err == nil {
-		t.Error("--settings outside .claude must not create a skills dir")
-	}
-
 	// Uninstall removes the unedited copy.
 	removePawsSkill(settings)
-	if _, err := os.Stat(filepath.Join(dir, ".claude", "skills", "paws")); err == nil {
+	if _, err := os.Stat(filepath.Dir(skillMD)); err == nil {
 		t.Error("uninstall should remove the paws skill it installed")
+	}
+
+	// A user's own paws skill (no paws marker) is never replaced.
+	own := filepath.Join(dir, "other", ".claude")
+	os.MkdirAll(filepath.Join(own, "skills", "paws"), 0o755)
+	os.WriteFile(filepath.Join(own, "skills", "paws", "SKILL.md"), []byte("mine"), 0o644)
+	if code := Skill([]string{"--settings", filepath.Join(own, "settings.json")}); code == 0 {
+		t.Error("paws skill should refuse to replace a skill paws didn't install")
+	}
+	if got, _ := os.ReadFile(filepath.Join(own, "skills", "paws", "SKILL.md")); string(got) != "mine" {
+		t.Error("paws skill replaced a skill it did not install")
+	}
+
+	// A settings file outside .claude has no skills dir beside it.
+	if code := Skill([]string{"--settings", filepath.Join(dir, "elsewhere", "custom.json")}); code == 0 {
+		t.Error("--settings outside .claude should fail")
+	}
+	if _, err := os.Stat(filepath.Join(dir, "elsewhere", "skills")); err == nil {
+		t.Error("--settings outside .claude must not create a skills dir")
 	}
 }
 

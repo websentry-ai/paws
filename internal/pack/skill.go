@@ -300,6 +300,21 @@ func InstallBundledSkill(fsys fs.FS, skillsDir, name, source string) (string, er
 	return BundledInstalled, nil
 }
 
+// ReinstallBundledSkill is InstallBundledSkill for an explicit reinstall: a paws copy is replaced
+// even if the user edited it. A directory paws didn't install (no marker) is still kept.
+func ReinstallBundledSkill(fsys fs.FS, skillsDir, name, source string) (string, error) {
+	dest := filepath.Join(skillsDir, name)
+	if exists(dest) {
+		if readMarker(dest).Installed == "" {
+			return BundledKept, nil
+		}
+		if err := os.RemoveAll(dest); err != nil {
+			return "", err
+		}
+	}
+	return InstallBundledSkill(fsys, skillsDir, name, source)
+}
+
 // UpstreamMismatch: the upstream content at the pinned ref doesn't hash to the expected value.
 const UpstreamMismatch = "hash-mismatch"
 

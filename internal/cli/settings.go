@@ -222,11 +222,38 @@ func isPawsEntry(entry json.RawMessage) bool {
 	return false
 }
 
-// pawsMarker makes ownership an exact match — a basename/substring guess can misfire on an unrelated tool.
-const pawsMarker = "PAWS_MANAGED=1 "
+// legacyMarker prefixed hook commands written by paws 0.3.0 and earlier; still recognised so
+// init upgrades and uninstall removes those entries.
+const legacyMarker = "PAWS_MANAGED=1 "
 
+// isPawsCommand: `<paws binary> gate`, the binary quoted or not and named paws (paws.exe).
 func isPawsCommand(command string) bool {
-	return strings.HasPrefix(command, pawsMarker)
+	prog, ok := strings.CutSuffix(strings.TrimPrefix(command, legacyMarker), " gate")
+	if !ok {
+		return false
+	}
+	prog = strings.Trim(prog, `"'`)
+	base := prog[strings.LastIndexAny(prog, `/\`)+1:]
+	return base == "paws" || base == "paws.exe"
+}
+
+// hasPawsHook reports whether the settings file at path registers paws for any event.
+func hasPawsHook(path string) bool {
+	doc, err := readSettings(path)
+	if err != nil {
+		return false
+	}
+	hooks, err := hooksBlock(doc)
+	if err != nil {
+		return false
+	}
+	for _, raw := range hooks {
+		var list []json.RawMessage
+		if json.Unmarshal(raw, &list) == nil && pawsEntryIndex(list) >= 0 {
+			return true
+		}
+	}
+	return false
 }
 
 func jsonEqual(a, b json.RawMessage) bool {

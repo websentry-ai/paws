@@ -28,6 +28,8 @@ func run(args []string) int {
 		return cli.Init(args[1:])
 	case "uninstall":
 		return cli.Uninstall(args[1:])
+	case "skill":
+		return cli.Skill(args[1:])
 	case "explain":
 		return cli.Explain(args[1:])
 	case "validate":
@@ -72,6 +74,7 @@ Usage:
   paws gate                                      Run as a Claude Code hook (reads event JSON on stdin).
   paws init [--global | --settings <path>]       Register paws in a Claude Code settings.json.
   paws uninstall [--global | --settings <path>]  Remove paws from a settings.json.
+  paws skill [--global | --settings <path>]      Install or reinstall the paws skill (Claude writes rules with it).
   paws explain [--tool T] [--event E] <command>  Dry-run: show matching rules and the decision.
   echo '<event json>' | paws explain -           Dry-run a full event JSON.
   paws add [--project] [--pick g=o] <pack|cat/binding>...

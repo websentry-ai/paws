@@ -115,7 +115,18 @@ function newer(a, b) {
   }
   if (prea === preb) return false;
   if (!prea || !preb) return !prea;
-  return prea.localeCompare(preb, undefined, { numeric: true }) > 0;
+  // Semver: compare dot-separated identifiers; numbers numerically, and a number ranks below letters.
+  const ia = prea.split(".");
+  const ib = preb.split(".");
+  for (let i = 0; i < Math.min(ia.length, ib.length); i++) {
+    if (ia[i] === ib[i]) continue;
+    const na = /^\d+$/.test(ia[i]);
+    const nb = /^\d+$/.test(ib[i]);
+    if (na && nb) return Number(ia[i]) > Number(ib[i]);
+    if (na !== nb) return nb;
+    return ia[i] > ib[i];
+  }
+  return ia.length > ib.length;
 }
 
 // refreshHookCopy upgrades the copy `paws init` made for the hook (<paws home>/bin), if there is one,

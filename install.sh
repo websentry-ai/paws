@@ -108,13 +108,18 @@ newer() { # is $1 (x.y.z[-pre]) newer than $2? Semver order: 0.4.0 > 0.4.0-rc.10
     n = split(ra, p, "."); m = split(rb, q, ".")
     for (i = 1; i <= n && i <= m; i++) {
       if (p[i] == q[i]) continue
-      if (p[i] ~ /^[0-9]+$/ && q[i] ~ /^[0-9]+$/) exit !(p[i] + 0 > q[i] + 0)
+      pn = p[i] ~ /^[0-9]+$/; qn = q[i] ~ /^[0-9]+$/
+      if (pn && qn) exit !(p[i] + 0 > q[i] + 0)
+      if (pn != qn) exit pn # a number ranks below letters (rc.2 < rc.1a)
       exit !(p[i] > q[i])
     }
     exit !(n > m)
   }'
 }
-hook_copy="${PAWS_HOME:-$HOME/.paws}/bin/paws"
+# PAWS_HOME counts only when absolute, as in the CLI (a relative one would follow the cwd).
+paws_home="$HOME/.paws"
+case "${PAWS_HOME:-}" in /*) paws_home="$PAWS_HOME" ;; esac
+hook_copy="$paws_home/bin/paws"
 if [ -f "$hook_copy" ] && [ ! -L "$hook_copy" ] && [ -O "$hook_copy" ]; then
   current="$("$hook_copy" version 2>/dev/null || true)"
   current="${current#paws }"

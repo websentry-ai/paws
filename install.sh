@@ -95,11 +95,24 @@ echo "Installed $("$INSTALL_DIR/unbound-paws" version) at $INSTALL_DIR/unbound-p
 
 # `unbound-paws init` run before the folder was on PATH copied the binary here for the hook; keep
 # that copy current too (only your own regular file, never through a link).
+# Like the npm install: only a newer release (or a copy that no longer runs) replaces it, never an
+# older pinned one, and a source build (a version with "dev" in it) is left alone.
+newer() { # is $1 (x.y.z[-pre]) newer than $2?
+  awk -v a="$1" -v b="$2" 'BEGIN {
+    split(a, pa, "-"); split(b, pb, "-"); split(pa[1], x, "."); split(pb[1], y, ".")
+    for (i = 1; i <= 3; i++) if (x[i] + 0 != y[i] + 0) exit !(x[i] + 0 > y[i] + 0)
+    exit !(pa[2] == "" && pb[2] != "")
+  }'
+}
 hook_copy="${PAWS_HOME:-$HOME/.paws}/bin/paws"
 if [ -f "$hook_copy" ] && [ ! -L "$hook_copy" ] && [ -O "$hook_copy" ]; then
-  install -m 0755 "$tmp/paws" "$hook_copy.$$"
-  mv -f "$hook_copy.$$" "$hook_copy"
-  echo "Updated the hook's copy at $hook_copy"
+  current="$("$hook_copy" version 2>/dev/null || true)"
+  current="${current#paws }"
+  if [ -z "$current" ] || { [[ "$current" != *dev* ]] && newer "$VERSION" "$current"; }; then
+    install -m 0755 "$tmp/paws" "$hook_copy.$$"
+    mv -f "$hook_copy.$$" "$hook_copy"
+    echo "Updated the hook's copy at $hook_copy"
+  fi
 fi
 
 case ":$PATH:" in

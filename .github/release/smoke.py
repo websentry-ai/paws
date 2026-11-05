@@ -108,6 +108,10 @@ def main():
                     run(["bash", str(REPO / "install.sh"), version], scratch, ienv)
                 if run([str(hook_copy), "version"], scratch, ienv) != f"paws {version}":
                     raise RuntimeError("install.sh did not refresh the hook's copy in ~/.paws/bin")
+                hook_copy.write_text("#!/bin/sh\necho 'paws 999.0.0'\n")
+                run(["bash", str(REPO / "install.sh"), version], scratch, ienv)
+                if run([str(hook_copy), "version"], scratch, ienv) != "paws 999.0.0":
+                    raise RuntimeError("install.sh replaced a newer hook copy with an older release")
                 installed = home / ".local/bin/unbound-paws"
                 if run([str(installed), "version"], scratch, ienv) != f"paws {version}":
                     raise RuntimeError("install.sh did not install a working unbound-paws")

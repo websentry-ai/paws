@@ -293,7 +293,7 @@ func TestSyncRefusesHTTPCredentialsForARemoteHost(t *testing.T) {
 		code, _ := captureStdout(t, func() int { return Sync(nil) })
 		return code
 	})
-	if code != 1 || !strings.Contains(errOut, "must use https") || !strings.Contains(errOut, "run `paws login` again") {
+	if code != 1 || !strings.Contains(errOut, "must use https") || !strings.Contains(errOut, "paws login` again") {
 		t.Errorf("exit %d, stderr %q", code, errOut)
 	}
 	// The Stop hook stays silent and offline too.
@@ -386,7 +386,7 @@ func TestLoginWithOneTimeKey(t *testing.T) {
 	if code != 0 || !strings.Contains(out, "Logged in.\nNothing new to upload.") {
 		t.Fatalf("login --key exit %d, output %q", code, out)
 	}
-	if !strings.Contains(out, "paws init --global") {
+	if !strings.Contains(out, "init --global") {
 		t.Errorf("login with no global hook should say how to apply portal skills everywhere: %q", out)
 	}
 	host, _ := os.Hostname()

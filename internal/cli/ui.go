@@ -89,7 +89,7 @@ func uiHandler(addr string) http.Handler {
 			http.Error(w, err.Error(), http.StatusInternalServerError)
 			return
 		}
-		writeJSON(w, buildIndex(c))
+		writeJSON(w, buildIndex(c, runPaws()))
 	})
 	mux.HandleFunc("/api/installed", func(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, installedView())
@@ -172,13 +172,14 @@ type portalStatus struct {
 	Account     string            `json:"account,omitempty"`
 	API         string            `json:"api,omitempty"`
 	SyncMinutes int               `json:"sync_minutes"`
+	Run         string            `json:"run"` // how to run paws in a shell, for the page's hints
 	Skills      []portalSkillView `json:"skills"`
 }
 
 // portalView is the portal link as the CLI sees it: credentials.json, and the skills the applied
 // config turned on with their rule files under $PAWS_HOME/portal and local fire counts.
 func portalView() portalStatus {
-	v := portalStatus{SyncMinutes: int(defaultSyncInterval.Minutes()), Skills: []portalSkillView{}}
+	v := portalStatus{SyncMinutes: int(defaultSyncInterval.Minutes()), Run: runPaws(), Skills: []portalSkillView{}}
 	if c, err := loadCredentials(); err == nil && c != nil {
 		v.LoggedIn, v.Account, v.API = true, c.AccountEmail, c.API
 	}

@@ -60,7 +60,7 @@ export function App() {
       </header>
       <nav className="page" role="tablist">
         {tabs.map((t) => (
-          <button key={t.id} role="tab" aria-selected={tab === t.id} onClick={() => setTab(t.id)}>
+          <button key={t.id} role="tab" aria-selected={tab === t.id} data-label={t.label} onClick={() => setTab(t.id)}>
             {t.label}
           </button>
         ))}
@@ -73,7 +73,7 @@ export function App() {
       <footer className="page">
         {stats.state === "ok" ? `Audit log: ${stats.data.log}. ` : ""}
         {portal.state === "ok" && portal.data.logged_in
-          ? `Linked to the paws portal${portal.data.account ? ` as ${portal.data.account}` : ""} (${portal.data.api}): counts upload after Claude's turns, at most every ${portal.data.sync_minutes} minutes. paws logout stops it.`
+          ? `Linked to the paws portal${portal.data.account ? ` as ${portal.data.account}` : ""} (${portal.data.api}): counts upload after Claude's turns, at most every ${portal.data.sync_minutes} minutes. ${portal.data.run} logout stops it.`
           : "Nothing leaves this machine."}
       </footer>
     </>

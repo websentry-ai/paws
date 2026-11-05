@@ -140,7 +140,7 @@ func Add(args []string) int {
 		}
 	}
 	if !hookRegistered() {
-		fmt.Println("paws is not registered as a hook here yet: run `paws init` (this repo) or `paws init --global`.")
+		fmt.Printf("paws is not registered as a hook here yet: run `%[1]s init` (this repo) or `%[1]s init --global`.\n", runPaws())
 	}
 	return 0
 }
@@ -260,7 +260,7 @@ func List(args []string) int {
 		}
 	}
 	if !any {
-		fmt.Println("no packs installed (browse with `paws search`)")
+		fmt.Printf("no packs installed (browse with `%s search`)\n", runPaws())
 	}
 	return 0
 }
@@ -317,19 +317,19 @@ func Search(args []string) int {
 	hit := func(fields ...string) bool {
 		return strings.Contains(strings.ToLower(strings.Join(fields, " ")), q)
 	}
-	found := 0
+	found, run := 0, runPaws()
 	for _, n := range sortedKeys(c.Packs) {
 		p := c.Packs[n]
 		if hit(p.Name, p.Description, strings.Join(p.Tags, " ")) {
 			found++
-			fmt.Printf("pack %-20s %s\n     paws add %s\n", p.Name, p.Description, p.Name)
+			fmt.Printf("pack %-20s %s\n     %s add %s\n", p.Name, p.Description, run, p.Name)
 		}
 	}
 	for _, rel := range sortedKeys(c.Bindings) {
 		b := c.Bindings[rel]
 		if hit(b.Name, rel, b.Action.Skill, strings.Join(b.Tags, " "), b.Body) {
 			found++
-			fmt.Printf("binding %-28s %s\n     paws add %s\n", b.Name, firstLine(b.Body), strings.TrimSuffix(rel, ".md"))
+			fmt.Printf("binding %-28s %s\n     %s add %s\n", b.Name, firstLine(b.Body), run, strings.TrimSuffix(rel, ".md"))
 		}
 	}
 	if found == 0 {
@@ -351,7 +351,7 @@ func Index(args []string) int {
 		fmt.Fprintf(os.Stderr, "paws: %v\n", err)
 		return 1
 	}
-	var index any = buildIndex(c)
+	var index any = buildIndex(c, "paws")
 	if f.portal {
 		index = buildPortalCatalog(c)
 	}
@@ -390,17 +390,19 @@ type indexPack struct {
 	Add         string            `json:"add"`
 }
 
-func buildIndex(c *catalog.Catalog) map[string]any {
+// buildIndex is the catalog as JSON; run prefixes each add command ("paws", or "npx unbound-paws"
+// on a page shown to someone without paws on PATH).
+func buildIndex(c *catalog.Catalog, run string) map[string]any {
 	var packs []indexPack
 	for _, n := range sortedKeys(c.Packs) {
 		p := c.Packs[n]
-		packs = append(packs, indexPack{p.Name, p.Description, p.Tags, p.Bindings, p.PickOne, "paws add " + p.Name})
+		packs = append(packs, indexPack{p.Name, p.Description, p.Tags, p.Bindings, p.PickOne, run + " add " + p.Name})
 	}
 	var bindings []indexBinding
 	for _, rel := range sortedKeys(c.Bindings) {
 		b := c.Bindings[rel]
 		ib := indexBinding{Path: rel, Name: b.Name, Description: firstLine(b.Body), Event: b.Event, Action: b.Action.Type,
-			Skill: b.Action.Skill, Tags: b.Tags, Add: "paws add " + strings.TrimSuffix(rel, ".md")}
+			Skill: b.Action.Skill, Tags: b.Tags, Add: run + " add " + strings.TrimSuffix(rel, ".md")}
 		if b.Upstream.Repo != "" {
 			u, pv := b.Upstream, b.Provenance
 			ib.Upstream, ib.Provenance = &u, &pv

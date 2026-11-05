@@ -55,10 +55,15 @@ func Init(args []string) int {
 		return 1
 	}
 	fmt.Printf("Registered paws in %s\n  command: %s\n", settingsPath, command)
-	if _, err := exec.LookPath("paws"); err != nil {
-		fmt.Println("`paws` isn't on your PATH: install it with `npm i -g unbound-paws`, or run commands as `npx unbound-paws <command>`.")
-	}
 	return 0
+}
+
+// runPaws is how to run paws from a shell, for hints: `paws` when it's on PATH, else through npx.
+func runPaws() string {
+	if _, err := exec.LookPath("paws"); err == nil {
+		return "paws"
+	}
+	return "npx unbound-paws"
 }
 
 // hookCommand is the settings.json command that runs bin as the gate. A binary under $HOME is

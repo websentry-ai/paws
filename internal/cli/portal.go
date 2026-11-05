@@ -94,13 +94,13 @@ func loadCredentials() (*credentials, error) {
 	}
 	var c credentials
 	if err := json.Unmarshal(data, &c); err != nil {
-		return nil, fmt.Errorf("%s is unreadable (%v); run `paws login` again", path, err)
+		return nil, fmt.Errorf("%s is unreadable (%v); run `%s login` again", path, err, runPaws())
 	}
 	if c.Token == "" || c.API == "" {
 		return nil, nil
 	}
 	if _, err := checkPortalAPI(c.API); err != nil {
-		return nil, fmt.Errorf("%s: %v; run `paws login` again", path, err)
+		return nil, fmt.Errorf("%s: %v; run `%s login` again", path, err, runPaws())
 	}
 	return &c, nil
 }
@@ -255,12 +255,12 @@ func Login(args []string) int {
 	cwd, _ := os.Getwd()
 	rep, err := syncNow(&c, cwd)
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "paws: first sync failed: %v (run `paws sync` to retry)\n", err)
+		fmt.Fprintf(os.Stderr, "paws: first sync failed: %v (run `%s sync` to retry)\n", err, runPaws())
 		return 0
 	}
 	printSyncReport(rep)
 	if !hasPawsHook(filepath.Join(userClaudeDir(), "settings.json")) {
-		fmt.Println("Skills you turn on in the portal apply only where paws is registered. To use them in every project: paws init --global")
+		fmt.Printf("Skills you turn on in the portal apply only where paws is registered. To use them in every project: %s init --global\n", runPaws())
 	}
 	return 0
 }
@@ -376,7 +376,7 @@ func pollDeviceToken(api string, dc deviceCode) (deviceToken, error) {
 		case http.StatusForbidden:
 			return tok, errors.New("the login was denied")
 		case http.StatusGone:
-			return tok, errors.New("the code expired; run `paws login` again")
+			return tok, fmt.Errorf("the code expired; run `%s login` again", runPaws())
 		case http.StatusOK:
 			if tok.Status == "ok" && tok.Token != "" {
 				return tok, nil
@@ -386,7 +386,7 @@ func pollDeviceToken(api string, dc deviceCode) (deviceToken, error) {
 			return tok, portalError(status, resp)
 		}
 	}
-	return deviceToken{}, errors.New("the code expired; run `paws login` again")
+	return deviceToken{}, fmt.Errorf("the code expired; run `%s login` again", runPaws())
 }
 
 // Logout forgets the portal token and everything the portal config put in place: `paws logout`.

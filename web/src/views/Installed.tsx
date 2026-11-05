@@ -4,13 +4,14 @@ import { Bar, Cmd, Empty, Loaded } from "../ui";
 
 export function Installed({ load, portal }: { load: Load<InstalledPack[]>; portal: Load<Portal> }) {
   const fromPortal = portal.state === "ok" ? portal.data.skills : [];
+  const run = portal.state === "ok" ? portal.data.run : "paws";
   return (
     <Loaded load={load}>
       {(packs) => {
         if (!packs.length && !fromPortal.length) {
           return (
             <Empty>
-              No packs installed yet. Open <b>Catalog</b>, or run <Cmd text="paws add writing" />
+              No packs installed yet. Open <b>Catalog</b>, or run <Cmd text={`${run} add writing`} />
             </Empty>
           );
         }
@@ -25,7 +26,7 @@ export function Installed({ load, portal }: { load: Load<InstalledPack[]>; porta
               <h2 className="grow">From the portal</h2>
               <span className="badge">portal</span>
             </div>
-            <p className="desc">Skills turned on in the paws portal. Change them there; paws picks up changes within 15 minutes, or run paws sync.</p>
+            <p className="desc">Skills turned on in the paws portal. Change them there; paws picks up changes within 15 minutes, or run {run} sync.</p>
             <table>
               <thead>
                 <tr>
@@ -91,7 +92,7 @@ export function Installed({ load, portal }: { load: Load<InstalledPack[]>; porta
               </tbody>
             </table>
             <p className="desc after-table">
-              <Cmd text={`paws remove ${p.scope === "project" ? "--project " : ""}${p.name}`} />
+              <Cmd text={`${run} remove ${p.scope === "project" ? "--project " : ""}${p.name}`} />
             </p>
           </div>
         ));

@@ -72,7 +72,7 @@ const (
 	dryRunShown    = 20
 )
 
-var errRevoked = errors.New("your login was revoked; run `paws login`")
+var errRevoked = errors.New("your login was revoked")
 
 // Sync uploads new records and pulls the portal config now: `paws sync [--dry-run]`.
 func Sync(args []string) int {
@@ -91,9 +91,9 @@ func Sync(args []string) int {
 	}
 	if creds == nil && !dry {
 		if loadPortalState().Revoked {
-			fmt.Fprintln(os.Stderr, "Your login was revoked and its portal rules were removed. Run `paws login`.")
+			fmt.Fprintf(os.Stderr, "Your login was revoked and its portal rules were removed. Run `%s login`.\n", runPaws())
 		} else {
-			fmt.Fprintln(os.Stderr, "Run `paws login` first.")
+			fmt.Fprintf(os.Stderr, "Run `%s login` first.\n", runPaws())
 		}
 		return 1
 	}
@@ -110,7 +110,7 @@ func Sync(args []string) int {
 	}
 	rep, err := syncNow(creds, cwd)
 	if errors.Is(err, errRevoked) {
-		fmt.Fprintln(os.Stderr, "Your login was revoked and its portal rules were removed. Run `paws login`.")
+		fmt.Fprintf(os.Stderr, "Your login was revoked and its portal rules were removed. Run `%s login`.\n", runPaws())
 		return 1
 	}
 	printSyncReport(rep)

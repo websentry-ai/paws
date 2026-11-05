@@ -22,12 +22,12 @@ Apache-2.0 · Claude Code · no account.
 ## Ten minutes
 
 ```bash
-npm i -g unbound-paws      # puts `paws` on your PATH
-paws init                  # registers the hook in this repo's .claude/settings.json
-paws add writing           # humanizer before PR bodies, commits and MCP sends
+npx unbound-paws init          # registers the hook in this repo's .claude/settings.json
+npx unbound-paws add writing   # humanizer before PR bodies, commits and MCP sends
 ```
 
-(`npx unbound-paws init` works too; then run commands as `npx unbound-paws <command>`.)
+Every command runs as `npx unbound-paws <command>` (or `paws <command>` if you
+installed it with `npm i -g unbound-paws`); the examples below use `paws` for short.
 
 Now ask Claude Code for a commit or a PR. You'll see:
 
@@ -168,11 +168,10 @@ only for `localhost`, `127.0.0.1` or `::1`, with a warning.
 ## Install details
 
 ```bash
-npm i -g unbound-paws
-paws init                        # this repo (or this folder, outside a repo)
-paws init --global               # every repo for this user (~/.claude/settings.json)
-npm i -g unbound-paws@latest     # upgrade: also replaces ~/.paws/bin/paws
-paws uninstall [--global]        # removes the hook (and the paws skill, if unedited)
+npx unbound-paws init               # this repo (or this folder, outside a repo)
+npx unbound-paws init --global      # every repo for this user (~/.claude/settings.json)
+npx unbound-paws@latest init        # upgrade
+npx unbound-paws uninstall [--global]   # removes the hook (and the paws skill, if unedited)
 ```
 
 The npm package downloads the release binary for your platform and checks it
@@ -180,9 +179,9 @@ against the release's `checksums.txt`. `paws init` copies the binary to
 `~/.paws/bin/paws` and registers it as `"$HOME/.paws/bin/paws" gate`, so
 clearing the npm cache never breaks the hook and a committed
 `.claude/settings.json` works for every teammate. The hook runs that binary
-directly (about 7 ms a call; through the npm wrapper it would be about
-125 ms). Installing a newer npm package replaces it; so does re-running
-`init`. All repos share that one binary. From source: `go build -o paws ./cmd/paws && ./paws init`.
+directly (about 7 ms a call; through npx or the npm wrapper it would be
+125 ms or more). Installing a newer npm package replaces it (never an older
+one); so does re-running `init`. All repos share that one binary. From source: `go build -o paws ./cmd/paws && ./paws init`.
 
 Upgrading from 0.3.0: nothing to do; the old `PAWS_MANAGED=1 …` hook entry
 keeps working, and `paws init` rewrites it. `init` no longer installs the

@@ -115,7 +115,9 @@ The full reference: [docs/rules.md](docs/rules.md).
   call denies once more.
 - **Not a sandbox.** Regex rules match command text, not shell semantics.
   A gate makes an agent that follows instructions load the skill; it doesn't
-  stop an adversary.
+  stop an adversary. The hook runs `unbound-paws gate` from your PATH, so a
+  repo whose `.claude/settings.json` sets `env.PATH` could swap it out in that
+  repo; review `.claude/settings.json` like you review `.paws/`.
 
 ## Portal (optional)
 

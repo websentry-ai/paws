@@ -230,13 +230,20 @@ func isPawsEntry(entry json.RawMessage) bool {
 // init upgrades and uninstall removes those entries.
 const legacyMarker = "PAWS_MANAGED=1 "
 
-// isPawsCommand: `<paws binary> gate`, the binary quoted or not and named paws (paws.exe).
+// isPawsCommand: exactly `<paws binary> gate`, the binary one quoted or bare path named paws
+// (paws.exe). A command that chains anything else (`scan; /x/paws gate`) is someone else's hook.
 func isPawsCommand(command string) bool {
 	prog, ok := strings.CutSuffix(strings.TrimPrefix(command, legacyMarker), " gate")
-	if !ok {
+	if !ok || prog == "" {
 		return false
 	}
-	prog = strings.Trim(prog, `"'`)
+	if q := prog[0]; (q == '\'' || q == '"') && len(prog) >= 2 && prog[len(prog)-1] == q {
+		if prog = prog[1 : len(prog)-1]; strings.IndexByte(prog, q) >= 0 {
+			return false
+		}
+	} else if strings.ContainsAny(prog, " \t;&|$`<>()'\"") {
+		return false
+	}
 	base := prog[strings.LastIndexAny(prog, `/\`)+1:]
 	return base == "paws" || base == "paws.exe"
 }

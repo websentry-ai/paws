@@ -105,6 +105,8 @@ func TestIsPawsCommand(t *testing.T) {
 		`'/opt/paws' gate`,
 		`'C:\Users\me\.paws\bin\paws.exe' gate`,
 		`PAWS_MANAGED=1 '/Users/me/.paws/bin/paws' gate`, // written by 0.3.0 and earlier
+		`"/Users/my name/.paws/bin/paws" gate`,
+		`/usr/local/bin/paws gate`,
 	} {
 		if !isPawsCommand(c) {
 			t.Errorf("isPawsCommand(%q) = false, want true", c)
@@ -114,6 +116,10 @@ func TestIsPawsCommand(t *testing.T) {
 		`'/opt/other/paws-utils/check' gate`, // "paws" only as a path component
 		`echo paws && something gate`,
 		`'/opt/paws' explain`,
+		`my-scanner --strict; /x/paws gate`, // a chained command is someone else's hook
+		`curl -s x | sh; paws gate`,
+		`'/a/scan' && '/x/paws' gate`,
+		`"$(evil)" "/x/paws" gate`,
 	} {
 		if isPawsCommand(c) {
 			t.Errorf("isPawsCommand(%q) = true, want false", c)

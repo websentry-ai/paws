@@ -9,8 +9,9 @@ import (
 const gitAnchor = `(^|[;&|\n])\s*`
 const gitFlags = `(\s+-C\s+\S+|\s+--?[\w-]+(=\S+)?)*`
 
-// gitEnd ends the subcommand word; \b alone would let `commit-tree` and `commit-graph` match.
-const gitEnd = `($|[\s;&|])`
+// gitEnd ends the subcommand word (space, ;, a redirect, a paren...); \b alone would let
+// `commit-tree` and `commit-graph` match.
+const gitEnd = `($|[^\w-])`
 
 var (
 	gitCommitRe = regexp.MustCompile(gitAnchor + `git` + gitFlags + `\s+commit` + gitEnd)

@@ -103,12 +103,34 @@ async function ensureBinary() {
   return BINARY;
 }
 
+// newer reports whether version a (x.y.z) is newer than b.
+function newer(a, b) {
+  const pa = a.split(/[.-]/).map(Number);
+  const pb = b.split(/[.-]/).map(Number);
+  for (let i = 0; i < 3; i++) {
+    if (pa[i] !== pb[i]) return pa[i] > pb[i];
+  }
+  return false;
+}
+
 // refreshHookCopy upgrades the copy `paws init` made for the hook (<paws home>/bin), if there is one,
-// so `npm i -g unbound-paws@latest` is the whole upgrade. Same rename-into-place as init.
+// so `npm i -g unbound-paws@latest` is the whole upgrade. Every repo's hook runs that one copy, so it
+// is only replaced by a newer release (or when it no longer runs), never by an older pinned or npx'd
+// one, and a local build (`paws dev`) is left alone. Same rename-into-place as init.
 function refreshHookCopy(bin) {
   const home = process.env.PAWS_HOME && path.isAbsolute(process.env.PAWS_HOME) ? process.env.PAWS_HOME : path.join(os.homedir(), ".paws");
   const copy = path.join(home, "bin", EXE);
   if (!fs.existsSync(copy)) return;
+  let current = null;
+  try {
+    current = execFileSync(copy, ["version"], { encoding: "utf8", timeout: 5000 });
+  } catch {
+    // Doesn't run: replace it.
+  }
+  if (current !== null) {
+    const m = /^paws (\d+\.\d+\.\d+)/.exec(current.trim());
+    if (!m || !newer(pkg.version, m[1])) return;
+  }
   const staged = path.join(path.dirname(copy), `.${EXE}.${process.pid}`);
   fs.copyFileSync(bin, staged);
   fs.chmodSync(staged, 0o755);

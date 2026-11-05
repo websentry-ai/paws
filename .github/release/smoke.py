@@ -119,6 +119,15 @@ def main():
             if run([str(binary), "version"], project, env) != f"paws {version}":
                 raise RuntimeError("npm install did not refresh the hook's binary copy")
             print("PASS: npm install refreshes the hook's binary copy", flush=True)
+
+            if sys.platform != "win32":
+                shutil.rmtree(scratch / "npm-cache")
+                binary.write_text("#!/bin/sh\necho 'paws 999.0.0'\n")
+                binary.chmod(0o755)
+                run(version_command, project, env)
+                if run([str(binary), "version"], project, env) != "paws 999.0.0":
+                    raise RuntimeError("npm install replaced a newer hook binary with an older one")
+                print("PASS: npm install never downgrades the hook's binary copy", flush=True)
             shutil.rmtree(scratch / "npm-cache")  # the checksum checks below need a fresh download
 
             sums_path.write_text("\n".join(f"{'0' * 64}  {name}" for name in sums) + "\n")

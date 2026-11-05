@@ -109,10 +109,11 @@ func pawsCommandIn(path string) string {
 const cliName = "unbound-paws"
 
 // cliPath is the first `unbound-paws` on PATH, or "". npx (and npm run) put a node_modules/.bin
-// in front of PATH only for that run; Claude Code won't have it, so those folders are skipped.
+// in front of PATH only for that run; Claude Code won't have it, so those folders are skipped, and
+// so are relative entries like `.` (they follow the cwd, and a bare name would search PATH again).
 func cliPath() string {
 	for _, dir := range filepath.SplitList(os.Getenv("PATH")) {
-		if dir == "" || filepath.Base(dir) == ".bin" && filepath.Base(filepath.Dir(dir)) == "node_modules" {
+		if !filepath.IsAbs(dir) || filepath.Base(dir) == ".bin" && filepath.Base(filepath.Dir(dir)) == "node_modules" {
 			continue
 		}
 		if p, err := exec.LookPath(filepath.Join(dir, cliName)); err == nil {

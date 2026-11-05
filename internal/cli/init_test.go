@@ -332,9 +332,12 @@ func TestCliPathLooksPastNpxBin(t *testing.T) {
 	if got := cliPath(); got != filepath.Join(local, "unbound-paws") {
 		t.Errorf("cliPath() = %q, want the installed one in %s", got, local)
 	}
-	t.Setenv("PATH", npxBin)
-	if got := cliPath(); got != "" {
-		t.Errorf("cliPath() with only npx's .bin = %q, want empty", got)
+	// A relative entry after npx's .bin must not turn into a bare-name search that finds npx's copy.
+	for _, path := range []string{npxBin, npxBin + string(os.PathListSeparator) + ".", npxBin + string(os.PathListSeparator) + ""} {
+		t.Setenv("PATH", path)
+		if got := cliPath(); got != "" {
+			t.Errorf("cliPath() with PATH %q = %q, want empty", path, got)
+		}
 	}
 }
 

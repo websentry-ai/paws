@@ -79,7 +79,7 @@ func Sync(args []string) int {
 	dry := false
 	for _, a := range args {
 		if a != "--dry-run" {
-			fmt.Fprintf(os.Stderr, "paws: unknown flag %q\nusage: paws sync [--dry-run]\n", a)
+			fmt.Fprintf(os.Stderr, "paws: unknown flag %q\nusage: unbound-paws sync [--dry-run]\n", a)
 			return 2
 		}
 		dry = true
@@ -91,9 +91,9 @@ func Sync(args []string) int {
 	}
 	if creds == nil && !dry {
 		if loadPortalState().Revoked {
-			fmt.Fprintf(os.Stderr, "Your login was revoked and its portal rules were removed. Run `%s login`.\n", runPaws())
+			fmt.Fprintf(os.Stderr, "Your login was revoked and its portal rules were removed. Run `%s login`.\n", cliName)
 		} else {
-			fmt.Fprintf(os.Stderr, "Run `%s login` first.\n", runPaws())
+			fmt.Fprintf(os.Stderr, "Run `%s login` first.\n", cliName)
 		}
 		return 1
 	}
@@ -110,7 +110,7 @@ func Sync(args []string) int {
 	}
 	rep, err := syncNow(creds, cwd)
 	if errors.Is(err, errRevoked) {
-		fmt.Fprintf(os.Stderr, "Your login was revoked and its portal rules were removed. Run `%s login`.\n", runPaws())
+		fmt.Fprintf(os.Stderr, "Your login was revoked and its portal rules were removed. Run `%s login`.\n", cliName)
 		return 1
 	}
 	printSyncReport(rep)

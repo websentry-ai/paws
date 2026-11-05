@@ -29,12 +29,17 @@ func Init(args []string) int {
 		return 1
 	}
 	self, _ = filepath.Abs(self)
-	bin, err := installSelf(self, gate.UserDir())
-	if err != nil {
-		fmt.Fprintf(os.Stderr, "paws: install binary: %v\n", err)
-		return 1
+	// The same command in project and user settings, so Claude Code runs the gate once.
+	command := cliName + " gate"
+	if !onPath(self) {
+		// Not installed on PATH: copy the binary somewhere the npx cache can't clean up.
+		bin, err := installSelf(self, gate.UserDir())
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "paws: install binary: %v\n", err)
+			return 1
+		}
+		command = hookCommand(bin)
 	}
-	command := hookCommand(bin)
 
 	doc, err := readSettings(settingsPath)
 	if err != nil {
@@ -58,12 +63,24 @@ func Init(args []string) int {
 	return 0
 }
 
-// runPaws is how to run paws from a shell, for hints: `paws` when it's on PATH, else through npx.
-func runPaws() string {
-	if _, err := exec.LookPath("paws"); err == nil {
-		return "paws"
+// cliName is the command people type and the hook runs: the installer (and npm) put it on PATH.
+const cliName = "unbound-paws"
+
+// onPath reports whether init is running as the unbound-paws on PATH, so the hook can name it
+// instead of copying the binary: true for the installer's copy and a native npm install, false
+// for npx, a source build, or an older unbound-paws earlier on PATH.
+func onPath(self string) bool {
+	p, err := exec.LookPath(cliName)
+	// npx (and npm run) put a node_modules/.bin on PATH only for that run; Claude Code won't have it.
+	if err != nil || filepath.Base(filepath.Dir(p)) == ".bin" && filepath.Base(filepath.Dir(filepath.Dir(p))) == "node_modules" {
+		return false
 	}
-	return "npx unbound-paws"
+	a, err := filepath.EvalSymlinks(p)
+	if err != nil {
+		return false
+	}
+	b, err := filepath.EvalSymlinks(self)
+	return err == nil && a == b
 }
 
 // hookCommand is the settings.json command that runs bin as the gate. A binary under $HOME is

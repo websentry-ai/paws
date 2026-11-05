@@ -15,7 +15,7 @@ func Validate(args []string) int {
 	case 1:
 		root = args[0]
 	default:
-		fmt.Fprintln(os.Stderr, "usage: paws validate [root]")
+		fmt.Fprintln(os.Stderr, "usage: unbound-paws validate [root]")
 		return 2
 	}
 	if st, err := os.Stat(catalog.CatalogDir(root)); err != nil || !st.IsDir() {

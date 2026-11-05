@@ -69,7 +69,7 @@ func Gate() (code int) {
 		problems = append(problems, fmt.Sprintf("%d rule file(s) have unknown keys", n))
 	}
 	if len(problems) > 0 {
-		out.SystemMessage = "paws: " + strings.Join(problems, ", ") + " (run `paws explain` for details)"
+		out.SystemMessage = "paws: " + strings.Join(problems, ", ") + " (run `unbound-paws explain` for details)"
 	}
 	wrote = true
 	emit(out)

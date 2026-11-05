@@ -41,7 +41,7 @@ func UI(args []string) int {
 			port = n
 			i++
 		default:
-			fmt.Fprintf(os.Stderr, "paws: unknown flag %q\nusage: paws ui [--port N] [--no-open]\n", args[i])
+			fmt.Fprintf(os.Stderr, "paws: unknown flag %q\nusage: unbound-paws ui [--port N] [--no-open]\n", args[i])
 			return 2
 		}
 	}
@@ -90,7 +90,7 @@ func uiHandler(addr string) http.Handler {
 			http.Error(w, err.Error(), http.StatusInternalServerError)
 			return
 		}
-		writeJSON(w, buildIndex(c, runPaws()))
+		writeJSON(w, buildIndex(c))
 	})
 	mux.HandleFunc("/api/installed", func(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, installedView())
@@ -182,7 +182,7 @@ type portalStatus struct {
 // config turned on with their rule files under $PAWS_HOME/portal and local fire counts.
 func portalView() portalStatus {
 	v := portalStatus{SyncMinutes: int(defaultSyncInterval.Minutes()), ConfigMinutes: int(defaultConfigInterval.Minutes()),
-		Run: runPaws(), Skills: []portalSkillView{}}
+		Run: cliName, Skills: []portalSkillView{}}
 	if c, err := loadCredentials(); err == nil && c != nil {
 		v.LoggedIn, v.Account, v.API = true, c.AccountEmail, c.API
 	}

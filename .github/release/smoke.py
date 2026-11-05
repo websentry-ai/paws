@@ -93,6 +93,21 @@ def main():
                         raise RuntimeError(f"Missing archive contents in {asset}")
             print("PASS: all six archives, contents, and SHA-256 checksums", flush=True)
 
+            if sys.platform != "win32":
+                home = scratch / "install-home"
+                home.mkdir()
+                ienv = {**os.environ, **installer.env, "HOME": str(home), "SHELL": "/bin/zsh",
+                        "PATH": "/usr/bin:/bin:/usr/sbin:/sbin"}
+                ienv.pop("PAWS_INSTALL_DIR", None)
+                for _ in range(2):  # the second run is an upgrade in place
+                    run(["bash", str(REPO / "install.sh"), version], scratch, ienv)
+                installed = home / ".local/bin/unbound-paws"
+                if run([str(installed), "version"], scratch, ienv) != f"paws {version}":
+                    raise RuntimeError("install.sh did not install a working unbound-paws")
+                if (home / ".zshrc").read_text().count('export PATH="$HOME/.local/bin:$PATH"') != 1:
+                    raise RuntimeError("install.sh should add ~/.local/bin to PATH in .zshrc exactly once")
+                print("PASS: install.sh installs ~/.local/bin/unbound-paws and puts it on PATH once", flush=True)
+
             project = scratch / "project"
             project.mkdir()
             env = {**os.environ, **installer.env,
@@ -103,6 +118,11 @@ def main():
             version_command = [*installer.init[:-1], "version"]
             if run(version_command, project, env) != f"paws {version}":
                 raise RuntimeError("npm wrapper ran the wrong version")
+            if sys.platform != "win32":
+                launchers = list((scratch / "npm-cache").glob("_npx/*/node_modules/unbound-paws/bin/paws.js"))
+                if not launchers or launchers[0].read_bytes()[:2] == b"#!":
+                    raise RuntimeError("npm install kept the Node launcher instead of the native binary")
+                print("PASS: npm install puts the native binary behind the unbound-paws command", flush=True)
             run(installer.init, project, env)
             settings = json.loads((project / ".claude/settings.json").read_text())
             command = settings["hooks"]["PreToolUse"][0]["hooks"][0]["command"]
@@ -132,6 +152,11 @@ def main():
                 shutil.rmtree(scratch / "npm-cache")  # the checksum checks below need a fresh download
 
             sums_path.write_text("\n".join(f"{'0' * 64}  {name}" for name in sums) + "\n")
+            if sys.platform != "win32":
+                bad = sh(["bash", str(REPO / "install.sh"), version], scratch,
+                         {**ienv, "PAWS_INSTALL_DIR": str(scratch / "bad-bin")})
+                if bad.returncode == 0 or "checksum mismatch" not in bad.stderr:
+                    raise RuntimeError("install.sh accepted a corrupted checksum")
             rejected = sh(version_command, project, env, timeout=300)
             if rejected.returncode == 0 or "checksum mismatch" not in rejected.stderr:
                 raise RuntimeError("npm wrapper accepted corrupted checksums")

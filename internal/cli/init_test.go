@@ -223,3 +223,54 @@ func TestProjectAndGlobalHookCommandsMatch(t *testing.T) {
 		t.Errorf("project %q and global %q differ; Claude Code would run the gate twice", p, g)
 	}
 }
+
+// Run as the unbound-paws on PATH (installer, native npm), init names it and copies nothing.
+func TestInitOnPathWritesTheCommandName(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	t.Setenv("PAWS_HOME", filepath.Join(home, ".paws"))
+	t.Setenv("CLAUDE_CONFIG_DIR", filepath.Join(home, ".claude"))
+	self, err := os.Executable()
+	if err != nil {
+		t.Fatal(err)
+	}
+	bin := filepath.Join(home, ".local", "bin")
+	os.MkdirAll(bin, 0o755)
+	if err := os.Symlink(self, filepath.Join(bin, "unbound-paws")); err != nil {
+		t.Skip(err)
+	}
+	t.Setenv("PATH", bin)
+	repo := filepath.Join(home, "repo")
+	os.MkdirAll(filepath.Join(repo, ".git"), 0o755)
+	t.Chdir(repo)
+	if code := Init(nil); code != 0 {
+		t.Fatalf("init exit %d", code)
+	}
+	doc, _ := readSettings(filepath.Join(repo, ".claude", "settings.json"))
+	hooks, _ := hooksBlock(doc)
+	var pre []json.RawMessage
+	json.Unmarshal(hooks["PreToolUse"], &pre)
+	if !containsCommand(pre, "unbound-paws gate") {
+		t.Errorf("want unbound-paws gate, got %s", hooks["PreToolUse"])
+	}
+	if _, err := os.Stat(filepath.Join(home, ".paws", "bin")); err == nil {
+		t.Error("init copied the binary although unbound-paws is on PATH")
+	}
+	if !isPawsCommand("unbound-paws gate") || isPawsCommand("unbound-paws explain") {
+		t.Error("isPawsCommand should own exactly `unbound-paws gate`")
+	}
+}
+
+// npx puts node_modules/.bin on PATH for one run only; init must not name a command from there.
+func TestOnPathIgnoresNpxBin(t *testing.T) {
+	self, _ := os.Executable()
+	bin := filepath.Join(t.TempDir(), "_npx", "abc", "node_modules", ".bin")
+	os.MkdirAll(bin, 0o755)
+	if err := os.Symlink(self, filepath.Join(bin, "unbound-paws")); err != nil {
+		t.Skip(err)
+	}
+	t.Setenv("PATH", bin)
+	if onPath(self) {
+		t.Error("onPath trusted an npx node_modules/.bin")
+	}
+}

@@ -103,11 +103,36 @@ async function ensureBinary() {
   return BINARY;
 }
 
+// refreshHookCopy upgrades the copy `paws init` made for the hook (<paws home>/bin), if there is one,
+// so `npm i -g unbound-paws@latest` is the whole upgrade. Same rename-into-place as init.
+function refreshHookCopy(bin) {
+  const home = process.env.PAWS_HOME && path.isAbsolute(process.env.PAWS_HOME) ? process.env.PAWS_HOME : path.join(os.homedir(), ".paws");
+  const copy = path.join(home, "bin", EXE);
+  if (!fs.existsSync(copy)) return;
+  const staged = path.join(path.dirname(copy), `.${EXE}.${process.pid}`);
+  fs.copyFileSync(bin, staged);
+  fs.chmodSync(staged, 0o755);
+  if (process.platform === "win32") {
+    // A running .exe can't be replaced, only renamed; init does the same.
+    fs.rmSync(copy + ".old", { force: true });
+    fs.renameSync(copy, copy + ".old");
+  }
+  fs.renameSync(staged, copy);
+  console.log(`updated the paws hook binary at ${copy}`);
+}
+
 module.exports = { ensureBinary, BINARY };
 
 if (require.main === module) {
   ensureBinary().then(
-    (bin) => console.log(`paws ${pkg.version} installed at ${bin}`),
+    (bin) => {
+      console.log(`paws ${pkg.version} installed at ${bin}`);
+      try {
+        refreshHookCopy(bin);
+      } catch (err) {
+        console.warn(`unbound-paws: could not update the paws hook binary: ${err.message} (run \`paws init\` again)`);
+      }
+    },
     (err) => {
       // Never fail the npm install: bin/paws.js retries on first run and reports the error there.
       console.warn(`unbound-paws: could not download the paws binary yet: ${err.message}`);

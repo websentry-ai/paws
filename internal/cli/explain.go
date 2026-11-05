@@ -16,6 +16,10 @@ func Explain(args []string) int {
 	gate.DryRun = true
 	in := &hook.Input{HookEventName: "PreToolUse", ToolName: "Bash"}
 
+	if len(args) == 0 {
+		fmt.Fprintln(os.Stderr, "usage: paws explain [--tool T] [--event E] <command|path|url|...>\n       echo '<event json>' | paws explain -")
+		return 2
+	}
 	if len(args) == 1 && args[0] == "-" {
 		data, err := io.ReadAll(os.Stdin)
 		if err != nil {
@@ -52,11 +56,11 @@ func Explain(args []string) int {
 			in.ToolName, in.Source = "", text
 		default:
 			in.ToolInput = map[string]any{}
-			switch in.ToolName {
-			case "Read", "Write", "Edit":
-				in.ToolInput["file_path"] = text
-			default:
-				in.ToolInput["command"] = text
+			if field := hook.InputField(in.ToolName); field != "" {
+				in.ToolInput[field] = text
+			} else if json.Unmarshal([]byte(text), &in.ToolInput) != nil {
+				// An MCP tool matches on its whole input: pass it as JSON, or this text stands in for it.
+				in.ToolInput = map[string]any{"input": text}
 			}
 		}
 	}
@@ -78,6 +82,14 @@ func Explain(args []string) int {
 	}
 	for _, fe := range res.Warns {
 		fmt.Printf("  ! unknown key in %s (ignored): %s\n", fe.Path, oneLine(fe.Err))
+	}
+	seen := map[string]string{}
+	for _, r := range res.Rules {
+		if first, ok := seen[r.Name]; ok {
+			fmt.Printf("  ! two rules named %q (%s, %s): both apply, but the audit log and fire counts can't tell them apart\n", r.Name, first, r.SourcePath)
+		} else {
+			seen[r.Name] = r.SourcePath
+		}
 	}
 
 	fmt.Println("\nrules:")

@@ -178,6 +178,14 @@ func TestReadSettingsMissingIsEmpty(t *testing.T) {
 	}
 }
 
+func TestReadSettingsEmptyFileIsEmpty(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "settings.json")
+	os.WriteFile(path, []byte(" \n"), 0o644)
+	if doc, err := readSettings(path); err != nil || len(doc) != 0 {
+		t.Fatalf("an empty file should yield an empty doc, got %v %v", doc, err)
+	}
+}
+
 func TestWriteSettingsRoundTripsUnknownKeys(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "settings.json")
 	doc := settingsDoc{"someOtherPlugin": json.RawMessage(`{"n":123456789012345}`)}

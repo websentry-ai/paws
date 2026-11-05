@@ -6,6 +6,7 @@ import (
 	"io"
 	"io/fs"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"runtime"
 	"strings"
@@ -54,6 +55,9 @@ func Init(args []string) int {
 		return 1
 	}
 	fmt.Printf("Registered paws in %s\n  command: %s\n", settingsPath, command)
+	if _, err := exec.LookPath("paws"); err != nil {
+		fmt.Println("`paws` isn't on your PATH: install it with `npm i -g unbound-paws`, or run commands as `npx unbound-paws <command>`.")
+	}
 	return 0
 }
 
@@ -94,6 +98,16 @@ func Uninstall(args []string) int {
 	}
 	fmt.Printf("Removed paws from %s\n", settingsPath)
 	removePawsSkill(settingsPath)
+	if len(doc) == 0 {
+		// Nothing but paws was in it: don't leave an empty settings.json and empty folders behind.
+		os.Remove(settingsPath)
+		if skillsDir := pawsSkillDir(settingsPath); skillsDir != "" {
+			os.Remove(skillsDir)
+		}
+		if filepath.Base(filepath.Dir(settingsPath)) == ".claude" {
+			os.Remove(filepath.Dir(settingsPath))
+		}
+	}
 	return 0
 }
 

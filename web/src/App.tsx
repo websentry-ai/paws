@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { useJSON } from "./api";
-import type { Catalog, InstalledPack, StatsResponse } from "./types";
+import type { Catalog, InstalledPack, Portal, StatsResponse } from "./types";
 import { Activity } from "./views/Activity";
 import { CatalogView } from "./views/Catalog";
 import { Installed } from "./views/Installed";
@@ -32,6 +32,7 @@ export function App() {
   const installed = useJSON<InstalledPack[]>("/api/installed");
   const catalog = useJSON<Catalog>("/api/catalog");
   const stats = useJSON<StatsResponse>("/api/stats");
+  const portal = useJSON<Portal>("/api/portal");
 
   useEffect(() => {
     const onHash = () => {
@@ -65,12 +66,15 @@ export function App() {
         ))}
       </nav>
       <main className="page">
-        {tab === "installed" && <Installed load={installed} />}
+        {tab === "installed" && <Installed load={installed} portal={portal} />}
         {tab === "catalog" && <CatalogView load={catalog} />}
         {tab === "activity" && <Activity load={stats} />}
       </main>
       <footer className="page">
-        {stats.state === "ok" ? `Audit log: ${stats.data.log}. ` : ""}Nothing leaves this machine.
+        {stats.state === "ok" ? `Audit log: ${stats.data.log}. ` : ""}
+        {portal.state === "ok" && portal.data.logged_in
+          ? `Linked to the paws portal${portal.data.account ? ` as ${portal.data.account}` : ""} (${portal.data.api}): counts upload after Claude's turns, at most every ${portal.data.sync_minutes} minutes. paws logout stops it.`
+          : "Nothing leaves this machine."}
       </footer>
     </>
   );

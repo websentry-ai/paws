@@ -90,9 +90,11 @@ escapes and break the rule.
 ## Action
 
 `require-skill` + `skill` is the only action: deny until the skill was
-invoked in the last 20 turns. Optional `deny_message` replaces the deny text.
-With `on_miss: digest` and `digest: <path>`, the deny carries the digest
-text instead (under 7000 bytes). The path is relative to the rule file's own
+invoked in the last 20 turns. Optional `deny_message` (under `action:`)
+replaces the deny text. With `on_miss: digest` and `digest: <path>`, the deny
+carries the digest text instead (under 7000 bytes), and once that deny is in
+the transcript the retry passes even if the skill isn't installed: use it for
+a skill the user may not have. The path is relative to the rule file's own
 folder and must stay inside it (no `..`): copy the text next to the rule, e.g.
 `.paws/pre-tool/digests/s3.md` with `digest: digests/s3.md`. A rule with any
 other action is skipped.

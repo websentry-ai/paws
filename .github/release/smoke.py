@@ -106,13 +106,19 @@ def main():
             run(installer.init, project, env)
             settings = json.loads((project / ".claude/settings.json").read_text())
             command = settings["hooks"]["PreToolUse"][0]["hooks"][0]["command"]
-            if "PAWS_MANAGED=1" not in command or "paws-home" not in command:
+            if not command.endswith(" gate") or "paws-home" not in command:
                 raise RuntimeError("Hook does not point to the installed binary")
             binary = scratch / "paws-home/bin" / ("paws.exe" if sys.platform == "win32" else "paws")
             shutil.rmtree(scratch / "npm-cache")
             if run([str(binary), "version"], project, env) != f"paws {version}":
                 raise RuntimeError("Installed binary failed after clearing the npm cache")
             print("PASS: fresh npm install, init, hook registration, and cache-independent binary", flush=True)
+
+            binary.write_bytes(b"stale")
+            run(version_command, project, env)  # the npm cache is empty again, so this install runs postinstall
+            if run([str(binary), "version"], project, env) != f"paws {version}":
+                raise RuntimeError("npm install did not refresh the hook's binary copy")
+            print("PASS: npm install refreshes the hook's binary copy", flush=True)
 
             sums_path.write_text("\n".join(f"{'0' * 64}  {name}" for name in sums) + "\n")
             rejected = sh(version_command, project, env, timeout=300)

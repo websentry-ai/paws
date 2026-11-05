@@ -129,6 +129,11 @@ func TestMatchesGitSyntheticEvents(t *testing.T) {
 	if !commit.Matches("Bash", "git commit -am wip") {
 		t.Error("pre-commit should match git commit")
 	}
+	for _, c := range []string{"git commit-tree HEAD^{tree} -m x", "git commit-graph write", "git commit"} {
+		if got, want := commit.Matches("Bash", c), c == "git commit"; got != want {
+			t.Errorf("pre-commit on %q = %v, want %v", c, got, want)
+		}
+	}
 	if commit.Matches("Bash", `git tag -m "first commit"`) {
 		t.Error("pre-commit should not fire on a commit-flavored commit message")
 	}

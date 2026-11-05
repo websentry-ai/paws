@@ -96,7 +96,7 @@ the agent to invoke it and retry the same command. A compaction resets the
 20-turn window, so the next gated call denies once more.
 
 A rule with any other action, or an event not listed above, is skipped with
-a notice, and `paws validate` names it.
+a notice, and `paws explain` lists it as `! skipped`.
 
 ### on_miss: digest
 

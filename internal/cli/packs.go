@@ -161,6 +161,9 @@ func askPick(g catalog.PickOne) string {
 	}
 	fmt.Printf(": pick one of %s [%s]: ", strings.Join(names, ", "), g.Default)
 	line, _ := bufio.NewReader(os.Stdin).ReadString('\n')
+	if st, err := os.Stdin.Stat(); err == nil && st.Mode()&os.ModeCharDevice == 0 {
+		fmt.Println() // piped answer: no echoed newline from a terminal
+	}
 	return strings.TrimSpace(line)
 }
 
@@ -240,6 +243,19 @@ func List(args []string) int {
 			for _, rel := range inst.Bindings {
 				name := ruleName(filepath.Join(pack.InstallDir(t, n), filepath.FromSlash(rel)))
 				fmt.Printf("  %-28s fired %d\n", name, fires[name])
+			}
+		}
+	}
+	if !f.project {
+		if skills := portalView().Skills; len(skills) > 0 {
+			any = true
+			fmt.Println("from the portal (change them there)")
+			for _, s := range skills {
+				n := 0
+				for _, b := range s.Bindings {
+					n += b.Fires
+				}
+				fmt.Printf("  %-28s fired %d\n", s.Name, n)
 			}
 		}
 	}
@@ -465,12 +481,16 @@ func Pin(args []string) int {
 		fmt.Fprintln(os.Stderr, "usage: paws pin [root]")
 		return 2
 	}
+	if st, err := os.Stat(catalog.CatalogDir(root)); err != nil || !st.IsDir() {
+		fmt.Fprintf(os.Stderr, "paws: no catalog/ directory under %s\n", root)
+		return 2
+	}
 	c, probs := catalog.Load(root)
 	for _, p := range probs {
 		fmt.Fprintln(os.Stderr, "paws:", p)
 	}
 	hashes := map[string]string{} // repo@ref:path -> hash
-	failed := 0
+	failed, pinned := 0, 0
 	for _, rel := range sortedKeys(c.Bindings) {
 		b := c.Bindings[rel]
 		u := b.Upstream
@@ -509,10 +529,14 @@ func Pin(args []string) int {
 				continue
 			}
 			fmt.Printf("pinned %s %s\n", rel, hash)
+			pinned++
 		}
 	}
 	if failed > 0 {
 		return 1
+	}
+	if pinned == 0 {
+		fmt.Println("every upstream skill is already pinned")
 	}
 	return 0
 }

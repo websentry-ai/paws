@@ -116,6 +116,21 @@ func TestInitRegistersHookOnly(t *testing.T) {
 	if _, err := os.Stat(filepath.Join(repo, ".claude", "skills")); err == nil {
 		t.Error("init must not install the paws skill; that's `paws skill`")
 	}
+	// Uninstall leaves no empty settings.json or .claude folder behind.
+	if code := Uninstall(nil); code != 0 {
+		t.Fatalf("uninstall exit %d", code)
+	}
+	if _, err := os.Stat(filepath.Join(repo, ".claude")); err == nil {
+		t.Error("uninstall left an empty .claude folder")
+	}
+	// A settings.json with other content stays.
+	os.MkdirAll(filepath.Join(repo, ".claude"), 0o755)
+	os.WriteFile(filepath.Join(repo, ".claude", "settings.json"), []byte(`{"env":{"A":"1"}}`), 0o644)
+	Init(nil)
+	Uninstall(nil)
+	if data, _ := os.ReadFile(filepath.Join(repo, ".claude", "settings.json")); !strings.Contains(string(data), `"A"`) {
+		t.Errorf("uninstall must keep other settings, got %q", data)
+	}
 }
 
 func TestSkillInstallsAndReinstalls(t *testing.T) {

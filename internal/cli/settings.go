@@ -1,6 +1,7 @@
 package cli
 
 import (
+	"bytes"
 	"encoding/json"
 	"fmt"
 	"os"
@@ -23,6 +24,9 @@ func readSettings(path string) (settingsDoc, error) {
 		return nil, fmt.Errorf("read %s: %w", path, err)
 	}
 	var doc settingsDoc
+	if len(bytes.TrimSpace(data)) == 0 {
+		return settingsDoc{}, nil // an empty file is an empty object, e.g. one just created by hand
+	}
 	if err := json.Unmarshal(data, &doc); err != nil {
 		return nil, fmt.Errorf("parse %s: %w", path, err)
 	}

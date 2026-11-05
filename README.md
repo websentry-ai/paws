@@ -22,11 +22,12 @@ Apache-2.0 · Claude Code · no account.
 ## Ten minutes
 
 ```bash
-npx unbound-paws init      # registers the hook in this repo's .claude/settings.json
+npm i -g unbound-paws      # puts `paws` on your PATH
+paws init                  # registers the hook in this repo's .claude/settings.json
 paws add writing           # humanizer before PR bodies, commits and MCP sends
 ```
 
-(If `paws` isn't on your PATH yet, it's at `~/.paws/bin/paws`.)
+(`npx unbound-paws init` works too; then run commands as `npx unbound-paws <command>`.)
 
 Now ask Claude Code for a commit or a PR. You'll see:
 
@@ -167,25 +168,26 @@ only for `localhost`, `127.0.0.1` or `::1`, with a warning.
 ## Install details
 
 ```bash
-npx unbound-paws init            # this repo
-npx unbound-paws init --global   # every repo for this user (~/.claude/settings.json)
-paws uninstall [--global]       # removes the hook (and the paws skill, if unedited)
+npm i -g unbound-paws
+paws init                        # this repo (or this folder, outside a repo)
+paws init --global               # every repo for this user (~/.claude/settings.json)
+npm i -g unbound-paws@latest     # upgrade: also replaces ~/.paws/bin/paws
+paws uninstall [--global]        # removes the hook (and the paws skill, if unedited)
 ```
 
 The npm package downloads the release binary for your platform and checks it
 against the release's `checksums.txt`. `paws init` copies the binary to
 `~/.paws/bin/paws` and registers it as `"$HOME/.paws/bin/paws" gate`, so
 clearing the npm cache never breaks the hook and a committed
-`.claude/settings.json` works for every teammate; re-run `init` after an
-upgrade. All repos share that one
-binary. From source: `go build -o paws ./cmd/paws && ./paws init`.
+`.claude/settings.json` works for every teammate. The hook runs that binary
+directly (about 7 ms a call; through the npm wrapper it would be about
+125 ms). Installing a newer npm package replaces it; so does re-running
+`init`. All repos share that one binary. From source: `go build -o paws ./cmd/paws && ./paws init`.
 
-Upgrading from 0.1: re-run `paws init` once. 0.2 registers SessionStart
-(for `session-start` rules) and PostToolUse and Stop (for local telemetry,
-async), and drops the UserPromptSubmit hook. 0.2 runs `require-skill` rules
-only; a rule using an older action is skipped with a notice. From a 0.2
-release candidate: re-run `paws init`, then `paws add <pack>` for each
-installed pack.
+Upgrading from 0.3.0: nothing to do; the old `PAWS_MANAGED=1 …` hook entry
+keeps working, and `paws init` rewrites it. `init` no longer installs the
+paws skill: run `paws skill` if you want it. From 0.1 or 0.2: re-run
+`paws init` once, then `paws add <pack>` for each installed pack.
 
 `$PAWS_HOME`, when set to an absolute path, replaces `~/.paws`. Claude Code
 passes a settings file's `env` to hooks, so a repo's `.claude/settings.json`

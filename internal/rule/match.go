@@ -9,9 +9,12 @@ import (
 const gitAnchor = `(^|[;&|\n])\s*`
 const gitFlags = `(\s+-C\s+\S+|\s+--?[\w-]+(=\S+)?)*`
 
+// gitEnd ends the subcommand word; \b alone would let `commit-tree` and `commit-graph` match.
+const gitEnd = `($|[\s;&|])`
+
 var (
-	gitCommitRe = regexp.MustCompile(gitAnchor + `git` + gitFlags + `\s+commit\b`)
-	gitPushRe   = regexp.MustCompile(gitAnchor + `git` + gitFlags + `\s+push\b`)
+	gitCommitRe = regexp.MustCompile(gitAnchor + `git` + gitFlags + `\s+commit` + gitEnd)
+	gitPushRe   = regexp.MustCompile(gitAnchor + `git` + gitFlags + `\s+push` + gitEnd)
 )
 
 // fileTools carry a file path target (file_path, notebook_path), the only tools a file_glob can match.

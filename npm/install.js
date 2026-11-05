@@ -184,7 +184,7 @@ if (require.main === module) {
       try {
         refreshHookCopy(bin);
       } catch (err) {
-        console.warn(`unbound-paws: could not update the paws hook binary: ${err.message} (run \`paws init\` again)`);
+        console.warn(`unbound-paws: could not update the paws hook binary: ${err.message} (run \`unbound-paws init\` again)`);
       }
     },
     (err) => {

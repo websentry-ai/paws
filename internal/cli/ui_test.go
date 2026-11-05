@@ -81,13 +81,16 @@ func TestUIPortalView(t *testing.T) {
 	t.Setenv("PAWS_HOME", home)
 	os.WriteFile(filepath.Join(home, "credentials.json"), []byte(`{"api":"https://paws-api.getunbound.ai","token":"t","account_email":"a@example.com"}`), 0o600)
 	os.MkdirAll(filepath.Join(home, "portal"), 0o700)
-	os.WriteFile(filepath.Join(home, "portal", "state.json"), []byte(`{"skills":["humanizer"]}`), 0o600)
+	os.WriteFile(filepath.Join(home, "portal", "state.json"), []byte(`{"skills":["humanizer","humanizer--x"]}`), 0o600)
+	// Skill humanizer--x's file also starts with "humanizer--"; it must not count for humanizer.
+	os.WriteFile(filepath.Join(home, "portal", "humanizer--x--3.md"), []byte("---\nname: humanizer--x--3\nevent: pre-tool\nmatcher:\n  tool: Bash\naction:\n  type: require-skill\n  skill: humanizer--x\n---\n"), 0o600)
 	os.WriteFile(filepath.Join(home, "portal", "humanizer--7.md"), []byte("---\nname: humanizer--7\nevent: pre-tool\nmatcher:\n  tool: Bash\naction:\n  type: require-skill\n  skill: humanizer\n---\n"), 0o600)
 	v := portalView()
 	if !v.LoggedIn || v.Account != "a@example.com" || v.SyncMinutes != 10 {
 		t.Errorf("login state: %+v", v)
 	}
-	if len(v.Skills) != 1 || v.Skills[0].Name != "humanizer" || len(v.Skills[0].Bindings) != 1 || v.Skills[0].Bindings[0].Name != "humanizer--7" {
+	if len(v.Skills) != 2 || v.Skills[0].Name != "humanizer" || len(v.Skills[0].Bindings) != 1 || v.Skills[0].Bindings[0].Name != "humanizer--7" ||
+		len(v.Skills[1].Bindings) != 1 || v.Skills[1].Bindings[0].Name != "humanizer--x--3" {
 		t.Errorf("portal skills: %+v", v.Skills)
 	}
 }

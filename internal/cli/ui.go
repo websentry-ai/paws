@@ -15,6 +15,7 @@ import (
 
 	"github.com/websentry-ai/paws"
 	"github.com/websentry-ai/paws/internal/pack"
+	"github.com/websentry-ai/paws/internal/rule"
 )
 
 // UI serves the local picker: `paws ui [--port N] [--no-open]`. Read-only by design: it shows
@@ -198,8 +199,13 @@ func portalView() portalStatus {
 		sv := portalSkillView{Name: name, Bindings: []installedBinding{}}
 		files, _ := filepath.Glob(filepath.Join(dir, name+"--*.md"))
 		for _, f := range files {
-			rn := ruleName(f)
-			sv.Bindings = append(sv.Bindings, installedBinding{Path: filepath.Base(f), Name: rn, Fires: fires[rn]})
+			// The prefix also matches skill foo--bar's files for skill foo; the rule names its skill.
+			data, err := os.ReadFile(f)
+			r, perr := rule.Parse(data, f)
+			if err != nil || perr != nil || r.Action.Skill != name {
+				continue
+			}
+			sv.Bindings = append(sv.Bindings, installedBinding{Path: filepath.Base(f), Name: r.Name, Fires: fires[r.Name]})
 		}
 		v.Skills = append(v.Skills, sv)
 	}

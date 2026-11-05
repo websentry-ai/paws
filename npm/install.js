@@ -125,12 +125,20 @@ function newer(a, b) {
 function refreshHookCopy(bin) {
   const home = process.env.PAWS_HOME && path.isAbsolute(process.env.PAWS_HOME) ? process.env.PAWS_HOME : path.join(os.homedir(), ".paws");
   const copy = path.join(home, "bin", EXE);
-  // Windows has no owner check to make, and an elevated install must not run a user-writable binary:
-  // there `npx unbound-paws@latest init` does the upgrade.
-  if (process.platform === "win32" || !fs.existsSync(copy)) return;
-  // Never run or replace another user's copy, e.g. root (`sudo npm i -g`) touching a binary the user
-  // can write to.
-  if (fs.statSync(copy).uid !== process.getuid()) return;
+  // Only an unprivileged install by the copy's owner refreshes it: never root (`sudo npm i -g` would
+  // run or write through a binary and folder the user controls), never Windows (no owner to check;
+  // `npx unbound-paws@latest init` upgrades there), never through a symlink.
+  if (process.platform === "win32" || process.getuid() === 0) return;
+  const dir = path.dirname(copy);
+  let st, dst;
+  try {
+    st = fs.lstatSync(copy);
+    dst = fs.lstatSync(dir);
+  } catch {
+    return; // no copy yet
+  }
+  const uid = process.getuid();
+  if (!st.isFile() || st.uid !== uid || !dst.isDirectory() || dst.uid !== uid || (dst.mode & 0o022) !== 0) return;
   let current = null;
   try {
     current = execFileSync(copy, ["version"], { encoding: "utf8", timeout: 5000 });
@@ -142,8 +150,8 @@ function refreshHookCopy(bin) {
     // A source build (0.2.0-dev, dev) is someone's own; leave it.
     if (!m || /dev/.test(m[1]) || !newer(pkg.version, m[1])) return;
   }
-  const staged = path.join(path.dirname(copy), `.${EXE}.${process.pid}`);
-  fs.copyFileSync(bin, staged);
+  const staged = path.join(dir, `.${EXE}.${process.pid}`);
+  fs.copyFileSync(bin, staged, fs.constants.COPYFILE_EXCL); // never through a planted file or link
   fs.chmodSync(staged, 0o755);
   fs.renameSync(staged, copy);
   console.log(`updated the paws hook binary at ${copy}`);

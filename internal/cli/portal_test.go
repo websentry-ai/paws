@@ -473,3 +473,14 @@ func TestLoginWithoutAccountEmail(t *testing.T) {
 		t.Errorf("sync exit %d, output %q", code, out)
 	}
 }
+
+// A 403 web page means something in front of the portal refused the request, not the portal.
+func TestPortalErrorNamesAFirewallBlock(t *testing.T) {
+	err := portalError(403, []byte("<!DOCTYPE html>\n<html><title>Attention Required</title></html>"))
+	if err == nil || !strings.Contains(err.Error(), "blocked before it reached the paws portal") {
+		t.Errorf("got %v", err)
+	}
+	if err := portalError(403, []byte(`{"error":"denied"}`)); err == nil || !strings.Contains(err.Error(), "denied") {
+		t.Errorf("a portal 403 should keep its own message, got %v", err)
+	}
+}

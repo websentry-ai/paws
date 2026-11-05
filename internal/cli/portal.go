@@ -168,6 +168,10 @@ func portalError(status int, body []byte) error {
 	if json.Unmarshal(body, &e) == nil && e.Error != "" {
 		return fmt.Errorf("portal: %s (HTTP %d)", printable(e.Error), status)
 	}
+	if status == http.StatusForbidden && bytes.Contains(bytes.ToLower(body[:min(len(body), 512)]), []byte("<html")) {
+		// A web page, not the portal's JSON: a firewall or proxy in front of it refused the request.
+		return fmt.Errorf("portal: the request was blocked before it reached the paws portal (HTTP 403 from a firewall or proxy); try again later, and report it if it keeps happening")
+	}
 	return fmt.Errorf("portal: unexpected HTTP %d", status)
 }
 

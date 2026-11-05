@@ -7,7 +7,7 @@ coding agent decides on every turn whether it's relevant enough to load.
 Often it decides no: the PR body goes out with the AI tells, the tests get
 skipped, the bucket gets created without tags. Installed is not applied.
 
-paws is a small local hook for Claude Code that fixes that one thing. When a
+paws is a small local hook for your coding agent that fixes that one thing. When a
 bound action is about to run (a commit, a PR, a Slack send, an S3 bucket),
 paws checks the session transcript for the skill. If it isn't loaded, the call
 is denied once with a message naming the skill; the agent loads it and
@@ -17,17 +17,18 @@ paws guarantees the skill was loaded; the skill governs the behaviour. The
 hook never rewrites tool input or reads tool output, and the gate that decides
 each tool call never calls the network.
 
-Apache-2.0 · Claude Code · no account.
+Apache-2.0 · no account · Claude Code today; other coding agents to follow.
 
 ## Ten minutes
 
 ```bash
-npx unbound-paws init          # registers the hook in this repo's .claude/settings.json
-npx unbound-paws add writing   # humanizer before PR bodies, commits and MCP sends
+npm i -g unbound-paws      # puts `paws` on your PATH
+paws init                  # registers the hook in this repo's .claude/settings.json
+paws add writing           # humanizer before PR bodies, commits and MCP sends
 ```
 
-Every command runs as `npx unbound-paws <command>` (or `paws <command>` if you
-installed it with `npm i -g unbound-paws`); the examples below use `paws` for short.
+(`npx unbound-paws <command>` works without installing, but every run checks
+the npm registry.)
 
 Now ask Claude Code for a commit or a PR. You'll see:
 
@@ -168,10 +169,12 @@ only for `localhost`, `127.0.0.1` or `::1`, with a warning.
 ## Install details
 
 ```bash
-npx unbound-paws init               # this repo (or this folder, outside a repo)
-npx unbound-paws init --global      # every repo for this user (~/.claude/settings.json)
-npx unbound-paws@latest init        # upgrade
-npx unbound-paws uninstall [--global]   # removes the hook (and the paws skill, if unedited)
+npm i -g unbound-paws
+paws init                        # this repo (or this folder, outside a repo)
+paws init --global               # every repo for this user (~/.claude/settings.json)
+npm i -g unbound-paws@latest     # upgrade (on Windows, run `paws init` after it)
+paws uninstall [--global]        # removes the hook (and the paws skill, if unedited)
+npm rm -g unbound-paws
 ```
 
 The npm package downloads the release binary for your platform and checks it

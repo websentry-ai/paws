@@ -103,14 +103,19 @@ async function ensureBinary() {
   return BINARY;
 }
 
-// newer reports whether version a (x.y.z) is newer than b.
+// newer reports whether version a (x.y.z[-pre]) is newer than b, semver style: a release is newer
+// than its own prereleases (0.4.0 > 0.4.0-rc.1).
 function newer(a, b) {
-  const pa = a.split(/[.-]/).map(Number);
-  const pb = b.split(/[.-]/).map(Number);
+  const [ca, prea = ""] = a.split(/-(.*)/);
+  const [cb, preb = ""] = b.split(/-(.*)/);
+  const pa = ca.split(".").map(Number);
+  const pb = cb.split(".").map(Number);
   for (let i = 0; i < 3; i++) {
     if (pa[i] !== pb[i]) return pa[i] > pb[i];
   }
-  return false;
+  if (prea === preb) return false;
+  if (!prea || !preb) return !prea;
+  return prea.localeCompare(preb, undefined, { numeric: true }) > 0;
 }
 
 // refreshHookCopy upgrades the copy `paws init` made for the hook (<paws home>/bin), if there is one,
@@ -128,7 +133,7 @@ function refreshHookCopy(bin) {
     // Doesn't run: replace it.
   }
   if (current !== null) {
-    const m = /^paws (\d+\.\d+\.\d+)/.exec(current.trim());
+    const m = /^paws (\d+\.\d+\.\d+(-\S+)?)$/.exec(current.trim());
     if (!m || !newer(pkg.version, m[1])) return;
   }
   const staged = path.join(path.dirname(copy), `.${EXE}.${process.pid}`);

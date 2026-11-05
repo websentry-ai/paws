@@ -151,10 +151,13 @@ func TestSkillInstallsAndReinstalls(t *testing.T) {
 	if data, _ := os.ReadFile(skillMD); !strings.Contains(string(data), "name: paws") {
 		t.Error("reinstall kept the edited copy")
 	}
-	// Uninstall removes the unedited copy.
-	removePawsSkill(settings)
-	if _, err := os.Stat(filepath.Dir(skillMD)); err == nil {
-		t.Error("uninstall should remove the paws skill it installed")
+	// Uninstall removes the unedited copy, even though paws was never registered here, and the
+	// folders it leaves empty.
+	if code := Uninstall([]string{"--settings", settings}); code != 0 {
+		t.Fatalf("uninstall exit %d", code)
+	}
+	if _, err := os.Stat(filepath.Join(dir, ".claude")); err == nil {
+		t.Error("uninstall should remove the paws skill and the empty .claude folder")
 	}
 
 	// A user's own paws skill (no paws marker) is never replaced.

@@ -88,25 +88,26 @@ func Uninstall(args []string) int {
 		fmt.Fprintf(os.Stderr, "paws: %s: %v\n", settingsPath, err)
 		return 1
 	}
-	if !changed {
+	if changed {
+		if err := writeSettings(settingsPath, doc); err != nil {
+			fmt.Fprintf(os.Stderr, "paws: %v\n", err)
+			return 1
+		}
+		fmt.Printf("Removed paws from %s\n", settingsPath)
+	} else {
 		fmt.Printf("paws is not registered in %s\n", settingsPath)
-		return 0
 	}
-	if err := writeSettings(settingsPath, doc); err != nil {
-		fmt.Fprintf(os.Stderr, "paws: %v\n", err)
-		return 1
-	}
-	fmt.Printf("Removed paws from %s\n", settingsPath)
+	// The skill goes too, even when `paws skill` ran without init.
 	removePawsSkill(settingsPath)
-	if len(doc) == 0 {
-		// Nothing but paws was in it: don't leave an empty settings.json and empty folders behind.
-		os.Remove(settingsPath)
-		if skillsDir := pawsSkillDir(settingsPath); skillsDir != "" {
-			os.Remove(skillsDir)
-		}
-		if filepath.Base(filepath.Dir(settingsPath)) == ".claude" {
-			os.Remove(filepath.Dir(settingsPath))
-		}
+	if changed && len(doc) == 0 {
+		os.Remove(settingsPath) // nothing but paws was in it
+	}
+	// Don't leave empty folders behind; os.Remove keeps a folder that still has anything in it.
+	if skillsDir := pawsSkillDir(settingsPath); skillsDir != "" {
+		os.Remove(skillsDir)
+	}
+	if filepath.Base(filepath.Dir(settingsPath)) == ".claude" {
+		os.Remove(filepath.Dir(settingsPath))
 	}
 	return 0
 }

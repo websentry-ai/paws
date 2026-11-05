@@ -36,7 +36,7 @@ func Init(args []string) int {
 	}
 	// Project settings get the portable "$HOME/..." form; user-level settings get the absolute
 	// path, so a repo's settings env can't repoint the hook that runs everywhere.
-	command := hookCommand(bin, settingsPath != filepath.Join(userClaudeDir(), "settings.json"))
+	command := hookCommand(bin, !samePath(settingsPath, filepath.Join(userClaudeDir(), "settings.json")))
 
 	doc, err := readSettings(settingsPath)
 	if err != nil {
@@ -66,6 +66,19 @@ func runPaws() string {
 		return "paws"
 	}
 	return "npx unbound-paws"
+}
+
+// samePath reports whether a and b name the same file once made absolute and their folders'
+// symlinks resolved (the file itself may not exist yet).
+func samePath(a, b string) bool {
+	resolve := func(p string) string {
+		p, _ = filepath.Abs(p)
+		if dir, err := filepath.EvalSymlinks(filepath.Dir(p)); err == nil {
+			p = filepath.Join(dir, filepath.Base(p))
+		}
+		return p
+	}
+	return resolve(a) == resolve(b)
 }
 
 // hookCommand is the settings.json command that runs bin as the gate. With portable, a binary

@@ -198,3 +198,22 @@ func TestGlobalSettingsFollowClaudeConfigDir(t *testing.T) {
 		t.Errorf("without CLAUDE_CONFIG_DIR: got %q", got)
 	}
 }
+
+func TestSamePathSeesThroughRelativeAndSymlinkedPaths(t *testing.T) {
+	dir := t.TempDir()
+	real := filepath.Join(dir, "claude")
+	os.MkdirAll(real, 0o755)
+	link := filepath.Join(dir, "link")
+	if err := os.Symlink(real, link); err != nil {
+		t.Skip(err)
+	}
+	t.Chdir(real)
+	for _, p := range []string{"settings.json", filepath.Join(link, "settings.json"), filepath.Join(real, ".", "settings.json")} {
+		if !samePath(p, filepath.Join(real, "settings.json")) {
+			t.Errorf("samePath(%q) = false", p)
+		}
+	}
+	if samePath(filepath.Join(dir, "other", "settings.json"), filepath.Join(real, "settings.json")) {
+		t.Error("different folders compared equal")
+	}
+}

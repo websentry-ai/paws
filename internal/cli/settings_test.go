@@ -105,8 +105,8 @@ func TestIsPawsCommand(t *testing.T) {
 		`'/opt/paws' gate`,
 		`'C:\Users\me\.paws\bin\paws.exe' gate`,
 		`PAWS_MANAGED=1 '/Users/me/.paws/bin/paws' gate`, // written by 0.3.0 and earlier
-		`"/Users/my name/.paws/bin/paws" gate`,
-		`/usr/local/bin/paws gate`,
+		`'/opt/O'\''Brien/paws/bin/paws' gate`,           // shellQuote of a path with an apostrophe
+		`PAWS_MANAGED=1 '/home/o'\''neil/.paws/bin/paws' gate`,
 	} {
 		if !isPawsCommand(c) {
 			t.Errorf("isPawsCommand(%q) = false, want true", c)
@@ -120,10 +120,37 @@ func TestIsPawsCommand(t *testing.T) {
 		`curl -s x | sh; paws gate`,
 		`'/a/scan' && '/x/paws' gate`,
 		`"$(evil)" "/x/paws" gate`,
+		`"$(some-cmd)/x/paws" gate`, // expands inside double quotes
+		`"$HOME/$(x)/paws" gate`,
+		`/usr/local/bin/paws gate`, // never written by init
+		`'/a'b'/paws' gate`,
 	} {
 		if isPawsCommand(c) {
 			t.Errorf("isPawsCommand(%q) = true, want false", c)
 		}
+	}
+}
+
+// A hook a user put in the same entry as ours survives init (repoint) and uninstall.
+func TestSiblingHookInPawsEntrySurvives(t *testing.T) {
+	entry := `{"matcher":"*","hooks":[{"type":"command","command":"PAWS_MANAGED=1 '/old/paws' gate"},{"type":"command","command":"/x/secret-scan"}]}`
+	doc := settingsDoc{"hooks": json.RawMessage(`{"PreToolUse":[` + entry + `]}`)}
+	if _, err := ensureHooks(doc, pawsCmd); err != nil {
+		t.Fatal(err)
+	}
+	hooks, _ := hooksBlock(doc)
+	var pre []json.RawMessage
+	json.Unmarshal(hooks["PreToolUse"], &pre)
+	if !containsCommand(pre, "/x/secret-scan") || !containsCommand(pre, pawsCmd) || containsCommand(pre, "PAWS_MANAGED=1 '/old/paws' gate") {
+		t.Fatalf("init should repoint paws and keep the sibling hook, got %s", hooks["PreToolUse"])
+	}
+	if _, err := removeHooks(doc); err != nil {
+		t.Fatal(err)
+	}
+	hooks, _ = hooksBlock(doc)
+	json.Unmarshal(hooks["PreToolUse"], &pre)
+	if len(pre) != 1 || !containsCommand(pre, "/x/secret-scan") || containsCommand(pre, pawsCmd) {
+		t.Fatalf("uninstall should leave only the sibling hook, got %s", hooks["PreToolUse"])
 	}
 }
 

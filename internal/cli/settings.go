@@ -84,16 +84,12 @@ func ensureHooks(doc settingsDoc, command string) (bool, error) {
 	}
 	changed := false
 	for _, event := range hook.RetiredEvents {
-		var list, kept []json.RawMessage
+		var list []json.RawMessage
 		if json.Unmarshal(hooks[event], &list) != nil {
 			continue
 		}
-		for _, entry := range list {
-			if !isPawsEntry(entry) {
-				kept = append(kept, entry)
-			}
-		}
-		if len(kept) == len(list) {
+		kept, stripped := stripPaws(list)
+		if !stripped {
 			continue
 		}
 		changed = true
@@ -122,7 +118,13 @@ func ensureHooks(doc settingsDoc, command string) (bool, error) {
 		case jsonEqual(list[idx], desired):
 			continue
 		default:
-			list[idx] = desired
+			// Repoint our hook; a hook someone else added to the same entry stays where it is.
+			if rest, _ := withoutPawsHooks(list[idx]); rest == nil {
+				list[idx] = desired
+			} else {
+				list[idx] = rest
+				list = append(list, desired)
+			}
 		}
 		changed = true
 		b, err := json.Marshal(list)
@@ -149,17 +151,11 @@ func removeHooks(doc settingsDoc) (bool, error) {
 		if err := json.Unmarshal(raw, &list); err != nil {
 			continue // not an entry list; leave it alone
 		}
-		var kept []json.RawMessage
-		for _, entry := range list {
-			if isPawsEntry(entry) {
-				changed = true
-				continue
-			}
-			kept = append(kept, entry)
-		}
-		if len(kept) == len(list) {
+		kept, stripped := stripPaws(list)
+		if !stripped {
 			continue
 		}
+		changed = true
 		if len(kept) == 0 {
 			delete(hooks, event)
 			continue
@@ -226,25 +222,75 @@ func isPawsEntry(entry json.RawMessage) bool {
 	return false
 }
 
+// stripPaws removes paws's hooks from an event's entry list, dropping entries left empty.
+func stripPaws(list []json.RawMessage) (kept []json.RawMessage, stripped bool) {
+	for _, entry := range list {
+		rest, had := withoutPawsHooks(entry)
+		stripped = stripped || had
+		if rest != nil {
+			kept = append(kept, rest)
+		}
+	}
+	return kept, stripped
+}
+
+// withoutPawsHooks returns entry minus paws's own hook objects and whether it had any; rest is
+// nil when nothing else was in it. A hook a user added beside ours in the same entry survives.
+func withoutPawsHooks(entry json.RawMessage) (rest json.RawMessage, had bool) {
+	var e map[string]json.RawMessage
+	var hooks []json.RawMessage
+	if json.Unmarshal(entry, &e) != nil || json.Unmarshal(e["hooks"], &hooks) != nil {
+		return entry, false
+	}
+	var kept []json.RawMessage
+	for _, h := range hooks {
+		var c struct {
+			Command string `json:"command"`
+		}
+		if json.Unmarshal(h, &c) == nil && isPawsCommand(c.Command) {
+			continue
+		}
+		kept = append(kept, h)
+	}
+	if len(kept) == len(hooks) {
+		return entry, false
+	}
+	if len(kept) == 0 {
+		return nil, true
+	}
+	e["hooks"], _ = json.Marshal(kept)
+	rest, _ = json.Marshal(e)
+	return rest, true
+}
+
 // legacyMarker prefixed hook commands written by paws 0.3.0 and earlier; still recognised so
 // init upgrades and uninstall removes those entries.
 const legacyMarker = "PAWS_MANAGED=1 "
 
-// isPawsCommand: exactly `<paws binary> gate`, the binary one quoted or bare path named paws
-// (paws.exe). A command that chains anything else (`scan; /x/paws gate`) is someone else's hook.
+// isPawsCommand recognises exactly the commands init writes: `"$HOME/<path>" gate` or a
+// shellQuote'd path then ` gate` (optionally after 0.3.0's marker), the binary named paws
+// (paws.exe). Nothing that can expand or chain (`"$(x)/paws"`, `scan; paws gate`) counts.
 func isPawsCommand(command string) bool {
 	prog, ok := strings.CutSuffix(strings.TrimPrefix(command, legacyMarker), " gate")
-	if !ok || prog == "" {
+	if !ok {
 		return false
 	}
-	if q := prog[0]; (q == '\'' || q == '"') && len(prog) >= 2 && prog[len(prog)-1] == q {
-		if prog = prog[1 : len(prog)-1]; strings.IndexByte(prog, q) >= 0 {
+	var path string
+	switch {
+	case strings.HasPrefix(prog, `"$HOME/`) && strings.HasSuffix(prog, `"`) && len(prog) > len(`"$HOME/"`):
+		path = prog[len(`"$HOME/`) : len(prog)-1]
+		if strings.ContainsAny(path, "\"$`\\") {
 			return false
 		}
-	} else if strings.ContainsAny(prog, " \t;&|$`<>()'\"") {
+	case strings.HasPrefix(prog, "'") && len(prog) >= 2:
+		path = strings.ReplaceAll(prog[1:len(prog)-1], `'\''`, "'")
+		if shellQuote(path) != prog {
+			return false
+		}
+	default:
 		return false
 	}
-	base := prog[strings.LastIndexAny(prog, `/\`)+1:]
+	base := path[strings.LastIndexAny(path, `/\`)+1:]
 	return base == "paws" || base == "paws.exe"
 }
 

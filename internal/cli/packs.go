@@ -213,6 +213,8 @@ func List(args []string) int {
 	scopes := []bool{false, true}
 	if f.project {
 		scopes = []bool{true}
+	} else if target(true).StateFile == target(false).StateFile {
+		scopes = []bool{false} // in $HOME outside a repo the project dir is ~/.paws itself
 	}
 	any := false
 	for _, project := range scopes {

@@ -97,11 +97,21 @@ echo "Installed $("$INSTALL_DIR/unbound-paws" version) at $INSTALL_DIR/unbound-p
 # that copy current too (only your own regular file, never through a link).
 # Like the npm install: only a newer release (or a copy that no longer runs) replaces it, never an
 # older pinned one, and a source build (a version with "dev" in it) is left alone.
-newer() { # is $1 (x.y.z[-pre]) newer than $2?
+newer() { # is $1 (x.y.z[-pre]) newer than $2? Semver order: 0.4.0 > 0.4.0-rc.10 > 0.4.0-rc.9.
   awk -v a="$1" -v b="$2" 'BEGIN {
-    split(a, pa, "-"); split(b, pb, "-"); split(pa[1], x, "."); split(pb[1], y, ".")
+    i = index(a, "-"); ca = i ? substr(a, 1, i - 1) : a; ra = i ? substr(a, i + 1) : ""
+    i = index(b, "-"); cb = i ? substr(b, 1, i - 1) : b; rb = i ? substr(b, i + 1) : ""
+    split(ca, x, "."); split(cb, y, ".")
     for (i = 1; i <= 3; i++) if (x[i] + 0 != y[i] + 0) exit !(x[i] + 0 > y[i] + 0)
-    exit !(pa[2] == "" && pb[2] != "")
+    if (ra == rb) exit 1
+    if (ra == "" || rb == "") exit !(ra == "")
+    n = split(ra, p, "."); m = split(rb, q, ".")
+    for (i = 1; i <= n && i <= m; i++) {
+      if (p[i] == q[i]) continue
+      if (p[i] ~ /^[0-9]+$/ && q[i] ~ /^[0-9]+$/) exit !(p[i] + 0 > q[i] + 0)
+      exit !(p[i] > q[i])
+    }
+    exit !(n > m)
   }'
 }
 hook_copy="${PAWS_HOME:-$HOME/.paws}/bin/paws"

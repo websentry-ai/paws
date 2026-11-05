@@ -317,3 +317,39 @@ func TestInitKeepsProjectAndGlobalOnOneLine(t *testing.T) {
 		t.Errorf("project init reused unbound-paws gate with no unbound-paws on PATH")
 	}
 }
+
+// npx puts its own node_modules/.bin first on PATH; an installed unbound-paws further along still
+// counts, so a project init through npx reuses the global `unbound-paws gate`.
+func TestCliPathLooksPastNpxBin(t *testing.T) {
+	dir := t.TempDir()
+	npxBin := filepath.Join(dir, "_npx", "x", "node_modules", ".bin")
+	local := filepath.Join(dir, ".local", "bin")
+	for _, d := range []string{npxBin, local} {
+		os.MkdirAll(d, 0o755)
+		os.WriteFile(filepath.Join(d, "unbound-paws"), []byte("#!/bin/sh\n"), 0o755)
+	}
+	t.Setenv("PATH", npxBin+string(os.PathListSeparator)+local)
+	if got := cliPath(); got != filepath.Join(local, "unbound-paws") {
+		t.Errorf("cliPath() = %q, want the installed one in %s", got, local)
+	}
+	t.Setenv("PATH", npxBin)
+	if got := cliPath(); got != "" {
+		t.Errorf("cliPath() with only npx's .bin = %q, want empty", got)
+	}
+}
+
+// Off PATH and not installed anywhere, init says how to install unbound-paws.
+func TestInitOffPathSaysHowToInstall(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	t.Setenv("PAWS_HOME", filepath.Join(home, ".paws"))
+	t.Setenv("CLAUDE_CONFIG_DIR", filepath.Join(home, ".claude"))
+	t.Setenv("PATH", "")
+	repo := filepath.Join(home, "repo")
+	os.MkdirAll(filepath.Join(repo, ".git"), 0o755)
+	t.Chdir(repo)
+	code, out := captureStdout(t, func() int { return Init(nil) })
+	if code != 0 || !strings.Contains(out, "install.sh | bash") {
+		t.Errorf("init off PATH should say how to install: %d %q", code, out)
+	}
+}

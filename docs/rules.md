@@ -24,7 +24,7 @@ Loads humanizer before a PR body goes out.
 | `event:` | Fires on | Target the regex sees |
 |---|---|---|
 | `pre-tool` | any tool call | see the table below |
-| `pre-commit` | a Bash call that runs `git commit` (flags and `-C dir` allowed) | the command |
+| `pre-commit` | a Bash call that runs `git commit` or `git commit-tree` (flags and `-C dir` allowed; not `commit-graph`) | the command |
 | `pre-push` | a Bash call that runs `git push` | the command |
 | `session-start` | a session starting | `startup`, `resume`, `clear` or `compact` |
 

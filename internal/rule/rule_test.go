@@ -130,7 +130,7 @@ func TestMatchesGitSyntheticEvents(t *testing.T) {
 		t.Error("pre-commit should match git commit")
 	}
 	for c, want := range map[string]bool{
-		"git commit-tree HEAD^{tree} -m x": false, "git commit-graph write": false, "git commit": true,
+		"git commit-tree HEAD^{tree} -m x": true, "git commit-graph write": false, "git commit": true,
 		"git commit>/dev/null -m x": true, "git commit</dev/null": true,
 	} {
 		if got := commit.Matches("Bash", c); got != want {

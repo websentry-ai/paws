@@ -126,6 +126,9 @@ function refreshHookCopy(bin) {
   const home = process.env.PAWS_HOME && path.isAbsolute(process.env.PAWS_HOME) ? process.env.PAWS_HOME : path.join(os.homedir(), ".paws");
   const copy = path.join(home, "bin", EXE);
   if (!fs.existsSync(copy)) return;
+  // Never run or replace another user's copy, e.g. root (`sudo npm i -g`) touching a binary the user
+  // can write to.
+  if (process.getuid && fs.statSync(copy).uid !== process.getuid()) return;
   let current = null;
   try {
     current = execFileSync(copy, ["version"], { encoding: "utf8", timeout: 5000 });

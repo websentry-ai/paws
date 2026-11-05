@@ -213,11 +213,9 @@ func List(args []string) int {
 		return 2
 	}
 	fires := fireCounts(filepath.Join(gate.UserDir(), "audit.log"))
-	scopes := []bool{false, true}
+	scopes := packScopes()
 	if f.project {
 		scopes = []bool{true}
-	} else if target(true).StateFile == target(false).StateFile {
-		scopes = []bool{false} // in $HOME outside a repo the project dir is ~/.paws itself
 	}
 	any := false
 	for _, project := range scopes {
@@ -263,6 +261,15 @@ func List(args []string) int {
 		fmt.Printf("no packs installed (browse with `%s search`)\n", runPaws())
 	}
 	return 0
+}
+
+// packScopes are the install targets to show, user then project, once each: in $HOME outside a
+// repo the project dir is ~/.paws itself.
+func packScopes() []bool {
+	if target(true).StateFile == target(false).StateFile {
+		return []bool{false}
+	}
+	return []bool{false, true}
 }
 
 func ruleName(path string) string {

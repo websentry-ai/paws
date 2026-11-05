@@ -140,7 +140,7 @@ func installedView() []installedPack {
 		fires[r.Rule] = r.Fires
 	}
 	out := []installedPack{}
-	for _, project := range []bool{false, true} {
+	for _, project := range packScopes() {
 		t := target(project)
 		state, err := pack.LoadState(t.StateFile)
 		if err != nil {

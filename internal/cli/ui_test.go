@@ -116,3 +116,17 @@ func TestListenUIDefaultPortFallsBack(t *testing.T) {
 		t.Error("an explicit --port that's taken should fail, not move")
 	}
 }
+
+// In $HOME outside a repo the project and user targets are both ~/.paws: list each pack once.
+func TestInstalledViewListsHomePacksOnce(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	t.Setenv("PAWS_HOME", "")
+	t.Setenv("CLAUDE_CONFIG_DIR", "")
+	t.Chdir(home)
+	os.MkdirAll(filepath.Join(home, ".paws"), 0o755)
+	os.WriteFile(filepath.Join(home, ".paws", "installed.yaml"), []byte("packs:\n  writing:\n    at: \"2026-11-05T00:00:00Z\"\n"), 0o644)
+	if got := installedView(); len(got) != 1 || got[0].Scope != "user" {
+		t.Fatalf("want writing once, as user; got %+v", got)
+	}
+}

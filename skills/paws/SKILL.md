@@ -29,8 +29,9 @@ reads every rule on every tool call, so a saved rule is live.
    the skill, the second shows neither, and no `! skipped` line appears.
 5. **Report** the path and what the rule does.
 
-Run each `unbound-paws explain` as its own plain Bash call, nothing chained. If `paws`
-isn't on PATH, use `$PAWS_HOME/bin/paws` or `~/.paws/bin/paws`. If the new
+Run each `unbound-paws explain` as its own plain Bash call, nothing chained. If
+`unbound-paws` isn't on PATH, use the binary the hook runs: the path in the
+`gate` command of `.claude/settings.json` (often `~/.paws/bin/paws`). If the new
 rule denies your own check, that deny proves the match; check the near-miss.
 
 ```markdown

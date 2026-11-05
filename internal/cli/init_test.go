@@ -283,7 +283,11 @@ func TestInitKeepsProjectAndGlobalOnOneLine(t *testing.T) {
 	t.Setenv("PAWS_HOME", filepath.Join(home, ".paws"))
 	cfg := filepath.Join(home, ".claude")
 	t.Setenv("CLAUDE_CONFIG_DIR", cfg)
-	t.Setenv("PATH", "")
+	// unbound-paws is installed on PATH (some other build), but init runs off PATH (npx).
+	pathBin := filepath.Join(home, "path-bin")
+	os.MkdirAll(pathBin, 0o755)
+	os.WriteFile(filepath.Join(pathBin, "unbound-paws"), []byte("#!/bin/sh\n"), 0o755)
+	t.Setenv("PATH", pathBin)
 	doc := settingsDoc{}
 	ensureHooks(doc, "unbound-paws gate")
 	writeSettings(filepath.Join(cfg, "settings.json"), doc)
@@ -296,11 +300,20 @@ func TestInitKeepsProjectAndGlobalOnOneLine(t *testing.T) {
 	if got := pawsCommandIn(filepath.Join(repo, ".claude", "settings.json")); got != "unbound-paws gate" {
 		t.Errorf("project init should reuse the global line, got %q", got)
 	}
-
 	// A global init (off PATH here) next to a project line it can't match says so.
+	t.Setenv("PATH", "")
 	os.Remove(filepath.Join(cfg, "settings.json"))
 	code, out := captureStdout(t, func() int { return Init([]string{"--global"}) })
 	if code != 0 || !strings.Contains(out, "run `unbound-paws init` there too") {
 		t.Errorf("global init should warn about the differing project line: %d %q", code, out)
+	}
+	// With unbound-paws gone from PATH, reusing the global line would register a hook that can't
+	// start: keep the working fallback instead.
+	doc = settingsDoc{}
+	ensureHooks(doc, "unbound-paws gate")
+	writeSettings(filepath.Join(cfg, "settings.json"), doc)
+	Init(nil)
+	if got := pawsCommandIn(filepath.Join(repo, ".claude", "settings.json")); got == "unbound-paws gate" {
+		t.Errorf("project init reused unbound-paws gate with no unbound-paws on PATH")
 	}
 }

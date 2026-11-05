@@ -41,10 +41,10 @@ func Init(args []string) int {
 		}
 		command = hookCommand(bin)
 	}
-	// Project and user settings must carry the same line or Claude Code runs the gate twice. A
-	// user-level `unbound-paws gate` means it's on PATH where Claude Code runs, so reuse it.
+	// Project and user settings must carry the same line or Claude Code runs the gate twice: reuse
+	// a user-level `unbound-paws gate`, as long as unbound-paws is still installed on PATH.
 	user := filepath.Join(userClaudeDir(), "settings.json")
-	if filepath.Clean(settingsPath) != filepath.Clean(user) && pawsCommandIn(user) == cliName+" gate" {
+	if filepath.Clean(settingsPath) != filepath.Clean(user) && pawsCommandIn(user) == cliName+" gate" && cliPath() != "" {
 		command = cliName + " gate"
 	}
 
@@ -107,13 +107,22 @@ func pawsCommandIn(path string) string {
 // cliName is the command people type and the hook runs: the installer (and npm) put it on PATH.
 const cliName = "unbound-paws"
 
+// cliPath is where `unbound-paws` resolves on PATH, or "". npx (and npm run) put a
+// node_modules/.bin on PATH only for that run; Claude Code won't have it, so it doesn't count.
+func cliPath() string {
+	p, err := exec.LookPath(cliName)
+	if err != nil || filepath.Base(filepath.Dir(p)) == ".bin" && filepath.Base(filepath.Dir(filepath.Dir(p))) == "node_modules" {
+		return ""
+	}
+	return p
+}
+
 // onPath reports whether init is running as the unbound-paws on PATH, so the hook can name it
 // instead of copying the binary: true for the installer's copy and a native npm install, false
 // for npx, a source build, or an older unbound-paws earlier on PATH.
 func onPath(self string) bool {
-	p, err := exec.LookPath(cliName)
-	// npx (and npm run) put a node_modules/.bin on PATH only for that run; Claude Code won't have it.
-	if err != nil || filepath.Base(filepath.Dir(p)) == ".bin" && filepath.Base(filepath.Dir(filepath.Dir(p))) == "node_modules" {
+	p := cliPath()
+	if p == "" {
 		return false
 	}
 	a, err := filepath.EvalSymlinks(p)

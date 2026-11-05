@@ -180,9 +180,9 @@ npm rm -g unbound-paws
 The npm package downloads the release binary for your platform and checks it
 against the release's `checksums.txt`. `paws init` copies the binary to
 `~/.paws/bin/paws` and registers it, so clearing the npm cache never breaks
-the hook. In a project's `.claude/settings.json` the command is
-`"$HOME/.paws/bin/paws" gate`, so the committed file works for every
-teammate; `--global` writes the absolute path. The hook runs that binary
+the hook. The command is `"$HOME/.paws/bin/paws" gate`, so a committed
+`.claude/settings.json` works for every teammate, and a project and a
+`--global` registration are the same hook (Claude Code runs it once). The hook runs that binary
 directly (about 7 ms a call; through npx or the npm wrapper it would be
 125 ms or more). Installing a newer npm package replaces it (never an older
 one); so does re-running `init`. All repos share that one binary. From source: `go build -o paws ./cmd/paws && ./paws init`.

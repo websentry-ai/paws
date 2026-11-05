@@ -1,6 +1,7 @@
 package cli
 
 import (
+	"encoding/json"
 	"os"
 	"path/filepath"
 	"strings"
@@ -89,16 +90,13 @@ func TestInstallSelfWithoutUserDirUsesSelf(t *testing.T) {
 func TestHookCommandUsesHomeVariable(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("HOME", home)
-	if got, want := hookCommand(filepath.Join(home, ".paws", "bin", "paws"), true), `"$HOME/.paws/bin/paws" gate`; got != want {
+	if got, want := hookCommand(filepath.Join(home, ".paws", "bin", "paws")), `"$HOME/.paws/bin/paws" gate`; got != want {
 		t.Errorf("binary under HOME: got %s, want %s", got, want)
 	}
-	if got, want := hookCommand(filepath.Join(home, ".paws", "bin", "paws"), false), shellQuote(filepath.Join(home, ".paws", "bin", "paws"))+" gate"; got != want {
-		t.Errorf("user-level settings get the absolute path: got %s, want %s", got, want)
-	}
-	if got, want := hookCommand("/opt/paws", true), `'/opt/paws' gate`; got != want {
+	if got, want := hookCommand("/opt/paws"), `'/opt/paws' gate`; got != want {
 		t.Errorf("binary outside HOME: got %s, want %s", got, want)
 	}
-	if got, want := hookCommand(filepath.Join(home, "we$ird", "paws"), true), shellQuote(filepath.Join(home, "we$ird", "paws"))+" gate"; got != want {
+	if got, want := hookCommand(filepath.Join(home, "we$ird", "paws")), shellQuote(filepath.Join(home, "we$ird", "paws"))+" gate"; got != want {
 		t.Errorf("path a double-quoted string would expand: got %s, want %s", got, want)
 	}
 }
@@ -199,21 +197,29 @@ func TestGlobalSettingsFollowClaudeConfigDir(t *testing.T) {
 	}
 }
 
-func TestSamePathSeesThroughRelativeAndSymlinkedPaths(t *testing.T) {
-	dir := t.TempDir()
-	real := filepath.Join(dir, "claude")
-	os.MkdirAll(real, 0o755)
-	link := filepath.Join(dir, "link")
-	if err := os.Symlink(real, link); err != nil {
-		t.Skip(err)
-	}
-	t.Chdir(real)
-	for _, p := range []string{"settings.json", filepath.Join(link, "settings.json"), filepath.Join(real, ".", "settings.json")} {
-		if !samePath(p, filepath.Join(real, "settings.json")) {
-			t.Errorf("samePath(%q) = false", p)
+// Project and global init write the same command, so a user with both runs the gate once.
+func TestProjectAndGlobalHookCommandsMatch(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	t.Setenv("PAWS_HOME", filepath.Join(home, ".paws"))
+	t.Setenv("CLAUDE_CONFIG_DIR", filepath.Join(home, ".claude"))
+	repo := filepath.Join(home, "repo")
+	os.MkdirAll(filepath.Join(repo, ".git"), 0o755)
+	t.Chdir(repo)
+	Init(nil)
+	Init([]string{"--global"})
+	cmd := func(path string) string {
+		doc, _ := readSettings(path)
+		hooks, _ := hooksBlock(doc)
+		var pre []struct {
+			Hooks []struct {
+				Command string `json:"command"`
+			} `json:"hooks"`
 		}
+		json.Unmarshal(hooks["PreToolUse"], &pre)
+		return pre[0].Hooks[0].Command
 	}
-	if samePath(filepath.Join(dir, "other", "settings.json"), filepath.Join(real, "settings.json")) {
-		t.Error("different folders compared equal")
+	if p, g := cmd(filepath.Join(repo, ".claude", "settings.json")), cmd(filepath.Join(home, ".claude", "settings.json")); p != g {
+		t.Errorf("project %q and global %q differ; Claude Code would run the gate twice", p, g)
 	}
 }

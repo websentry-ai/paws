@@ -26,6 +26,7 @@ export interface Portal {
   api?: string;
   sync_minutes: number;
   run: string;
+  config_minutes: number;
   skills: PortalSkill[];
 }
 

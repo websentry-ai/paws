@@ -268,10 +268,11 @@ func withoutPawsHooks(entry json.RawMessage) (rest json.RawMessage, had bool) {
 const legacyMarker = "PAWS_MANAGED=1 "
 
 // isPawsCommand recognises exactly the commands init writes: `"$HOME/<path>" gate` or a
-// shellQuote'd path then ` gate` (optionally after 0.3.0's marker), the binary named paws
-// (paws.exe). Nothing that can expand or chain (`"$(x)/paws"`, `scan; paws gate`) counts.
+// shellQuote'd path then ` gate`, the binary named paws (paws.exe), or any such single path
+// after 0.3.0's marker. Nothing that can expand or chain (`"$(x)/paws"`, `scan; paws gate`) counts.
 func isPawsCommand(command string) bool {
-	prog, ok := strings.CutSuffix(strings.TrimPrefix(command, legacyMarker), " gate")
+	rest, marked := strings.CutPrefix(command, legacyMarker)
+	prog, ok := strings.CutSuffix(rest, " gate")
 	if !ok {
 		return false
 	}
@@ -289,6 +290,9 @@ func isPawsCommand(command string) bool {
 		}
 	default:
 		return false
+	}
+	if marked {
+		return true // only paws wrote the marker; before it, the copy kept its build name (paws-dev)
 	}
 	base := path[strings.LastIndexAny(path, `/\`)+1:]
 	return base == "paws" || base == "paws.exe"

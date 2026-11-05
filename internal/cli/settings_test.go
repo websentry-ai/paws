@@ -107,6 +107,7 @@ func TestIsPawsCommand(t *testing.T) {
 		`PAWS_MANAGED=1 '/Users/me/.paws/bin/paws' gate`, // written by 0.3.0 and earlier
 		`'/opt/O'\''Brien/paws/bin/paws' gate`,           // shellQuote of a path with an apostrophe
 		`PAWS_MANAGED=1 '/home/o'\''neil/.paws/bin/paws' gate`,
+		`PAWS_MANAGED=1 '/Users/me/.paws/bin/paws-dev' gate`, // 0.3.0 kept a source build's name
 	} {
 		if !isPawsCommand(c) {
 			t.Errorf("isPawsCommand(%q) = false, want true", c)
@@ -124,6 +125,8 @@ func TestIsPawsCommand(t *testing.T) {
 		`"$HOME/$(x)/paws" gate`,
 		`/usr/local/bin/paws gate`, // never written by init
 		`'/a'b'/paws' gate`,
+		`'/Users/me/.paws/bin/paws-dev' gate`,          // unmarked: only the name paws counts
+		`PAWS_MANAGED=1 '/x/scan'; '/x/paws-dev' gate`, // marked, but not one quoted path
 	} {
 		if isPawsCommand(c) {
 			t.Errorf("isPawsCommand(%q) = true, want false", c)

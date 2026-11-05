@@ -26,7 +26,7 @@ export function Installed({ load, portal }: { load: Load<InstalledPack[]>; porta
               <h2 className="grow">From the portal</h2>
               <span className="badge">portal</span>
             </div>
-            <p className="desc">Skills turned on in the paws portal. Change them there; paws picks up changes within 15 minutes, or run {run} sync.</p>
+            <p className="desc">Skills turned on in the paws portal. Change them there; paws checks for changes at most every {portal.state === "ok" ? portal.data.config_minutes : 15} minutes after Claude&apos;s turns, or run {run} sync.</p>
             <table>
               <thead>
                 <tr>

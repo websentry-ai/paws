@@ -119,6 +119,7 @@ def main():
             if run([str(binary), "version"], project, env) != f"paws {version}":
                 raise RuntimeError("npm install did not refresh the hook's binary copy")
             print("PASS: npm install refreshes the hook's binary copy", flush=True)
+            shutil.rmtree(scratch / "npm-cache")  # the checksum checks below need a fresh download
 
             sums_path.write_text("\n".join(f"{'0' * 64}  {name}" for name in sums) + "\n")
             rejected = sh(version_command, project, env, timeout=300)

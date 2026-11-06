@@ -304,7 +304,7 @@ func TestInitKeepsProjectAndGlobalOnOneLine(t *testing.T) {
 	t.Setenv("PATH", "")
 	os.Remove(filepath.Join(cfg, "settings.json"))
 	code, out := captureStdout(t, func() int { return Init([]string{"--global"}) })
-	if code != 0 || !strings.Contains(out, "run `unbound-paws init` there too") {
+	if code != 0 || !strings.Contains(out, "run `npx unbound-paws init` there too") {
 		t.Errorf("global init should warn about the differing project line: %d %q", code, out)
 	}
 	// With unbound-paws gone from PATH, reusing the global line would register a hook that can't

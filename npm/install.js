@@ -168,8 +168,8 @@ function refreshHookCopy(bin) {
   console.log(`updated the paws hook binary at ${copy}`);
 }
 
-// useNativeLauncher replaces bin/paws.js, the launcher npm links as `unbound-paws`, with the binary
-// itself, so the command (and the Claude Code hook that runs it) doesn't start Node on every call.
+// useNativeLauncher replaces bin/paws.js, the launcher npm links as `unbound-paws` and `paws`, with the
+// binary itself, so the command (and the Claude Code hook that runs it) doesn't start Node on every call.
 // Windows keeps the Node launcher: npm's .cmd shim there always runs node.
 function useNativeLauncher(bin) {
   if (process.platform === "win32") return;

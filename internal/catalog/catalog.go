@@ -202,7 +202,7 @@ func ValidateFS(fsys fs.FS, display string) (*Catalog, []Problem) {
 			add(p, "upstream.ref must be a full 40-character commit SHA, got %q", u.Ref)
 		}
 		if u.Repo != "" && !contentHashRe.MatchString(u.ContentHash) {
-			add(p, "upstream.content_hash must be sha256:<64 hex> (pin it with `unbound-paws pin`), got %q", u.ContentHash)
+			add(p, "upstream.content_hash must be sha256:<64 hex> (pin it with `paws pin`), got %q", u.ContentHash)
 		}
 		if u.Path != "" {
 			if err := rule.RelativeInside(u.Path); err != nil {

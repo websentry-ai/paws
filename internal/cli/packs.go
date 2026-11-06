@@ -111,7 +111,7 @@ func Add(args []string) int {
 		err = fmt.Errorf("name a pack or binding to add")
 	}
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "paws: %v\nusage: unbound-paws add [--project] [--pick group=option] <pack|category/binding>...\n", err)
+		fmt.Fprintf(os.Stderr, "paws: %v\nusage: paws add [--project] [--pick group=option] <pack|category/binding>...\n", err)
 		return 2
 	}
 	c, err := loadCatalog(f.catalog)
@@ -140,7 +140,7 @@ func Add(args []string) int {
 		}
 	}
 	if !hookRegistered() {
-		fmt.Printf("paws is not registered as a hook here yet: run `%[1]s init` (this repo) or `%[1]s init --global`.\n", cliName)
+		fmt.Printf("paws is not registered as a hook here yet: run `%[1]s init` (this repo) or `%[1]s init --global`.\n", runName())
 	}
 	return 0
 }
@@ -190,7 +190,7 @@ func Remove(args []string) int {
 		err = fmt.Errorf("name one pack to remove")
 	}
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "paws: %v\nusage: unbound-paws remove [--project] <pack>\n", err)
+		fmt.Fprintf(os.Stderr, "paws: %v\nusage: paws remove [--project] <pack>\n", err)
 		return 2
 	}
 	skills, err := pack.Remove(f.args[0], target(f.project))
@@ -258,7 +258,7 @@ func List(args []string) int {
 		}
 	}
 	if !any {
-		fmt.Printf("no packs installed (browse with `%s search`)\n", cliName)
+		fmt.Printf("no packs installed (browse with `%s search`)\n", runName())
 	}
 	return 0
 }
@@ -312,7 +312,7 @@ func Search(args []string) int {
 		err = fmt.Errorf("give a search term")
 	}
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "paws: %v\nusage: unbound-paws search <text>\n", err)
+		fmt.Fprintf(os.Stderr, "paws: %v\nusage: paws search <text>\n", err)
 		return 2
 	}
 	c, err := loadCatalog(f.catalog)
@@ -324,19 +324,20 @@ func Search(args []string) int {
 	hit := func(fields ...string) bool {
 		return strings.Contains(strings.ToLower(strings.Join(fields, " ")), q)
 	}
+	run := runName()
 	found := 0
 	for _, n := range sortedKeys(c.Packs) {
 		p := c.Packs[n]
 		if hit(p.Name, p.Description, strings.Join(p.Tags, " ")) {
 			found++
-			fmt.Printf("pack %-20s %s\n     %s add %s\n", p.Name, p.Description, cliName, p.Name)
+			fmt.Printf("pack %-20s %s\n     %s add %s\n", p.Name, p.Description, run, p.Name)
 		}
 	}
 	for _, rel := range sortedKeys(c.Bindings) {
 		b := c.Bindings[rel]
 		if hit(b.Name, rel, b.Action.Skill, strings.Join(b.Tags, " "), b.Body) {
 			found++
-			fmt.Printf("binding %-28s %s\n     %s add %s\n", b.Name, firstLine(b.Body), cliName, strings.TrimSuffix(rel, ".md"))
+			fmt.Printf("binding %-28s %s\n     %s add %s\n", b.Name, firstLine(b.Body), run, strings.TrimSuffix(rel, ".md"))
 		}
 	}
 	if found == 0 {
@@ -486,7 +487,7 @@ func Pin(args []string) int {
 	if len(args) == 1 {
 		root = args[0]
 	} else if len(args) > 1 {
-		fmt.Fprintln(os.Stderr, "usage: unbound-paws pin [root]")
+		fmt.Fprintln(os.Stderr, "usage: paws pin [root]")
 		return 2
 	}
 	if st, err := os.Stat(catalog.CatalogDir(root)); err != nil || !st.IsDir() {

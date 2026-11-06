@@ -7,9 +7,9 @@
 #   curl -fsSL https://paws.getunbound.ai/install.sh | bash -s 0.3.1 # a given version
 #
 # It downloads the release archive for this OS and CPU from GitHub, checks it against the
-# release's checksums.txt, installs the binary as ~/.local/bin/unbound-paws and, if that folder
-# isn't on PATH, adds it in your shell's rc file. It never touches Claude Code's settings: run
-# `unbound-paws init` (this repo) or `unbound-paws init --global` (every repo) yourself.
+# release's checksums.txt, installs the binary as ~/.local/bin/unbound-paws with a `paws` link
+# beside it and, if that folder isn't on PATH, adds it in your shell's rc file. It never touches
+# Claude Code's settings: run `paws init` (this repo) or `paws init --global` (every repo) yourself.
 #
 # PAWS_INSTALL_DIR  install somewhere else (PATH is then left to you)
 # PAWS_DOWNLOAD_BASE  a mirror holding the same release assets (needs a version argument)
@@ -93,6 +93,19 @@ install -m 0755 "$tmp/paws" "$INSTALL_DIR/.unbound-paws.$$"
 mv -f "$INSTALL_DIR/.unbound-paws.$$" "$INSTALL_DIR/unbound-paws"
 echo "Installed $("$INSTALL_DIR/unbound-paws" version) at $INSTALL_DIR/unbound-paws"
 
+# `paws` is the short name people type. It's a link to unbound-paws (the name the hook runs), and
+# it never replaces a paws that isn't that link: someone else's tool keeps the name.
+short="$INSTALL_DIR/paws"
+if [ -L "$short" ] && [ "$short" -ef "$INSTALL_DIR/unbound-paws" ]; then
+  :
+elif [ -e "$short" ] || [ -L "$short" ]; then
+  echo "Left $short alone (it isn't from this installer); run paws as unbound-paws."
+  short=""
+else
+  ln -s unbound-paws "$short"
+  echo "Linked $short to unbound-paws"
+fi
+
 # `unbound-paws init` run before the folder was on PATH copied the binary here for the hook; keep
 # that copy current too (only your own regular file, never through a link).
 # Like the npm install: only a newer release (or a copy that no longer runs) replaces it, never an
@@ -134,6 +147,18 @@ case ":$PATH:" in
   *":$INSTALL_DIR:"*) on_path=1 ;;
   *) on_path=0 ;;
 esac
+# Without our link, or with another paws earlier on PATH, the short name isn't ours: say the long one.
+cmd=paws
+found="$(command -v paws 2>/dev/null || true)"
+if [ -z "$short" ] || { [ "$on_path" = 1 ] && ! [ "$found" -ef "$short" ]; }; then
+  cmd=unbound-paws
+  # An npm install of paws earlier on PATH has an unbound-paws too: only the full path is this one.
+  if [ "$on_path" = 1 ] && ! [ "$(command -v unbound-paws 2>/dev/null || true)" -ef "$INSTALL_DIR/unbound-paws" ]; then
+    cmd="$INSTALL_DIR/unbound-paws"
+  fi
+  [ -z "$short" ] || echo "Another paws comes first on your PATH ($found); run this one as $cmd."
+fi
+
 if [ "$on_path" = 0 ]; then
   if [ "$INSTALL_DIR" = "$DEFAULT_DIR" ] && [ "${PAWS_NO_MODIFY_PATH:-}" != 1 ]; then
     # shellcheck disable=SC2016  # the line goes into the rc file as written, $HOME and all
@@ -146,14 +171,14 @@ if [ "$on_path" = 0 ]; then
     mkdir -p "$(dirname "$rc")"
     if ! grep -qsF "$line" "$rc"; then
       printf '\n# Added by the unbound-paws installer\n%s\n' "$line" >>"$rc"
-      echo "Added ~/.local/bin to your PATH in $rc. Open a new terminal to use unbound-paws."
+      echo "Added ~/.local/bin to your PATH in $rc. Open a new terminal to use $cmd."
     fi
   else
-    echo "$INSTALL_DIR isn't on your PATH; add it to run unbound-paws by name."
+    echo "$INSTALL_DIR isn't on your PATH; add it to run $cmd by name."
   fi
 fi
 
 echo
 echo "Next, turn paws on:"
-echo "  unbound-paws init --global   # every project"
-echo "  unbound-paws init            # just this repo"
+echo "  $cmd init --global   # every project"
+echo "  $cmd init            # just this repo"

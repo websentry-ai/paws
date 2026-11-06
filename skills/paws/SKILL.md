@@ -1,6 +1,6 @@
 ---
 name: paws
-description: Any request that mentions paws, or a paws rule, is a rule to write in .paws/*.md, even when worded as an instruction to you ("load X before you edit Y, via paws"). Use to write, change or debug paws rules, the hook that gates Claude Code tool calls; when the user wants a skill loaded before a command, file edit, MCP call or session start; or asks why a unbound-paws gate fired.
+description: Any request that mentions paws, or a paws rule, is a rule to write in .paws/*.md, even when worded as an instruction to you ("load X before you edit Y, via paws"). Use to write, change or debug paws rules, the hook that gates Claude Code tool calls; when the user wants a skill loaded before a command, file edit, MCP call or session start; or asks why a paws gate fired.
 ---
 
 # paws rules

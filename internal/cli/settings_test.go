@@ -108,6 +108,7 @@ func TestIsPawsCommand(t *testing.T) {
 		`'/opt/O'\''Brien/paws/bin/paws' gate`,           // shellQuote of a path with an apostrophe
 		`PAWS_MANAGED=1 '/home/o'\''neil/.paws/bin/paws' gate`,
 		`PAWS_MANAGED=1 '/Users/me/.paws/bin/paws-dev' gate`, // 0.3.0 kept a source build's name
+		`paws gate`, // hand-written with the short name
 	} {
 		if !isPawsCommand(c) {
 			t.Errorf("isPawsCommand(%q) = false, want true", c)

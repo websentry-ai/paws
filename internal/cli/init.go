@@ -68,13 +68,15 @@ func Init(args []string) int {
 		return 1
 	}
 	fmt.Printf("Registered paws in %s\n  command: %s\n", settingsPath, command)
-	other := user
+	// A different paws hook in the other scope makes Claude Code run paws twice: say which init fixes it.
+	other, fix := user, "`"+cliName+" init --global`"
 	if filepath.Clean(settingsPath) == filepath.Clean(user) {
 		cwd, _ := os.Getwd()
-		other = filepath.Join(projectRoot(cwd), ".claude", "settings.json")
+		root := projectRoot(cwd)
+		other, fix = filepath.Join(root, ".claude", "settings.json"), "`"+cliName+" init` in "+root
 	}
 	if c := pawsCommandIn(other); c != "" && c != command {
-		fmt.Printf("%s registers paws as `%s`; run `%s init` there too, so Claude Code runs paws once.\n", other, c, cliName)
+		fmt.Printf("%s has a different paws hook. Run %s too, so Claude Code runs paws once.\n", other, fix)
 	}
 	return 0
 }

@@ -304,7 +304,7 @@ func TestInitKeepsProjectAndGlobalOnOneLine(t *testing.T) {
 	t.Setenv("PATH", "")
 	os.Remove(filepath.Join(cfg, "settings.json"))
 	code, out := captureStdout(t, func() int { return Init([]string{"--global"}) })
-	if code != 0 || !strings.Contains(out, "run `unbound-paws init` there too") {
+	if code != 0 || !strings.Contains(out, "has a different paws hook. Run `unbound-paws init` in "+repo+" too") || strings.Contains(out, "PAWS_MANAGED") {
 		t.Errorf("global init should warn about the differing project line: %d %q", code, out)
 	}
 	// With unbound-paws gone from PATH, reusing the global line would register a hook that can't
@@ -342,6 +342,26 @@ func TestCliPathLooksPastNpxBin(t *testing.T) {
 }
 
 // Off PATH and not installed anywhere, init says how to install unbound-paws.
+// A project init next to a global hook from 0.3.0 names the init that fixes it, not the old line.
+func TestInitPointsAtGlobalInitForAnOldGlobalHook(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	t.Setenv("PAWS_HOME", filepath.Join(home, ".paws"))
+	cfg := filepath.Join(home, ".claude")
+	t.Setenv("CLAUDE_CONFIG_DIR", cfg)
+	t.Setenv("PATH", "")
+	doc := settingsDoc{}
+	ensureHooks(doc, `PAWS_MANAGED=1 '`+filepath.Join(home, ".paws", "bin", "paws")+`' gate`)
+	writeSettings(filepath.Join(cfg, "settings.json"), doc)
+	repo := filepath.Join(home, "repo")
+	os.MkdirAll(filepath.Join(repo, ".git"), 0o755)
+	t.Chdir(repo)
+	code, out := captureStdout(t, func() int { return Init(nil) })
+	if code != 0 || !strings.Contains(out, "has a different paws hook. Run `unbound-paws init --global` too") || strings.Contains(out, "PAWS_MANAGED") {
+		t.Errorf("project init should point at init --global without echoing the old line: %d %q", code, out)
+	}
+}
+
 func TestInitOffPathSaysHowToInstall(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("HOME", home)

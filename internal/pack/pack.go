@@ -132,7 +132,7 @@ func Resolve(c *catalog.Catalog, name string, picks map[string]string, choose fu
 		}
 		return strings.TrimSuffix(rel, ".md"), []string{rel}, nil, nil
 	}
-	return "", nil, nil, fmt.Errorf("no pack or binding named %q (try `unbound-paws search`)", name)
+	return "", nil, nil, fmt.Errorf("no pack or binding named %q (try `unbound-paws search <text>`)", name)
 }
 
 func hasGroup(p *catalog.Pack, name string) bool {

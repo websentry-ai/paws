@@ -300,7 +300,7 @@ func editedMatching(path string, glob *regexp.Regexp) bool {
 	pending := map[string]bool{} // tool_use ids of matching edits awaiting a result
 	for _, ln := range lines {
 		var e mainEntry
-		if json.Unmarshal(ln, &e) != nil || (e.IsSidechain && !subagentLog(path)) {
+		if json.Unmarshal(ln, &e) != nil || e.IsSidechain {
 			continue
 		}
 		switch e.Type {
@@ -338,7 +338,7 @@ func agentsSinceUserTurn(path string) int {
 	n := 0
 	for i := len(lines) - 1; i >= 0; i-- {
 		var e mainEntry
-		if json.Unmarshal(lines[i], &e) != nil || (e.IsSidechain && !subagentLog(path)) {
+		if json.Unmarshal(lines[i], &e) != nil || e.IsSidechain {
 			continue
 		}
 		if isUserPrompt(e) {

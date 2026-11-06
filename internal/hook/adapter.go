@@ -27,7 +27,8 @@ func ToEvent(in *Input) gate.Event {
 		Tool:       in.ToolName,
 		Target:     in.MatchTarget(),
 		Session:    in.SessionID,
-		Transcript: transcriptFor(in),
+		Transcript: in.TranscriptPath,
+		Own:        subagentLog(in),
 		Cwd:        in.CWD,
 		AgentID:    in.AgentID,
 		AgentType:  in.AgentType,
@@ -45,16 +46,16 @@ func ToEvent(in *Input) gate.Event {
 // outside <session>/subagents/, so it is not used to find one.
 var agentIDRe = regexp.MustCompile(`^[A-Za-z0-9_-]+$`)
 
-// transcriptFor is the log that holds the calling thread's own tool calls. A subagent's hook gets the
-// main session's transcript_path plus its agent_id, while its Skill loads go to
-// <session>/subagents/agent-<id>.jsonl; without that file the main log is the best there is.
-func transcriptFor(in *Input) string {
+// subagentLog is a subagent's own log, or "" for the main thread. A subagent's hook gets the main
+// session's transcript_path plus its agent_id, while its Skill loads go to
+// <session>/subagents/agent-<id>.jsonl.
+func subagentLog(in *Input) string {
 	if !agentIDRe.MatchString(in.AgentID) || in.TranscriptPath == "" {
-		return in.TranscriptPath
+		return ""
 	}
 	sub := filepath.Join(strings.TrimSuffix(in.TranscriptPath, ".jsonl"), "subagents", "agent-"+in.AgentID+".jsonl")
 	if _, err := os.Stat(sub); err != nil {
-		return in.TranscriptPath
+		return ""
 	}
 	return sub
 }

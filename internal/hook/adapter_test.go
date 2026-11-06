@@ -29,7 +29,7 @@ func TestToEventKind(t *testing.T) {
 
 // A subagent's call carries the main session's transcript_path and its agent_id; its own log sits at
 // <session>/subagents/agent-<id>.jsonl, and that is the one paws must read for the subagent's loads.
-func TestToEventUsesTheSubagentsOwnLog(t *testing.T) {
+func TestToEventFindsTheSubagentsOwnLog(t *testing.T) {
 	dir := t.TempDir()
 	main := filepath.Join(dir, "sess.jsonl")
 	sub := filepath.Join(dir, "sess", "subagents", "agent-a1.jsonl")
@@ -42,16 +42,16 @@ func TestToEventUsesTheSubagentsOwnLog(t *testing.T) {
 		}
 	}
 	in := &Input{HookEventName: "PreToolUse", ToolName: "Bash", TranscriptPath: main}
-	if ev := ToEvent(in); ev.Transcript != main {
-		t.Errorf("main thread: transcript %q, want %q", ev.Transcript, main)
+	if ev := ToEvent(in); ev.Transcript != main || ev.Own != "" {
+		t.Errorf("main thread: transcript %q own %q, want %q and none", ev.Transcript, ev.Own, main)
 	}
 	in.AgentID = "a1"
-	if ev := ToEvent(in); ev.Transcript != sub {
-		t.Errorf("subagent: transcript %q, want %q", ev.Transcript, sub)
+	if ev := ToEvent(in); ev.Transcript != main || ev.Own != sub {
+		t.Errorf("subagent: transcript %q own %q, want the session log %q and its own %q", ev.Transcript, ev.Own, main, sub)
 	}
 	in.AgentID = "missing"
-	if ev := ToEvent(in); ev.Transcript != main {
-		t.Errorf("subagent without its own log: transcript %q, want the main one %q", ev.Transcript, main)
+	if ev := ToEvent(in); ev.Own != "" {
+		t.Errorf("subagent without its own log: own %q, want none", ev.Own)
 	}
 	// An id that would leave <session>/subagents/ is never used, even when the file it names exists.
 	other := filepath.Join(dir, "sess", "agent-x.jsonl")
@@ -60,8 +60,8 @@ func TestToEventUsesTheSubagentsOwnLog(t *testing.T) {
 	}
 	for _, id := range []string{"a/../../agent-x", "x/../../agent-x"} {
 		in.AgentID = id
-		if ev := ToEvent(in); ev.Transcript != main {
-			t.Errorf("agent_id %q: transcript %q, want the main one %q", id, ev.Transcript, main)
+		if ev := ToEvent(in); ev.Own != "" {
+			t.Errorf("agent_id %q: own %q, want none", id, ev.Own)
 		}
 	}
 }

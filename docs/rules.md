@@ -45,7 +45,7 @@ Per tool, `pre-tool` matches against:
 
 | Field | Matches |
 |---|---|
-| `tool` | a name, `prefix*` (e.g. `mcp__slack__*`), an `A\|B` list, or omitted for any |
+| `tool` | a name, a pattern where `*` stands for any characters (e.g. `mcp__slack__*`, `mcp__*__get_issue`), an `A\|B` list, or omitted for any |
 | `command_regex` | Go RE2 regex over the target |
 | `file_glob` | `**`, `*`, `?`, `{a,b}` over the absolute path; Read/Write/Edit/NotebookEdit only |
 | `mcp_action` | `send`, `create`, `update`, `delete` (or `A\|B`): MCP tools whose name says so |

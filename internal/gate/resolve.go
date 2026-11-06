@@ -19,9 +19,19 @@ type Event struct {
 	Target     string // the string rules match against (command, path, or session source)
 	Session    string
 	Transcript string // path to the session log, when the agent supplies one
+	Own        string // the calling thread's own log when it isn't Transcript: a subagent's
 	Cwd        string // the agent's working directory; repo conditions resolve from it
 	AgentID    string // set when the call comes from a subagent rather than the main thread
 	AgentType  string
+}
+
+// ownLog is the log of the thread making the call: where its own skill loads and the denies it was
+// shown are. Session-wide conditions (agent-count, edits) read Transcript.
+func (ev Event) ownLog() string {
+	if ev.Own != "" {
+		return ev.Own
+	}
+	return ev.Transcript
 }
 
 // DefaultSkillWindow is how many of the agent's own turns back a skill load still counts for.
@@ -119,7 +129,7 @@ func evaluate(r *rule.Rule, ev Event) outcome {
 		// the agent out of the very call that satisfies the rule.
 		return outcome{}
 	}
-	if SkillLoaded(ev.Transcript, a.Skill, DefaultSkillWindow) {
+	if SkillLoaded(ev.ownLog(), a.Skill, DefaultSkillWindow) {
 		return outcome{verdict: Allow, satisfiedBy: skillLoadSatisfied, fired: true}
 	}
 	digest, digestErr := loadDigest(r)
@@ -129,7 +139,7 @@ func evaluate(r *rule.Rule, ev Event) outcome {
 		// check reinstalls the skill.
 		return outcome{}
 	}
-	if digest != "" && DenyDelivered(ev.Transcript, digestMarker(r), DefaultSkillWindow) {
+	if digest != "" && DenyDelivered(ev.ownLog(), digestMarker(r), DefaultSkillWindow) {
 		// The digest already rode in a deny this window: the agent has the rules, let the retry through.
 		return outcome{verdict: Allow, satisfiedBy: digestSatisfied, fired: true}
 	}

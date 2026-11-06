@@ -143,6 +143,18 @@ func TestWhenAgentCount(t *testing.T) {
 	}
 }
 
+// A subagent's call keeps the session log as Transcript: agent-count still sees the main thread's spawns,
+// which its own log (Own) does not hold.
+func TestWhenAgentCountForASubagentCall(t *testing.T) {
+	r := mustRule(t, "---\nname: par\nevent: pre-tool\nmatcher:\n  tool: Bash\nwhen: agent-count>1\naction:\n  type: require-skill\n  skill: s\n---\n")
+	ev := Event{Kind: rule.KindTool, Tool: "Bash", Target: "git push", AgentID: "a1"}
+	ev.Transcript = write(t, lnUserTyped, lnAgent, lnToolRes)
+	ev.Own = write(t, lnUserTyped, lnAssistant)
+	if !Applies(r, ev) {
+		t.Error("the main thread's two spawns should count for a subagent's call")
+	}
+}
+
 func TestWhenParseErrors(t *testing.T) {
 	for name, md := range map[string]string{
 		"unknown":             "---\nname: x\nevent: pre-tool\nwhen: phase-of-moon\naction:\n  type: require-skill\n  skill: s\n---\n",

@@ -79,6 +79,31 @@ func TestToolPrefixWildcard(t *testing.T) {
 	}
 }
 
+func TestToolWildcardAnywhere(t *testing.T) {
+	cases := []struct {
+		spec, tool string
+		want       bool
+	}{
+		{"mcp__*__get_issue", "mcp__plugin_linear_linear__get_issue", true},
+		{"mcp__*__get_issue", "mcp__linear__get_issue", true},
+		{"mcp__*__get_issue", "mcp__linear__get_issue_comments", false},
+		{"mcp__*__get_issue", "mcp__linear__list_issues", false},
+		{"mcp__plugin_linear_linear__get_*", "mcp__plugin_linear_linear__get_issue", true},
+		{"mcp__plugin_linear_linear__get_*", "mcp__plugin_linear_linear__list_issues", false},
+		{"mcp__*", "mcp__anything__at_all", true},
+		{"mcp__*", "Bash", false},
+		{"*__get_issue", "mcp__linear__get_issue", true},
+		{"mcp__*linear*__*", "mcp__plugin_linear_linear__save_issue", true},
+		{"mcp__*linear*__*", "mcp__claude_ai_Notion__fetch", false},
+		{"Bash|mcp__*__get_issue", "mcp__x__get_issue", true},
+	}
+	for _, c := range cases {
+		if got := matchTool(c.spec, c.tool); got != c.want {
+			t.Errorf("matchTool(%q,%q)=%v want %v", c.spec, c.tool, got, c.want)
+		}
+	}
+}
+
 func TestMCPActionMatcher(t *testing.T) {
 	r := mustRule(t, "---\nname: x\nevent: pre-tool\nmatcher:\n  mcp_action: send\naction:\n  type: require-skill\n  skill: s\n---\n")
 	if !r.Matches("mcp__claude_ai_Gmail__send_message", "{}") {

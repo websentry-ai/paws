@@ -44,21 +44,38 @@ func (r *Rule) Matches(tool, target string) bool {
 	return true
 }
 
-// matchTool matches a matcher tool spec ("", "*", or a pipe list of names and "prefix*" patterns) against a tool.
+// matchTool matches a matcher tool spec ("", "*", or a pipe list of names where * stands for any run of
+// characters, such as "mcp__slack__*" or "mcp__*__get_issue") against a tool.
 func matchTool(spec, tool string) bool {
 	spec = strings.TrimSpace(spec)
 	if spec == "" || spec == "*" {
 		return true
 	}
 	for _, p := range strings.Split(spec, "|") {
-		p = strings.TrimSpace(p)
-		if prefix, ok := strings.CutSuffix(p, "*"); ok {
-			if strings.HasPrefix(tool, prefix) {
-				return true
-			}
-		} else if p == tool {
+		if matchStar(strings.TrimSpace(p), tool) {
 			return true
 		}
 	}
 	return false
+}
+
+// matchStar reports whether s matches pattern p, where each * stands for any run of characters.
+func matchStar(p, s string) bool {
+	parts := strings.Split(p, "*")
+	if len(parts) == 1 {
+		return p == s
+	}
+	if !strings.HasPrefix(s, parts[0]) {
+		return false
+	}
+	s = s[len(parts[0]):]
+	last := parts[len(parts)-1]
+	for _, mid := range parts[1 : len(parts)-1] {
+		i := strings.Index(s, mid)
+		if i < 0 {
+			return false
+		}
+		s = s[i+len(mid):]
+	}
+	return strings.HasSuffix(s, last)
 }

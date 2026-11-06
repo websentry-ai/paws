@@ -359,7 +359,7 @@ func Index(args []string) int {
 		fmt.Fprintf(os.Stderr, "paws: %v\n", err)
 		return 1
 	}
-	var index any = buildIndex(c)
+	var index any = buildIndex(c, cliName)
 	if f.portal {
 		index = buildPortalCatalog(c)
 	}
@@ -398,18 +398,20 @@ type indexPack struct {
 	Add         string            `json:"add"`
 }
 
-// buildIndex is the catalog as JSON, each entry with the command that installs it.
-func buildIndex(c *catalog.Catalog) map[string]any {
+// buildIndex is the catalog as JSON, each entry with the command that installs it, run as `run`:
+// `paws index` (website and portal data) passes cliName; the local UI passes runName(), so a copied
+// command never runs another tool that has the name paws.
+func buildIndex(c *catalog.Catalog, run string) map[string]any {
 	var packs []indexPack
 	for _, n := range sortedKeys(c.Packs) {
 		p := c.Packs[n]
-		packs = append(packs, indexPack{p.Name, p.Description, p.Tags, p.Bindings, p.PickOne, cliName + " add " + p.Name})
+		packs = append(packs, indexPack{p.Name, p.Description, p.Tags, p.Bindings, p.PickOne, run + " add " + p.Name})
 	}
 	var bindings []indexBinding
 	for _, rel := range sortedKeys(c.Bindings) {
 		b := c.Bindings[rel]
 		ib := indexBinding{Path: rel, Name: b.Name, Description: firstLine(b.Body), Event: b.Event, Action: b.Action.Type,
-			Skill: b.Action.Skill, Tags: b.Tags, Add: cliName + " add " + strings.TrimSuffix(rel, ".md")}
+			Skill: b.Action.Skill, Tags: b.Tags, Add: run + " add " + strings.TrimSuffix(rel, ".md")}
 		if b.Upstream.Repo != "" {
 			u, pv := b.Upstream, b.Provenance
 			ib.Upstream, ib.Provenance = &u, &pv

@@ -148,6 +148,14 @@ func TestHintsNameACommandThatRuns(t *testing.T) {
 			if !strings.Contains(string(out), "run "+c.want) {
 				t.Errorf("want the hint to say %s, got:\n%s", c.want, out)
 			}
+			// `paws index` is data for the website and portal: it always says `paws add`.
+			cmd = exec.Command(built, "index")
+			cmd.Dir = repo
+			cmd.Env = []string{"HOME=" + home, "PATH=" + bin + string(os.PathListSeparator) + "/usr/bin:/bin"}
+			idx, err := cmd.Output()
+			if err != nil || !strings.Contains(string(idx), `"add": "paws add `) && !strings.Contains(string(idx), `"add":"paws add `) {
+				t.Errorf("paws index should say paws add whatever is on PATH: %v %.300s", err, idx)
+			}
 		})
 	}
 }

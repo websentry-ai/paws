@@ -90,7 +90,7 @@ func uiHandler(addr string) http.Handler {
 			http.Error(w, err.Error(), http.StatusInternalServerError)
 			return
 		}
-		writeJSON(w, buildIndex(c))
+		writeJSON(w, buildIndex(c, runName()))
 	})
 	mux.HandleFunc("/api/installed", func(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, installedView())

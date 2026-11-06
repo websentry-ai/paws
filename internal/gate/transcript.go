@@ -6,6 +6,7 @@ import (
 	"errors"
 	"io"
 	"os"
+	"path/filepath"
 	"regexp"
 	"strings"
 )
@@ -130,7 +131,7 @@ func SkillLoaded(path, skill string, window int) bool {
 
 var skillToolName = []byte(`"name":"Skill"`)
 
-// skillCalls returns the ids of main-thread Skill tool_use blocks that invoke skill.
+// skillCalls returns the ids of the log's own Skill tool_use blocks that invoke skill.
 func skillCalls(path, skill string) map[string]bool {
 	calls := map[string]bool{}
 	lines, err := tailLines(path)
@@ -141,7 +142,7 @@ func skillCalls(path, skill string) map[string]bool {
 	input := append([]byte(`"skill":`), name...) // skips the huge tool-definition lines cheaply
 	for _, l := range lines {
 		var e transcriptEntry
-		if !bytes.Contains(l, input) || !bytes.Contains(l, skillToolName) || json.Unmarshal(l, &e) != nil || e.IsSidechain || (e.Type != "assistant" && e.Type != requestBlob) {
+		if !bytes.Contains(l, input) || !bytes.Contains(l, skillToolName) || json.Unmarshal(l, &e) != nil || foreign(e, path) || (e.Type != "assistant" && e.Type != requestBlob) {
 			continue
 		}
 		e.raw = l
@@ -218,9 +219,7 @@ func scanWindow(path string, window int, hit func(transcriptEntry) bool) bool {
 			continue
 		}
 		e.raw = lines[i]
-		// Subagents write their own transcript files, so sidechain records should not
-		// appear here at all; skipping them keeps that guarantee if that ever changes.
-		if e.IsSidechain {
+		if foreign(e, path) {
 			continue
 		}
 		switch {
@@ -241,6 +240,17 @@ func scanWindow(path string, window int, hit func(transcriptEntry) bool) bool {
 		}
 	}
 	return false
+}
+
+// foreign reports whether e belongs to another thread than the log's own. Claude Code marks every record
+// of a subagent's log (<session>/subagents/agent-<id>.jsonl) isSidechain, and keeps the main log's own
+// records unmarked; a sidechain record anywhere else is a subagent's and says nothing about the main thread.
+func foreign(e transcriptEntry, path string) bool {
+	return e.IsSidechain && !subagentLog(path)
+}
+
+func subagentLog(path string) bool {
+	return filepath.Base(filepath.Dir(path)) == "subagents" && strings.HasPrefix(filepath.Base(path), "agent-")
 }
 
 // tailCache holds tails already read in this process. paws gate is one process per hook

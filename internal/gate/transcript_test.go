@@ -187,3 +187,22 @@ func TestRequestBlobs(t *testing.T) {
 	}
 
 }
+
+// A subagent's own log (<session>/subagents/agent-<id>.jsonl) marks every record isSidechain; there a
+// load counts. The same records in the main log still don't.
+func TestSkillLoadedInSubagentLog(t *testing.T) {
+	sideAssistant := `{"type":"assistant","isSidechain":true,"message":{"id":"msg_s","role":"assistant","content":[{"type":"tool_use","id":"toolu_9","name":"Bash","input":{"command":"echo release-1.2.0"}}]}}`
+	p := filepath.Join(t.TempDir(), "sess", "subagents", "agent-a1.jsonl")
+	if err := os.MkdirAll(filepath.Dir(p), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(p, []byte(lnSkillSide+"\n"+sideAssistant+"\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if !SkillLoaded(p, "release-checklist", 20) {
+		t.Error("a load in the subagent's own log should count")
+	}
+	if SkillLoaded(write(t, lnSkillSide, sideAssistant), "release-checklist", 20) {
+		t.Error("sidechain records in the main log must still not count")
+	}
+}

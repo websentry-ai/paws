@@ -2,6 +2,9 @@ package hook
 
 import (
 	"encoding/json"
+	"os"
+	"path/filepath"
+	"strings"
 
 	"github.com/websentry-ai/paws/internal/gate"
 	"github.com/websentry-ai/paws/internal/rule"
@@ -23,7 +26,7 @@ func ToEvent(in *Input) gate.Event {
 		Tool:       in.ToolName,
 		Target:     in.MatchTarget(),
 		Session:    in.SessionID,
-		Transcript: in.TranscriptPath,
+		Transcript: transcriptFor(in),
 		Cwd:        in.CWD,
 		AgentID:    in.AgentID,
 		AgentType:  in.AgentType,
@@ -35,6 +38,20 @@ func ToEvent(in *Input) gate.Event {
 		ev.Kind = rule.KindSession
 	}
 	return ev
+}
+
+// transcriptFor is the log that holds the calling thread's own tool calls. A subagent's hook gets the
+// main session's transcript_path plus its agent_id, while its Skill loads go to
+// <session>/subagents/agent-<id>.jsonl; without that file the main log is the best there is.
+func transcriptFor(in *Input) string {
+	if in.AgentID == "" || in.TranscriptPath == "" {
+		return in.TranscriptPath
+	}
+	sub := filepath.Join(strings.TrimSuffix(in.TranscriptPath, ".jsonl"), "subagents", "agent-"+in.AgentID+".jsonl")
+	if _, err := os.Stat(sub); err != nil {
+		return in.TranscriptPath
+	}
+	return sub
 }
 
 // Render turns an engine decision into Claude Code's wire format for eventName.

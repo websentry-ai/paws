@@ -1,6 +1,8 @@
 package hook
 
 import (
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -22,6 +24,34 @@ func TestToEventKind(t *testing.T) {
 		if ev := ToEvent(&Input{HookEventName: name}); ev.Kind != "" {
 			t.Errorf("%s should have no Kind, got %+v", name, ev)
 		}
+	}
+}
+
+// A subagent's call carries the main session's transcript_path and its agent_id; its own log sits at
+// <session>/subagents/agent-<id>.jsonl, and that is the one paws must read for the subagent's loads.
+func TestToEventUsesTheSubagentsOwnLog(t *testing.T) {
+	dir := t.TempDir()
+	main := filepath.Join(dir, "sess.jsonl")
+	sub := filepath.Join(dir, "sess", "subagents", "agent-a1.jsonl")
+	if err := os.MkdirAll(filepath.Dir(sub), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	for _, p := range []string{main, sub} {
+		if err := os.WriteFile(p, nil, 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	in := &Input{HookEventName: "PreToolUse", ToolName: "Bash", TranscriptPath: main}
+	if ev := ToEvent(in); ev.Transcript != main {
+		t.Errorf("main thread: transcript %q, want %q", ev.Transcript, main)
+	}
+	in.AgentID = "a1"
+	if ev := ToEvent(in); ev.Transcript != sub {
+		t.Errorf("subagent: transcript %q, want %q", ev.Transcript, sub)
+	}
+	in.AgentID = "missing"
+	if ev := ToEvent(in); ev.Transcript != main {
+		t.Errorf("subagent without its own log: transcript %q, want the main one %q", ev.Transcript, main)
 	}
 }
 

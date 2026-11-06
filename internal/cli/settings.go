@@ -267,16 +267,18 @@ func withoutPawsHooks(entry json.RawMessage) (rest json.RawMessage, had bool) {
 // init upgrades and uninstall removes those entries.
 const legacyMarker = "PAWS_MANAGED=1 "
 
-// isPawsCommand recognises exactly the commands init writes: `paws gate`, `"$HOME/<path>" gate` or a
+// isPawsCommand recognises exactly the commands init writes: `unbound-paws gate`, `"$HOME/<path>" gate` or a
 // shellQuote'd path then ` gate`, the binary named paws (paws.exe), or any such single path
-// after 0.3.0's marker. Nothing that can expand or chain (`"$(x)/paws"`, `scan; paws gate`) counts.
+// after 0.3.0's marker, plus a hand-written `paws gate` (the short name the docs use), so init doesn't add a
+// second line beside it and uninstall removes it. Nothing that can expand or chain (`"$(x)/paws"`,
+// `scan; paws gate`) counts.
 func isPawsCommand(command string) bool {
 	rest, marked := strings.CutPrefix(command, legacyMarker)
 	prog, ok := strings.CutSuffix(rest, " gate")
 	if !ok {
 		return false
 	}
-	if prog == cliName {
+	if prog == hookCLI || prog == cliName {
 		return true
 	}
 	var path string

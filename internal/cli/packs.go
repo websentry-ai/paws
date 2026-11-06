@@ -111,7 +111,7 @@ func Add(args []string) int {
 		err = fmt.Errorf("name a pack or binding to add")
 	}
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "paws: %v\nusage: unbound-paws add [--project] [--pick group=option] <pack|category/binding>...\n", err)
+		fmt.Fprintf(os.Stderr, "paws: %v\nusage: paws add [--project] [--pick group=option] <pack|category/binding>...\n", err)
 		return 2
 	}
 	c, err := loadCatalog(f.catalog)
@@ -140,7 +140,7 @@ func Add(args []string) int {
 		}
 	}
 	if !hookRegistered() {
-		fmt.Printf("paws is not registered as a hook here yet: run `%[1]s init` (this repo) or `%[1]s init --global`.\n", cliName)
+		fmt.Printf("paws is not registered as a hook here yet: run `%[1]s init` (this repo) or `%[1]s init --global`.\n", runName())
 	}
 	return 0
 }
@@ -190,7 +190,7 @@ func Remove(args []string) int {
 		err = fmt.Errorf("name one pack to remove")
 	}
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "paws: %v\nusage: unbound-paws remove [--project] <pack>\n", err)
+		fmt.Fprintf(os.Stderr, "paws: %v\nusage: paws remove [--project] <pack>\n", err)
 		return 2
 	}
 	skills, err := pack.Remove(f.args[0], target(f.project))
@@ -258,7 +258,7 @@ func List(args []string) int {
 		}
 	}
 	if !any {
-		fmt.Printf("no packs installed (browse with `%s search`)\n", cliName)
+		fmt.Printf("no packs installed (browse with `%s search`)\n", runName())
 	}
 	return 0
 }
@@ -312,7 +312,7 @@ func Search(args []string) int {
 		err = fmt.Errorf("give a search term")
 	}
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "paws: %v\nusage: unbound-paws search <text>\n", err)
+		fmt.Fprintf(os.Stderr, "paws: %v\nusage: paws search <text>\n", err)
 		return 2
 	}
 	c, err := loadCatalog(f.catalog)
@@ -324,19 +324,20 @@ func Search(args []string) int {
 	hit := func(fields ...string) bool {
 		return strings.Contains(strings.ToLower(strings.Join(fields, " ")), q)
 	}
+	run := runName()
 	found := 0
 	for _, n := range sortedKeys(c.Packs) {
 		p := c.Packs[n]
 		if hit(p.Name, p.Description, strings.Join(p.Tags, " ")) {
 			found++
-			fmt.Printf("pack %-20s %s\n     %s add %s\n", p.Name, p.Description, cliName, p.Name)
+			fmt.Printf("pack %-20s %s\n     %s add %s\n", p.Name, p.Description, run, p.Name)
 		}
 	}
 	for _, rel := range sortedKeys(c.Bindings) {
 		b := c.Bindings[rel]
 		if hit(b.Name, rel, b.Action.Skill, strings.Join(b.Tags, " "), b.Body) {
 			found++
-			fmt.Printf("binding %-28s %s\n     %s add %s\n", b.Name, firstLine(b.Body), cliName, strings.TrimSuffix(rel, ".md"))
+			fmt.Printf("binding %-28s %s\n     %s add %s\n", b.Name, firstLine(b.Body), run, strings.TrimSuffix(rel, ".md"))
 		}
 	}
 	if found == 0 {
@@ -358,7 +359,7 @@ func Index(args []string) int {
 		fmt.Fprintf(os.Stderr, "paws: %v\n", err)
 		return 1
 	}
-	var index any = buildIndex(c)
+	var index any = buildIndex(c, cliName)
 	if f.portal {
 		index = buildPortalCatalog(c)
 	}
@@ -397,18 +398,20 @@ type indexPack struct {
 	Add         string            `json:"add"`
 }
 
-// buildIndex is the catalog as JSON, each entry with the command that installs it.
-func buildIndex(c *catalog.Catalog) map[string]any {
+// buildIndex is the catalog as JSON, each entry with the command that installs it, run as `run`:
+// `paws index` (website and portal data) passes cliName; the local UI passes runName(), so a copied
+// command never runs another tool that has the name paws.
+func buildIndex(c *catalog.Catalog, run string) map[string]any {
 	var packs []indexPack
 	for _, n := range sortedKeys(c.Packs) {
 		p := c.Packs[n]
-		packs = append(packs, indexPack{p.Name, p.Description, p.Tags, p.Bindings, p.PickOne, cliName + " add " + p.Name})
+		packs = append(packs, indexPack{p.Name, p.Description, p.Tags, p.Bindings, p.PickOne, run + " add " + p.Name})
 	}
 	var bindings []indexBinding
 	for _, rel := range sortedKeys(c.Bindings) {
 		b := c.Bindings[rel]
 		ib := indexBinding{Path: rel, Name: b.Name, Description: firstLine(b.Body), Event: b.Event, Action: b.Action.Type,
-			Skill: b.Action.Skill, Tags: b.Tags, Add: cliName + " add " + strings.TrimSuffix(rel, ".md")}
+			Skill: b.Action.Skill, Tags: b.Tags, Add: run + " add " + strings.TrimSuffix(rel, ".md")}
 		if b.Upstream.Repo != "" {
 			u, pv := b.Upstream, b.Provenance
 			ib.Upstream, ib.Provenance = &u, &pv
@@ -486,7 +489,7 @@ func Pin(args []string) int {
 	if len(args) == 1 {
 		root = args[0]
 	} else if len(args) > 1 {
-		fmt.Fprintln(os.Stderr, "usage: unbound-paws pin [root]")
+		fmt.Fprintln(os.Stderr, "usage: paws pin [root]")
 		return 2
 	}
 	if st, err := os.Stat(catalog.CatalogDir(root)); err != nil || !st.IsDir() {

@@ -7,6 +7,7 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"runtime"
 	"strings"
 	"testing"
 )
@@ -128,5 +129,55 @@ func TestInstalledViewListsHomePacksOnce(t *testing.T) {
 	os.WriteFile(filepath.Join(home, ".paws", "installed.yaml"), []byte("packs:\n  writing:\n    at: \"2026-11-05T00:00:00Z\"\n"), 0o644)
 	if got := installedView(); len(got) != 1 || got[0].Scope != "user" {
 		t.Fatalf("want writing once, as user; got %+v", got)
+	}
+}
+
+// The local UI copies each pack's install command: it names the paws that runs here, so a `paws`
+// that belongs to another tool is never the one it offers.
+func TestUICatalogCommandsRunHere(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("needs symlinks")
+	}
+	t.Setenv("PAWS_HOME", t.TempDir())
+	for _, c := range []struct {
+		name  string
+		short func(t *testing.T, bin string)
+		want  string
+	}{
+		{"short name is ours", func(t *testing.T, bin string) {
+			if err := os.Symlink("unbound-paws", filepath.Join(bin, "paws")); err != nil {
+				t.Fatal(err)
+			}
+		}, "paws add "},
+		{"short name is another tool", func(t *testing.T, bin string) {
+			if err := os.WriteFile(filepath.Join(bin, "paws"), []byte("#!/bin/sh\n"), 0o755); err != nil {
+				t.Fatal(err)
+			}
+		}, "unbound-paws add "},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			bin := t.TempDir()
+			if err := os.WriteFile(filepath.Join(bin, "unbound-paws"), []byte("#!/bin/sh\n"), 0o755); err != nil {
+				t.Fatal(err)
+			}
+			c.short(t, bin)
+			t.Setenv("PATH", bin)
+			req := httptest.NewRequest("GET", "/api/catalog", nil)
+			req.Host = "127.0.0.1:4242"
+			rec := httptest.NewRecorder()
+			uiHandler("127.0.0.1:4242").ServeHTTP(rec, req)
+			var idx struct {
+				Packs    []struct{ Add string } `json:"packs"`
+				Bindings []struct{ Add string } `json:"bindings"`
+			}
+			if err := json.Unmarshal(rec.Body.Bytes(), &idx); err != nil || len(idx.Packs) == 0 || len(idx.Bindings) == 0 {
+				t.Fatalf("catalog: %d %v %.200s", rec.Code, err, rec.Body)
+			}
+			for _, a := range append(append([]struct{ Add string }{}, idx.Packs...), idx.Bindings...) {
+				if !strings.HasPrefix(a.Add, c.want) {
+					t.Fatalf("add command %q should start with %q", a.Add, c.want)
+				}
+			}
+		})
 	}
 }

@@ -124,7 +124,7 @@ func TestValidateProblems(t *testing.T) {
 		}, "host path like github.com/owner/repo"},
 		{"unpinned upstream", func(t *testing.T, root string) {
 			write(t, filepath.Join(root, "catalog/writing/unpinned.md"), strings.Replace(binding("unpinned", "x"), "  content_hash: sha256:0000000000000000000000000000000000000000000000000000000000000000\n", "", 1))
-		}, "pin it with `unbound-paws pin`"},
+		}, "pin it with `paws pin`"},
 		{"require-skill with no source", func(t *testing.T, root string) {
 			write(t, filepath.Join(root, "catalog/aws/orphan.md"), "---\nname: orphan\nevent: pre-tool\naction:\n  type: require-skill\n  skill: ghost\ntags: [org]\n---\n")
 		}, `require-skill "ghost" has no upstream and no local skill`},

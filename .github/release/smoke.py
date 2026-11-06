@@ -117,7 +117,29 @@ def main():
                     raise RuntimeError("install.sh did not install a working unbound-paws")
                 if (home / ".zshrc").read_text().count('export PATH="$HOME/.local/bin:$PATH"') != 1:
                     raise RuntimeError("install.sh should add ~/.local/bin to PATH in .zshrc exactly once")
-                print("PASS: install.sh installs ~/.local/bin/unbound-paws and puts it on PATH once", flush=True)
+                short = home / ".local/bin/paws"
+                if not short.is_symlink() or os.readlink(short) != "unbound-paws":
+                    raise RuntimeError("install.sh did not link ~/.local/bin/paws to unbound-paws")
+                if run([str(short), "version"], scratch, ienv) != f"paws {version}":
+                    raise RuntimeError("install.sh's paws link does not run")
+                print("PASS: install.sh installs ~/.local/bin/unbound-paws, links paws to it, puts it on PATH once", flush=True)
+
+                # Someone else's paws keeps the name: the installer leaves it and says the long name.
+                foreign_dir = scratch / "foreign-bin"
+                foreign_dir.mkdir()
+                foreign = foreign_dir / "paws"
+                foreign.write_text("#!/bin/sh\necho someone else\n")
+                foreign.chmod(0o755)
+                out = run(["bash", str(REPO / "install.sh"), version], scratch, {**ienv, "PAWS_INSTALL_DIR": str(foreign_dir)})
+                if foreign.read_text() != "#!/bin/sh\necho someone else\n" or foreign.is_symlink():
+                    raise RuntimeError("install.sh replaced a paws it didn't install")
+                if "unbound-paws init --global" not in out:
+                    raise RuntimeError(f"install.sh should suggest unbound-paws when paws isn't its own:\n{out}")
+                shadowed = {**ienv, "PATH": f"{foreign_dir}:{home / '.local/bin'}:/usr/bin:/bin"}
+                out = run(["bash", str(REPO / "install.sh"), version], scratch, shadowed)
+                if "Another paws comes first" not in out or "unbound-paws init --global" not in out:
+                    raise RuntimeError(f"install.sh should warn when another paws shadows its link:\n{out}")
+                print("PASS: install.sh leaves another tool's paws alone and says when one shadows its link", flush=True)
 
             project = scratch / "project"
             project.mkdir()
@@ -134,6 +156,10 @@ def main():
                 if not launchers or launchers[0].read_bytes()[:2] == b"#!":
                     raise RuntimeError("npm install kept the Node launcher instead of the native binary")
                 print("PASS: npm install puts the native binary behind the unbound-paws command", flush=True)
+            short_command = [*installer.init[:-2], "paws", "version"]  # the package's second bin
+            if run(short_command, project, env) != f"paws {version}":
+                raise RuntimeError("npm package has no working paws command")
+            print("PASS: npm package installs the paws command too", flush=True)
             run(installer.init, project, env)
             settings = json.loads((project / ".claude/settings.json").read_text())
             command = settings["hooks"]["PreToolUse"][0]["hooks"][0]["command"]
@@ -161,6 +187,25 @@ def main():
                     raise RuntimeError("npm install replaced a newer hook binary with an older one")
                 print("PASS: npm install never downgrades the hook's binary copy", flush=True)
                 shutil.rmtree(scratch / "npm-cache")  # the checksum checks below need a fresh download
+
+            # A real global install: npm links both bins to the launcher postinstall swapped for the
+            # binary, so `paws init` counts as on PATH and writes the hook as `unbound-paws gate`.
+            if sys.platform != "win32":
+                prefix = scratch / "global"
+                run(["npm", "i", "-g", "--prefix", str(prefix), installer.init[3]], scratch, env)
+                gproject = scratch / "global-project"
+                gproject.mkdir()
+                run(["git", "init", "-q"], gproject, env)
+                genv = {**env, "PAWS_HOME": str(scratch / "global-paws-home"),
+                        "HOME": str(scratch / "global-home"), "PATH": f"{prefix / 'bin'}:/usr/bin:/bin"}
+                (scratch / "global-home").mkdir()
+                run([str(prefix / "bin/paws"), "init"], gproject, genv)
+                settings = json.loads((gproject / ".claude/settings.json").read_text())
+                if settings["hooks"]["PreToolUse"][0]["hooks"][0]["command"] != "unbound-paws gate":
+                    raise RuntimeError("paws init from a global npm install should register `unbound-paws gate`")
+                if (scratch / "global-paws-home/bin/paws").exists():
+                    raise RuntimeError("paws init copied the binary although unbound-paws is on PATH")
+                print("PASS: npm i -g puts paws and unbound-paws on PATH; paws init registers unbound-paws gate", flush=True)
 
             sums_path.write_text("\n".join(f"{'0' * 64}  {name}" for name in sums) + "\n")
             if sys.platform != "win32":

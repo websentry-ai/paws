@@ -2,7 +2,7 @@
 
 paws keeps one JSONL audit log per user: `~/.paws/audit.log` (or
 `$PAWS_HOME/audit.log`). Nothing in it leaves the machine until you run
-`unbound-paws login`; after that, part of it is uploaded ([below](#portal-upload)).
+`paws login`; after that, part of it is uploaded ([below](#portal-upload)).
 Files are 0600 in a 0700 directory. Past 50 MB the log moves to
 `audit.log.1`, replacing the previous one.
 
@@ -53,8 +53,8 @@ The `action` key:
 
 ## Where to see it
 
-`unbound-paws list` shows how often each installed binding fired. The Activity tab of
-`unbound-paws ui` shows the rest. Per rule: `fires` (all records), `denied`, `already-loaded` (passed via
+`paws list` shows how often each installed binding fired. The Activity tab of
+`paws ui` shows the rest. Per rule: `fires` (all records), `denied`, `already-loaded` (passed via
 skill-load in a session where the rule had not denied first: the agent had
 the skill on its own), `loaded-after-deny`, and `delivered` (digest or
 session context). It also lists rules in scope that never fired, skill
@@ -86,7 +86,7 @@ It is a heuristic: a secret in a shape not listed here is written as it is.
 
 ## Portal upload
 
-Opt-in. Nothing is sent until you run `unbound-paws login`, which stores a token, and
+Opt-in. Nothing is sent until you run `paws login`, which stores a token, and
 the account's email when the portal sends it, in `~/.paws/credentials.json`
 (0600). The portal address (`PAWS_PORTAL_API`)
 must be https; plain http works only for `localhost`, `127.0.0.1` or `::1`,
@@ -98,21 +98,21 @@ and credentials saved for any other http address are refused. From then on:
   was more than `PAWS_CONFIG_INTERVAL` ago (default `15m`). Each request times
   out after 5 seconds and the whole step, skill downloads included, after 12;
   any failure is dropped silently and retried later;
-- **`unbound-paws sync`** does both at once and prints what it did;
-- **`unbound-paws login`** syncs once, so the portal sees the machine right away.
+- **`paws sync`** does both at once and prints what it did;
+- **`paws login`** syncs once, so the portal sees the machine right away.
 
-`unbound-paws logout` deletes the token and removes every rule and digest the portal
+`paws logout` deletes the token and removes every rule and digest the portal
 config wrote, and `~/.paws/portal/state.json`. A 401 from the portal (the
-login was revoked) does the same, from `unbound-paws sync` or the Stop hook; `paws
+login was revoked) does the same, from `paws sync` or the Stop hook; `paws
 sync` then says the login was revoked.
 
 The PreToolUse and SessionStart hooks, which decide tool calls, never touch
 the network.
 
-`unbound-paws sync` reads `audit.log.1` then `audit.log` and uploads each rule
+`paws sync` reads `audit.log.1` then `audit.log` and uploads each rule
 record (verdict `allow` or `deny`) and action record once.
 `~/.paws/sync-state.json` remembers the last record sent; requests carry at
-most 1,000 records and 1 MB. `unbound-paws sync --dry-run` prints the request body
+most 1,000 records and 1 MB. `paws sync --dry-run` prints the request body
 (first 20 records) and sends nothing. The body:
 
 ```
@@ -172,9 +172,9 @@ config and applies it:
   content hash matches the config. An upstream skill must match a catalog pin
   in this paws binary exactly (a `github.com` repo, path, commit and content
   hash), so the portal can only choose among pins paws already ships; anything
-  else is skipped as "not in this unbound-paws version's catalog". A mismatch is
+  else is skipped as "not in this paws version's catalog". A mismatch is
   skipped and reported. A skill directory paws didn't install, or one you
-  edited, is left as it is, as with `unbound-paws add`. Turning a skill off removes
+  edited, is left as it is, as with `paws add`. Turning a skill off removes
   its rules, not its skill directory;
 - a skill's rules are written only when its `SKILL.md` is in
   `~/.claude/skills/<name>` or the project's `.claude/skills/<name>` (or it

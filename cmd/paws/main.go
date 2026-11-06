@@ -71,30 +71,33 @@ func usage() {
 	fmt.Fprint(os.Stderr, `paws — Pre-tool Agent Workflow System
 
 Usage:
-  unbound-paws gate                                      Run as a Claude Code hook (reads event JSON on stdin).
-  unbound-paws init [--global | --settings <path>]       Register paws in a Claude Code settings.json.
-  unbound-paws uninstall [--global | --settings <path>]  Remove paws from a settings.json.
-  unbound-paws skill [--global | --settings <path>]      Install or reinstall the paws skill (Claude writes rules with it).
-  unbound-paws explain [--tool T] [--event E] <command>  Dry-run: show matching rules and the decision.
-  echo '<event json>' | unbound-paws explain -           Dry-run a full event JSON.
-  unbound-paws add [--project] [--pick g=o] <pack|cat/binding>...
-                                                         Install packs: bindings plus the skills they require.
-  unbound-paws remove [--project] <pack>                 Uninstall a pack (and skills only it needed).
-  unbound-paws list [--project]                          Installed packs with local fire counts.
-  unbound-paws ui [--port N] [--no-open]                 Local page: catalog, installed packs, what fired.
-  unbound-paws search <text>                             Search the catalog.
-  unbound-paws index [--portal] [-o file]                The catalog as JSON (website, local UI); --portal: the portal's /catalog.
-  unbound-paws validate [root]                           Check root/catalog bindings and root/packs manifests.
-  unbound-paws pin [root]                                Fetch upstream skills and pin their content hashes.
-  unbound-paws login [--key <one-time-key>|-]            Link this machine to the paws portal (opt-in); --key for no browser (- reads stdin).
-  unbound-paws logout                                    Forget the portal login and remove its rules.
-  unbound-paws sync [--dry-run]                          Upload new records and pull portal settings now; --dry-run prints the upload.
-  unbound-paws version                                   Print version.
+  paws gate                                      Run as a Claude Code hook (reads event JSON on stdin).
+  paws init [--global | --settings <path>]       Register paws in a Claude Code settings.json.
+  paws uninstall [--global | --settings <path>]  Remove paws from a settings.json.
+  paws skill [--global | --settings <path>]      Install or reinstall the paws skill (Claude writes rules with it).
+  paws explain [--tool T] [--event E] <command>  Dry-run: show matching rules and the decision.
+  echo '<event json>' | paws explain -           Dry-run a full event JSON.
+  paws add [--project] [--pick g=o] <pack|cat/binding>...
+                                                 Install packs: bindings plus the skills they require.
+  paws remove [--project] <pack>                 Uninstall a pack (and skills only it needed).
+  paws list [--project]                          Installed packs with local fire counts.
+  paws ui [--port N] [--no-open]                 Local page: catalog, installed packs, what fired.
+  paws search <text>                             Search the catalog.
+  paws index [--portal] [-o file]                The catalog as JSON (website, local UI); --portal: the portal's /catalog.
+  paws validate [root]                           Check root/catalog bindings and root/packs manifests.
+  paws pin [root]                                Fetch upstream skills and pin their content hashes.
+  paws login [--key <one-time-key>|-]            Link this machine to the paws portal (opt-in); --key for no browser (- reads stdin).
+  paws logout                                    Forget the portal login and remove its rules.
+  paws sync [--dry-run]                          Upload new records and pull portal settings now; --dry-run prints the upload.
+  paws version                                   Print version.
+
+paws is also installed as unbound-paws (its npm package name); the hook runs that name,
+and npx needs it: npx unbound-paws init.
 
 Rules are .paws/**/*.md files; paws reads every .paws/ from the working
 directory up to the repo root (or $HOME if no repo), plus ~/.paws.
 
-Nothing leaves the machine unless you run unbound-paws login. Once logged in, the
+Nothing leaves the machine unless you run paws login. Once logged in, the
 async Stop hook uploads records and pulls portal settings after Claude's
 turns (throttled); the gate itself never uses the network. The portal
 address is $PAWS_PORTAL_API (default https://paws-api.getunbound.ai).

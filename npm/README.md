@@ -6,6 +6,8 @@ picked is loaded before the matching action runs.
 
 ```bash
 npx unbound-paws init     # registers the hook in this repo's .claude/settings.json
+npm i -g unbound-paws     # or install it: puts `paws` (and `unbound-paws`) on PATH
+paws add writing
 ```
 
 The package downloads the paws binary for your platform from the GitHub

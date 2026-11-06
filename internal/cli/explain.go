@@ -17,7 +17,7 @@ func Explain(args []string) int {
 	in := &hook.Input{HookEventName: "PreToolUse", ToolName: "Bash"}
 
 	if len(args) == 0 {
-		fmt.Fprintln(os.Stderr, "usage: unbound-paws explain [--tool T] [--event E] <command|path|url|...>\n       echo '<event json>' | unbound-paws explain -")
+		fmt.Fprintln(os.Stderr, "usage: paws explain [--tool T] [--event E] <command|path|url|...>\n       echo '<event json>' | paws explain -")
 		return 2
 	}
 	if len(args) == 1 && args[0] == "-" {

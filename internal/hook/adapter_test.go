@@ -53,6 +53,17 @@ func TestToEventUsesTheSubagentsOwnLog(t *testing.T) {
 	if ev := ToEvent(in); ev.Transcript != main {
 		t.Errorf("subagent without its own log: transcript %q, want the main one %q", ev.Transcript, main)
 	}
+	// An id that would leave <session>/subagents/ is never used, even when the file it names exists.
+	other := filepath.Join(dir, "sess", "agent-x.jsonl")
+	if err := os.WriteFile(other, nil, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	for _, id := range []string{"a/../../agent-x", "x/../../agent-x"} {
+		in.AgentID = id
+		if ev := ToEvent(in); ev.Transcript != main {
+			t.Errorf("agent_id %q: transcript %q, want the main one %q", id, ev.Transcript, main)
+		}
+	}
 }
 
 func TestRenderDeny(t *testing.T) {

@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"regexp"
 	"strings"
 
 	"github.com/websentry-ai/paws/internal/gate"
@@ -40,11 +41,15 @@ func ToEvent(in *Input) gate.Event {
 	return ev
 }
 
+// agentIDRe is what Claude Code's agent ids look like; anything else (a "/" or "..") could name a file
+// outside <session>/subagents/, so it is not used to find one.
+var agentIDRe = regexp.MustCompile(`^[A-Za-z0-9_-]+$`)
+
 // transcriptFor is the log that holds the calling thread's own tool calls. A subagent's hook gets the
 // main session's transcript_path plus its agent_id, while its Skill loads go to
 // <session>/subagents/agent-<id>.jsonl; without that file the main log is the best there is.
 func transcriptFor(in *Input) string {
-	if in.AgentID == "" || in.TranscriptPath == "" {
+	if !agentIDRe.MatchString(in.AgentID) || in.TranscriptPath == "" {
 		return in.TranscriptPath
 	}
 	sub := filepath.Join(strings.TrimSuffix(in.TranscriptPath, ".jsonl"), "subagents", "agent-"+in.AgentID+".jsonl")

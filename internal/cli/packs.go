@@ -131,7 +131,11 @@ func Add(args []string) int {
 			fmt.Fprintf(os.Stderr, "paws: add %s: %v\n", name, err)
 			return 1
 		}
-		fmt.Printf("Added %s (%d binding(s)) to %s\n", res.Pack, len(res.Bindings), pack.InstallDir(t, res.Pack))
+		n := fmt.Sprintf("%d bindings", len(res.Bindings))
+		if len(res.Bindings) == 1 {
+			n = "1 binding"
+		}
+		fmt.Printf("Added %s (%s) to %s\n", res.Pack, n, pack.InstallDir(t, res.Pack))
 		for _, s := range res.Installed {
 			fmt.Printf("  skill %s installed in %s\n", s, t.SkillsDir)
 		}
@@ -160,9 +164,9 @@ func askPick(g catalog.PickOne) string {
 		fmt.Printf(" (%s)", g.Description)
 	}
 	fmt.Printf(": pick one of %s [%s]: ", strings.Join(names, ", "), g.Default)
-	line, _ := bufio.NewReader(os.Stdin).ReadString('\n')
-	if st, err := os.Stdin.Stat(); err == nil && st.Mode()&os.ModeCharDevice == 0 {
-		fmt.Println() // piped answer: no echoed newline from a terminal
+	line, err := bufio.NewReader(os.Stdin).ReadString('\n')
+	if err != nil {
+		fmt.Println() // Ctrl-D, or /dev/null (a char device too): no Enter ended the prompt line
 	}
 	return strings.TrimSpace(line)
 }

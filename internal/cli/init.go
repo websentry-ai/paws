@@ -30,9 +30,13 @@ func Init(args []string) int {
 		return 1
 	}
 	self, _ = filepath.Abs(self)
-	// The same command in project and user settings, so Claude Code runs the gate once.
+	// The same command in project and user settings, so Claude Code runs the gate once. Run as the
+	// unbound-paws on PATH, init names it; so does a project init (from npx, say) next to a user-level
+	// `unbound-paws gate` while unbound-paws is still installed on PATH.
+	user := filepath.Join(userClaudeDir(), "settings.json")
 	command := cliName + " gate"
-	if !onPath(self) {
+	reuse := filepath.Clean(settingsPath) != filepath.Clean(user) && pawsCommandIn(user) == command && cliPath() != ""
+	if !onPath(self) && !reuse {
 		// Not installed on PATH: copy the binary somewhere the npx cache can't clean up.
 		bin, err := installSelf(self, gate.UserDir())
 		if err != nil {
@@ -40,12 +44,9 @@ func Init(args []string) int {
 			return 1
 		}
 		command = hookCommand(bin)
-	}
-	// Project and user settings must carry the same line or Claude Code runs the gate twice: reuse
-	// a user-level `unbound-paws gate`, as long as unbound-paws is still installed on PATH.
-	user := filepath.Join(userClaudeDir(), "settings.json")
-	if filepath.Clean(settingsPath) != filepath.Clean(user) && pawsCommandIn(user) == cliName+" gate" && cliPath() != "" {
-		command = cliName + " gate"
+		if cliPath() == "" {
+			fmt.Printf("unbound-paws isn't installed, so the hook runs this copy. Install it for the `unbound-paws` command and upgrades:\n  curl -fsSL https://paws.getunbound.ai/install.sh | bash\n")
+		}
 	}
 
 	doc, err := readSettings(settingsPath)
@@ -67,13 +68,15 @@ func Init(args []string) int {
 		return 1
 	}
 	fmt.Printf("Registered paws in %s\n  command: %s\n", settingsPath, command)
-	other := user
+	// A different paws hook in the other scope makes Claude Code run paws twice: say which init fixes it.
+	other, fix := user, "`"+cliName+" init --global`"
 	if filepath.Clean(settingsPath) == filepath.Clean(user) {
 		cwd, _ := os.Getwd()
-		other = filepath.Join(projectRoot(cwd), ".claude", "settings.json")
+		root := projectRoot(cwd)
+		other, fix = filepath.Join(root, ".claude", "settings.json"), "`"+cliName+" init` in "+root
 	}
 	if c := pawsCommandIn(other); c != "" && c != command {
-		fmt.Printf("%s registers paws as `%s`; run `%s init` there too, so Claude Code runs paws once.\n", other, c, cliName)
+		fmt.Printf("%s has a different paws hook. Run %s too, so Claude Code runs paws once.\n", other, fix)
 	}
 	return 0
 }
@@ -107,14 +110,19 @@ func pawsCommandIn(path string) string {
 // cliName is the command people type and the hook runs: the installer (and npm) put it on PATH.
 const cliName = "unbound-paws"
 
-// cliPath is where `unbound-paws` resolves on PATH, or "". npx (and npm run) put a
-// node_modules/.bin on PATH only for that run; Claude Code won't have it, so it doesn't count.
+// cliPath is the first `unbound-paws` on PATH, or "". npx (and npm run) put a node_modules/.bin
+// in front of PATH only for that run; Claude Code won't have it, so those folders are skipped, and
+// so are relative entries like `.` (they follow the cwd, and a bare name would search PATH again).
 func cliPath() string {
-	p, err := exec.LookPath(cliName)
-	if err != nil || filepath.Base(filepath.Dir(p)) == ".bin" && filepath.Base(filepath.Dir(filepath.Dir(p))) == "node_modules" {
-		return ""
+	for _, dir := range filepath.SplitList(os.Getenv("PATH")) {
+		if !filepath.IsAbs(dir) || filepath.Base(dir) == ".bin" && filepath.Base(filepath.Dir(dir)) == "node_modules" {
+			continue
+		}
+		if p, err := exec.LookPath(filepath.Join(dir, cliName)); err == nil {
+			return p
+		}
 	}
-	return p
+	return ""
 }
 
 // onPath reports whether init is running as the unbound-paws on PATH, so the hook can name it

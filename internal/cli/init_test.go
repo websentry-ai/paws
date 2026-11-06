@@ -304,7 +304,7 @@ func TestInitKeepsProjectAndGlobalOnOneLine(t *testing.T) {
 	t.Setenv("PATH", "")
 	os.Remove(filepath.Join(cfg, "settings.json"))
 	code, out := captureStdout(t, func() int { return Init([]string{"--global"}) })
-	if code != 0 || !strings.Contains(out, "run `unbound-paws init` there too") {
+	if code != 0 || !strings.Contains(out, "has a different paws hook. Run `unbound-paws init` in "+repo+" too") || strings.Contains(out, "PAWS_MANAGED") {
 		t.Errorf("global init should warn about the differing project line: %d %q", code, out)
 	}
 	// With unbound-paws gone from PATH, reusing the global line would register a hook that can't
@@ -315,5 +315,64 @@ func TestInitKeepsProjectAndGlobalOnOneLine(t *testing.T) {
 	Init(nil)
 	if got := pawsCommandIn(filepath.Join(repo, ".claude", "settings.json")); got == "unbound-paws gate" {
 		t.Errorf("project init reused unbound-paws gate with no unbound-paws on PATH")
+	}
+}
+
+// npx puts its own node_modules/.bin first on PATH; an installed unbound-paws further along still
+// counts, so a project init through npx reuses the global `unbound-paws gate`.
+func TestCliPathLooksPastNpxBin(t *testing.T) {
+	dir := t.TempDir()
+	npxBin := filepath.Join(dir, "_npx", "x", "node_modules", ".bin")
+	local := filepath.Join(dir, ".local", "bin")
+	for _, d := range []string{npxBin, local} {
+		os.MkdirAll(d, 0o755)
+		os.WriteFile(filepath.Join(d, "unbound-paws"), []byte("#!/bin/sh\n"), 0o755)
+	}
+	t.Setenv("PATH", npxBin+string(os.PathListSeparator)+local)
+	if got := cliPath(); got != filepath.Join(local, "unbound-paws") {
+		t.Errorf("cliPath() = %q, want the installed one in %s", got, local)
+	}
+	// A relative entry after npx's .bin must not turn into a bare-name search that finds npx's copy.
+	for _, path := range []string{npxBin, npxBin + string(os.PathListSeparator) + ".", npxBin + string(os.PathListSeparator) + ""} {
+		t.Setenv("PATH", path)
+		if got := cliPath(); got != "" {
+			t.Errorf("cliPath() with PATH %q = %q, want empty", path, got)
+		}
+	}
+}
+
+// Off PATH and not installed anywhere, init says how to install unbound-paws.
+// A project init next to a global hook from 0.3.0 names the init that fixes it, not the old line.
+func TestInitPointsAtGlobalInitForAnOldGlobalHook(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	t.Setenv("PAWS_HOME", filepath.Join(home, ".paws"))
+	cfg := filepath.Join(home, ".claude")
+	t.Setenv("CLAUDE_CONFIG_DIR", cfg)
+	t.Setenv("PATH", "")
+	doc := settingsDoc{}
+	ensureHooks(doc, `PAWS_MANAGED=1 '`+filepath.Join(home, ".paws", "bin", "paws")+`' gate`)
+	writeSettings(filepath.Join(cfg, "settings.json"), doc)
+	repo := filepath.Join(home, "repo")
+	os.MkdirAll(filepath.Join(repo, ".git"), 0o755)
+	t.Chdir(repo)
+	code, out := captureStdout(t, func() int { return Init(nil) })
+	if code != 0 || !strings.Contains(out, "has a different paws hook. Run `unbound-paws init --global` too") || strings.Contains(out, "PAWS_MANAGED") {
+		t.Errorf("project init should point at init --global without echoing the old line: %d %q", code, out)
+	}
+}
+
+func TestInitOffPathSaysHowToInstall(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	t.Setenv("PAWS_HOME", filepath.Join(home, ".paws"))
+	t.Setenv("CLAUDE_CONFIG_DIR", filepath.Join(home, ".claude"))
+	t.Setenv("PATH", "")
+	repo := filepath.Join(home, "repo")
+	os.MkdirAll(filepath.Join(repo, ".git"), 0o755)
+	t.Chdir(repo)
+	code, out := captureStdout(t, func() int { return Init(nil) })
+	if code != 0 || !strings.Contains(out, "install.sh | bash") {
+		t.Errorf("init off PATH should say how to install: %d %q", code, out)
 	}
 }

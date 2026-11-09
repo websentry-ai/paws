@@ -2,6 +2,7 @@ package cli
 
 import (
 	"io/fs"
+	"path"
 	"strings"
 	"unicode"
 	"unicode/utf8"
@@ -16,6 +17,8 @@ type portalCatalogSkill struct {
 	Name           string          `json:"name"`
 	Kind           string          `json:"kind"`
 	Description    string          `json:"description"`
+	Summary        string          `json:"summary"`    // the first binding's summary: what the skill teaches
+	SourceURL      string          `json:"source_url"` // the skill's folder on GitHub, at the pinned ref
 	License        string          `json:"license"`
 	Upstream       *portalUpstream `json:"upstream"` // null for skills this repo ships
 	Version        string          `json:"version"`
@@ -33,8 +36,11 @@ type portalUpstream struct {
 // repoLicense covers the skills this repo ships under catalog/*/skills.
 const repoLicense = "Apache-2.0"
 
+// repoTree is where this repo's own skills are browsed on GitHub.
+const repoTree = "https://github.com/websentry-ai/paws/tree/main"
+
 // buildPortalCatalog groups bindings by the skill they require. Each binding becomes one of
-// the skill's default actions; the first binding (by path) supplies the description and pin.
+// the skill's default actions; the first binding (by path) supplies the description, summary and pin.
 func buildPortalCatalog(c *catalog.Catalog) map[string]any {
 	bySkill := map[string]*portalCatalogSkill{}
 	tags := map[string]map[string]bool{}
@@ -61,15 +67,18 @@ func buildPortalCatalog(c *catalog.Catalog) map[string]any {
 }
 
 // newCatalogSkill fills a skill's pin: the upstream ref, or for a skill this repo ships its
-// content hash (the hash `paws sync` checks before installing it from the binary).
+// content hash (the hash `paws sync` checks before installing it from the binary). Its source
+// link is the skill's folder at that ref, or in this repo on main; a SKILL.md at an upstream
+// repo's root links to the repo at the ref.
 func newCatalogSkill(c *catalog.Catalog, b *catalog.Binding) *portalCatalogSkill {
-	s := &portalCatalogSkill{Name: b.Action.Skill, Kind: "skill", Description: firstLine(b.Body), DefaultActions: []portalAction{}}
+	s := &portalCatalogSkill{Name: b.Action.Skill, Kind: "skill", Description: firstLine(b.Body), Summary: b.Summary, DefaultActions: []portalAction{}}
 	if u := b.Upstream; u.Repo != "" {
 		s.Upstream = &portalUpstream{Repo: u.Repo, Path: u.Path, Ref: u.Ref}
+		s.SourceURL = strings.TrimSuffix("https://"+u.Repo+"/tree/"+u.Ref+"/"+path.Dir(u.Path), "/.")
 		s.Version, s.ContentHash, s.License = u.Ref[:7], u.ContentHash, b.Provenance.License
 		return s
 	}
-	s.License = repoLicense
+	s.License, s.SourceURL = repoLicense, repoTree+"/"+catalog.LocalSkillDir(b)
 	if sub, err := fs.Sub(c.FS, catalog.LocalSkillDir(b)); err == nil {
 		if h, err := pack.HashSkill(sub); err == nil {
 			s.ContentHash, s.Version = h, strings.TrimPrefix(h, "sha256:")[:7]

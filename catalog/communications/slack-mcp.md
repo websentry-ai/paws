@@ -9,6 +9,7 @@ action:
   skill: slack
   on_miss: digest
   digest: digests/slack.md
+summary: 'Claude checks whether a channel is shared outside the company, drafts external or mass messages for you, replies in threads, and confirms before any @channel.'
 tags: [org, comms]
 ---
 Loads the slack skill before a Slack MCP send, draft or scheduled send.

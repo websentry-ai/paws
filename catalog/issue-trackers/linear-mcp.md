@@ -8,6 +8,7 @@ action:
   skill: linear
   on_miss: digest
   digest: digests/linear.md
+summary: 'Claude searches Linear before creating an issue, uses the team''s real statuses, states each status change, and links new issues to their project or parent.'
 tags: [org, issues]
 ---
 Loads the linear skill before Linear issues, projects, initiatives or comments are written or deleted.

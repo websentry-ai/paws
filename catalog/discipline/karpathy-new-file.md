@@ -18,6 +18,7 @@ provenance:
   license: MIT
   last_push: 2026-04-20
   fetched: 2026-10-27
+summary: 'Claude states its assumptions, writes the least code that solves the problem, changes only what the task needs, and defines a check it can run before calling it done.'
 tags: [practice, discipline]
 ---
 Loads karpathy-guidelines before the agent creates a new source file, the moment overbuilding usually starts.

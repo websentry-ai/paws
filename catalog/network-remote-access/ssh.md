@@ -9,6 +9,7 @@ action:
   skill: ssh
   on_miss: digest
   digest: digests/ssh.md
+summary: 'Claude stops on a changed host key, uses ed25519 keys made for one purpose, states prod commands before running them, and says what a tunnel exposes.'
 tags: [org, network]
 ---
 Loads the ssh skill before host-key overrides, agent or port forwarding, scp/sftp transfers and known_hosts removals.

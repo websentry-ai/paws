@@ -16,6 +16,7 @@ provenance:
   license: Apache-2.0
   last_push: 2026-10-28
   fetched: 2026-10-28
+summary: 'Claude writes short Conventional Commits messages: an imperative subject under 50 characters, and a body only when the why is not obvious or something breaks.'
 tags: [practice, git]
 ---
 Loads caveman-commit before a commit, so the message is a terse Conventional Commits subject and a body only when the why is not obvious.

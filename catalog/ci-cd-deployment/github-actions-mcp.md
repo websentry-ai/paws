@@ -8,6 +8,7 @@ action:
   skill: github-actions
   on_miss: digest
   digest: digests/github-actions.md
+summary: 'Before a prod workflow run or release, Claude checks the commit passed the earlier stage, says how to roll back, respects deploy windows, and never skips required checks.'
 tags: [org, deploy]
 ---
 Loads the github-actions skill before a GitHub MCP workflow dispatch, rerun or cancel.

@@ -9,6 +9,7 @@ action:
   skill: bigquery
   on_miss: digest
   digest: digests/bigquery.md
+summary: 'Claude dry-runs a query to show its cost first, keeps scratch tables in expiring datasets, keeps sensitive data in its zone, and labels every job it runs.'
 tags: [org, data]
 ---
 Loads the bigquery skill before a BigQuery MCP tool runs SQL (cost preview first), whatever the tool is called.

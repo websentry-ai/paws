@@ -17,6 +17,7 @@ provenance:
   license: Apache-2.0
   last_push: 2026-10-09
   fetched: 2026-10-27
+summary: 'Claude designs UI around the product''s own subject, with chosen typefaces and palette instead of templated defaults, and critiques the result against the brief.'
 tags: [practice, frontend]
 ---
 Loads Anthropic's frontend-design before a component or stylesheet changes, so the UI gets a deliberate visual direction instead of template defaults.

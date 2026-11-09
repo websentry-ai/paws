@@ -85,6 +85,7 @@ type Rule struct {
 	When       When       `yaml:"when"`
 	Upstream   Upstream   `yaml:"upstream"`
 	Provenance Provenance `yaml:"provenance"`
+	Summary    string     `yaml:"summary"` // what the skill teaches, for the portal; the runner never reads it
 	Tags       []string   `yaml:"tags"`
 
 	SourcePath string         `yaml:"-"`

@@ -9,6 +9,7 @@ action:
   skill: curl
   on_miss: digest
   digest: digests/curl.md
+summary: 'Claude passes auth headers from environment variables, keeps TLS verification on, downloads and reads a script before running it, and verifies checksums on downloads.'
 tags: [org, network]
 ---
 Loads the curl skill before curl or wget sends credentials, disables TLS checks, writes to an API, or pipes a download into a shell.

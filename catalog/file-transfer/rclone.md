@@ -9,6 +9,7 @@ action:
   skill: rclone
   on_miss: digest
   digest: digests/rclone.md
+summary: 'Claude lists remotes before choosing one, dry-runs and checks syncs that delete, states the size of big moves, and explains any new remote it creates.'
 tags: [org, cloud]
 ---
 Loads the rclone skill before bulk copies, syncs, moves and deletes, and before remotes are configured.

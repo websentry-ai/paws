@@ -17,6 +17,7 @@ provenance:
   license: MIT
   last_push: 2026-10-23
   fetched: 2026-10-27
+summary: 'Claude writes implementation plans for an engineer new to the codebase: exact files, names and tests, in small tasks with frequent commits.'
 tags: [practice, planning]
 ---
 Loads superpowers' writing-plans, which brainstorming hands off to, so the plan file follows its structure.

@@ -9,6 +9,7 @@ action:
   skill: salesforce
   on_miss: digest
   digest: digests/salesforce.md
+summary: 'Claude queries Salesforce for duplicates before creating a record, describes the object before writing, follows your stage rules, and attributes its changes.'
 tags: [org, crm]
 ---
 Loads the salesforce skill before a Salesforce MCP DML call (insert, update, delete, upsert), whose tool name carries no write verb.

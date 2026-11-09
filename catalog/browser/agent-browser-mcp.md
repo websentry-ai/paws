@@ -16,6 +16,7 @@ provenance:
   license: Apache-2.0
   last_push: 2026-10-27
   fetched: 2026-10-27
+summary: 'Claude drives Chrome from the terminal with the agent-browser CLI: opening pages, clicking, filling forms, taking screenshots and pulling data out of pages.'
 tags: [practice, browser]
 ---
 Loads agent-browser when the agent opens a page with Playwright or Chrome MCP (navigation only, so clicks and reads in an open page don't re-trigger it), so it weighs the faster agent-browser CLI first.

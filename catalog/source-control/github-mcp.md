@@ -8,6 +8,7 @@ action:
   skill: github
   on_miss: digest
   digest: digests/github.md
+summary: 'For GitHub MCP writes, Claude branches before touching protected refs, merges only through PRs with checks passing, scans file contents for secrets, and attributes its commits.'
 tags: [org, git]
 ---
 Loads the github skill before GitHub MCP writes: files, pushes, branches, pull requests, merges and new repositories.

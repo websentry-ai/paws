@@ -39,8 +39,12 @@ func TestIndexPortalMatchesCatalogContract(t *testing.T) {
 	}
 	bySkill := map[string]map[string]any{}
 	for _, s := range doc["skills"] {
-		if got := keysOf(s); got != "content_hash,default_actions,description,kind,license,name,tags,upstream,version" {
+		if got := keysOf(s); got != "content_hash,default_actions,description,kind,license,name,source_url,summary,tags,upstream,version" {
 			t.Errorf("%v: keys %s", s["name"], got)
+		}
+		// The add-skill page shows every skill's summary; it comes from the skill's first binding.
+		if sum, _ := s["summary"].(string); sum == "" || len(sum) > 200 {
+			t.Errorf("%v: summary must be set on its first binding, at most 200 characters, got %q", s["name"], sum)
 		}
 		for _, a := range s["default_actions"].([]any) {
 			am := a.(map[string]any)
@@ -64,6 +68,15 @@ func TestIndexPortalMatchesCatalogContract(t *testing.T) {
 		h["version"] != up["ref"].(string)[:7] || !strings.HasPrefix(h["content_hash"].(string), "sha256:") {
 		t.Errorf("humanizer entry: %v", h)
 	}
+	// humanizer's SKILL.md is at its repo's root, so the link is the repo at the pinned ref.
+	if want := "https://github.com/blader/humanizer/tree/" + up["ref"].(string); h["source_url"] != want {
+		t.Errorf("humanizer source_url %v, want %s", h["source_url"], want)
+	}
+	tdd := bySkill["tdd"]
+	tup := tdd["upstream"].(map[string]any)
+	if want := "https://github.com/mattpocock/skills/tree/" + tup["ref"].(string) + "/skills/engineering/tdd"; tdd["source_url"] != want {
+		t.Errorf("tdd source_url %v, want %s", tdd["source_url"], want)
+	}
 	var pr map[string]any
 	for _, a := range h["default_actions"].([]any) {
 		if a.(map[string]any)["id"] == "humanizer-pr" {
@@ -80,5 +93,8 @@ func TestIndexPortalMatchesCatalogContract(t *testing.T) {
 	want, _ := pack.HashSkill(sub)
 	if g["upstream"] != nil || g["content_hash"] != want || g["license"] != "Apache-2.0" {
 		t.Errorf("git entry: upstream %v hash %v (want %s)", g["upstream"], g["content_hash"], want)
+	}
+	if g["source_url"] != "https://github.com/websentry-ai/paws/tree/main/catalog/source-control/skills/git" {
+		t.Errorf("git source_url %v", g["source_url"])
 	}
 }

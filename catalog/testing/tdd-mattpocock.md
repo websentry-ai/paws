@@ -18,6 +18,7 @@ provenance:
   license: MIT
   last_push: 2026-10-27
   fetched: 2026-10-27
+summary: 'Claude works test-first one slice at a time: it agrees with you where tests go, writes one failing test, then just enough code to pass it.'
 tags: [practice, testing]
 ---
 Loads Matt Pocock's tdd before source under src/ changes while no test file has been edited this session, so the work goes red-green-refactor.

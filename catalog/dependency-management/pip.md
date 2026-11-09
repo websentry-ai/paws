@@ -9,7 +9,7 @@ action:
   skill: pip
   on_miss: digest
   digest: digests/pip.md
-summary: 'Claude installs into a virtualenv, never with system pip or sudo, uses hash-checked requirements, checks a package on OSV before adding it, and inspects unfamiliar sdists.'
+summary: 'Safe Python installs: always in a virtualenv, hash-checked requirements, and a vulnerability check on new packages.'
 tags: [org, dependencies]
 ---
 Loads the pip skill before Python packages are installed or downloaded with pip or uv.

@@ -9,7 +9,7 @@ action:
   skill: git
   on_miss: digest
   digest: digests/git.md
-summary: 'Claude writes commit messages in your format with the issue ID, keeps off protected branches, scans staged changes for secrets before committing, and marks agent-made commits.'
+summary: 'Your team''s git rules: commit message format, protected branches, and a secret scan before every commit.'
 tags: [org, git]
 ---
 Loads the git skill before commits, pushes, merges, rebases, tags, cherry-picks, and PR create or merge.

@@ -16,7 +16,7 @@ provenance:
   license: MIT
   last_push: 2026-03-17
   fetched: 2026-10-27
-summary: 'Claude edits prose to remove AI patterns: filler phrases, adverbs, passive voice, "not X but Y" contrasts, em dashes and lines written to be quoted.'
+summary: 'Prose without AI tells: no filler phrases, no passive voice, no em dashes, and no lines written to be quoted.'
 tags: [practice, writing]
 ---
 Loads stop-slop before a commit message is written.

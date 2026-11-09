@@ -16,7 +16,7 @@ provenance:
   license: MIT
   last_push: 2026-10-23
   fetched: 2026-10-27
-summary: 'Claude runs the command that proves a claim and reads its output before saying work is done, fixed or passing.'
+summary: 'Evidence before claims: run the command that proves work is done, fixed or passing, and read its output first.'
 tags: [practice, git]
 ---
 Loads verification-before-completion before a commit, so the work is checked with real command output before it is recorded as done.

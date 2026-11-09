@@ -18,7 +18,7 @@ provenance:
   license: MIT
   last_push: 2026-10-23
   fetched: 2026-10-27
-summary: 'Claude writes a failing test first and watches it fail, writes the least code to pass, then refactors. Code written before its test is deleted and redone.'
+summary: 'Strict test-first coding: watch a test fail, write the least code to pass, and redo code written before its test.'
 tags: [practice, testing]
 ---
 Loads superpowers' test-driven-development before source under src/ changes while no test file has been edited this session, so the failing test comes first.

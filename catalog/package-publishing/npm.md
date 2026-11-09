@@ -9,7 +9,7 @@ action:
   skill: npm
   on_miss: digest
   digest: digests/npm.md
-summary: 'Claude bumps versions with npm version, reviews the tarball with npm pack --dry-run, publishes with provenance and a granular token, and deprecates instead of unpublishing.'
+summary: 'Safe npm publishing: version bumps with npm version, a dry-run tarball review, and deprecate instead of unpublish.'
 tags: [org, publishing]
 ---
 Loads the npm skill before packages are published, unpublished, deprecated or re-tagged, or access and tokens change.

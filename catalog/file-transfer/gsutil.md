@@ -9,7 +9,7 @@ action:
   skill: gsutil
   on_miss: digest
   digest: digests/gsutil.md
-summary: 'Claude sizes big copies first, dry-runs syncs, and checks the destination bucket belongs to your org. Covers both gsutil and gcloud storage.'
+summary: 'Safe Cloud Storage transfers: size big copies first, dry-run syncs, and copy only to buckets your org owns.'
 tags: [org, cloud]
 ---
 Loads the gsutil skill before objects are copied, synced, moved or removed in Google Cloud Storage.

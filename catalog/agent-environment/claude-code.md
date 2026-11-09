@@ -9,7 +9,7 @@ action:
   skill: claude-code
   on_miss: digest
   digest: digests/claude-code.md
-summary: 'Claude shows a diff before editing its own settings or hooks, adds only allowlisted MCP servers, reads a skill in full before installing it, and keeps secrets out of CLAUDE.md.'
+summary: 'Safe edits to your AI coding setup: settings diffed first, approved MCP servers only, and skills read before install.'
 tags: [org, agent]
 ---
 Loads the claude-code skill before an agent adds or removes MCP servers, changes Claude Code config, or installs plugins.

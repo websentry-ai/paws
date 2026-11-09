@@ -9,7 +9,7 @@ action:
   skill: systemctl
   on_miss: digest
   digest: digests/systemctl.md
-summary: 'Before a restart, Claude checks what depends on the service. It edits units with drop-ins and verifies them, sends TERM before KILL, and labels cron entries it adds.'
+summary: 'Careful systemd changes: check what depends on a service before a restart, edit units with drop-ins, TERM before KILL.'
 tags: [org, system]
 ---
 Loads the systemctl skill before services are started, stopped, restarted, enabled or edited, crontabs change, or processes are force-killed or killed by pattern.

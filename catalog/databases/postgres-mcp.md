@@ -9,7 +9,7 @@ action:
   skill: postgres
   on_miss: digest
   digest: digests/postgres.md
-summary: 'Claude counts the rows a write will touch, wraps changes in a transaction with a check, makes prod schema changes as migrations, and sends reads to the replica.'
+summary: 'Safe Postgres writes: count the rows first, wrap changes in a transaction, and make prod schema changes as migrations.'
 tags: [org, database]
 ---
 Loads the postgres skill before the postgres MCP server runs a write or DDL statement.

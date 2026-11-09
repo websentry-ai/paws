@@ -8,7 +8,7 @@ action:
   skill: notion
   on_miss: digest
   digest: digests/notion.md
-summary: 'Claude creates Notion pages under the right parent or teamspace, tags an owner, starts from your templates, and adds a changelog entry when it edits a page.'
+summary: 'Tidy Notion pages: the right parent, a named owner, your templates, and a changelog entry on every edit.'
 tags: [org, docs]
 ---
 Loads the notion skill before Notion pages, databases or comments are created, edited, moved or archived.

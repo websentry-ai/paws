@@ -9,7 +9,7 @@ action:
   skill: cargo
   on_miss: digest
   digest: digests/cargo.md
-summary: 'Claude keeps Cargo.lock committed and builds with --locked, checks advisories before adding a crate, reads build.rs for unfamiliar crates, and notes global installs.'
+summary: 'Safe Rust dependencies: a committed Cargo.lock, an advisory check before adding a crate, and build.rs read first.'
 tags: [org, dependencies]
 ---
 Loads the cargo skill before Rust dependencies are added, installed or updated.

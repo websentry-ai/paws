@@ -9,7 +9,7 @@ action:
   skill: apt
   on_miss: digest
   digest: digests/apt.md
-summary: 'Claude refreshes the package list before installing, simulates big upgrades and removals with -s, keeps package holds, and adds only key-verified sources.'
+summary: 'Safe apt habits: refresh before installing, simulate big upgrades and removals, and add only key-verified sources.'
 tags: [org, packages]
 ---
 Loads the apt skill before packages are installed, upgraded or removed with apt, apt-get or dpkg, and before apt sources are added.

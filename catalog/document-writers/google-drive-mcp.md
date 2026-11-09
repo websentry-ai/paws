@@ -8,7 +8,7 @@ action:
   skill: google-drive
   on_miss: digest
   digest: digests/google-drive.md
-summary: 'Claude files new Drive docs in the right folder with a human owner, starts from your templates, and checks who can see a folder before putting sensitive content in it.'
+summary: 'Tidy Google Drive files: the right folder, a named owner, your templates, and a sharing check before sensitive content.'
 tags: [org, docs]
 ---
 Loads the google-drive skill before files are created or copied in Google Drive.

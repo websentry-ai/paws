@@ -9,7 +9,7 @@ action:
   skill: kubectl
   on_miss: digest
   digest: digests/kubectl.md
-summary: 'Claude passes --context and -n on every kubectl write, runs a server-side dry-run before prod applies, checks images are pinned and limits set, and states the blast radius first.'
+summary: 'Safe kubectl changes: explicit context and namespace, a server-side dry-run before prod, and pinned images with limits.'
 tags: [org, kubernetes]
 ---
 Loads the kubectl skill before a Kubernetes MCP server creates, applies, patches or deletes resources.

@@ -8,7 +8,7 @@ action:
   skill: terraform
   on_miss: digest
   digest: digests/terraform.md
-summary: 'Claude checks the workspace, applies only a saved plan it has shown you, backs up state before editing it, pins registry modules, and confirms before destroy.'
+summary: 'Safe Terraform: apply only a reviewed saved plan, back up state before editing it, and confirm before destroy.'
 tags: [org, iac]
 ---
 Loads the terraform skill before a Terraform Cloud MCP run is created or applied.

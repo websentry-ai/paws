@@ -8,7 +8,7 @@ action:
   skill: vault
   on_miss: digest
   digest: digests/vault.md
-summary: 'Claude reads Vault secrets with -field into a pipe so they never print, writes them from stdin, rotates any that leak, and creates narrow, short-lived tokens.'
+summary: 'Safe Vault use: secrets never printed or passed as arguments, rotation after a leak, and short-lived narrow tokens.'
 tags: [org, secrets]
 ---
 Loads the vault skill before a Vault MCP secret write, delete or token create.

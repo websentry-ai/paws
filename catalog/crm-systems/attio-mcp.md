@@ -8,7 +8,7 @@ action:
   skill: attio
   on_miss: digest
   digest: digests/attio.md
-summary: 'Claude searches Attio for an existing record before creating one, reads the attribute schema before its first write, uses select values exactly, and signs its notes.'
+summary: 'Clean Attio records: search before creating, read the schema before writing, and use select values exactly.'
 tags: [org, crm]
 ---
 Loads the attio skill before CRM records, notes, tasks or list entries are written in Attio.

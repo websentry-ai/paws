@@ -42,9 +42,10 @@ func TestIndexPortalMatchesCatalogContract(t *testing.T) {
 		if got := keysOf(s); got != "content_hash,default_actions,description,kind,license,name,source_url,summary,tags,upstream,version" {
 			t.Errorf("%v: keys %s", s["name"], got)
 		}
-		// The add-skill page shows every skill's summary; it comes from the skill's first binding.
-		if sum, _ := s["summary"].(string); sum == "" || len(sum) > 200 {
-			t.Errorf("%v: summary must be set on its first binding, at most 200 characters, got %q", s["name"], sum)
+		// The add-skill page shows every skill's summary; it comes from the skill's first binding. It says
+		// what the skill is about, not who acts on it: paws is not tied to one agent.
+		if sum, _ := s["summary"].(string); sum == "" || len(sum) > 140 || strings.Contains(sum, "Claude") {
+			t.Errorf("%v: summary must be set on its first binding, at most 140 characters, without \"Claude\", got %q", s["name"], sum)
 		}
 		for _, a := range s["default_actions"].([]any) {
 			am := a.(map[string]any)

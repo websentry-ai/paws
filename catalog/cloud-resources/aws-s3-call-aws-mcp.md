@@ -9,7 +9,7 @@ action:
   skill: aws-s3
   on_miss: digest
   digest: digests/aws-s3.md
-summary: 'New S3 buckets get Block Public Access, default encryption, your org tags and an expiry tag. Claude states any bucket policy or ACL change before making it.'
+summary: 'Your S3 bucket standards: no public access, encryption on, your org''s tags, and a heads-up before any policy change.'
 tags: [org, aws]
 ---
 Loads the aws-s3 skill when the generic call_aws MCP tool runs an S3 bucket create or policy change.

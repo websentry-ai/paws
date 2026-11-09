@@ -9,7 +9,7 @@ action:
   skill: launchctl
   on_miss: digest
   digest: digests/launchctl.md
-summary: 'Claude reads existing launchd jobs first, shows the full plist before loading it, uses reverse-DNS labels, picks user or root scope on purpose, and flags anything that persists.'
+summary: 'Careful launchd changes on macOS: read existing jobs first, review the full plist, and flag anything that persists.'
 tags: [org, system]
 ---
 Loads the launchctl skill before launchd jobs are loaded, unloaded, enabled, disabled, kicked or killed.

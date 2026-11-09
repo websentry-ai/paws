@@ -8,6 +8,7 @@ action:
   skill: vercel
   on_miss: digest
   digest: digests/vercel.md
+summary: 'Careful Vercel deploys: previews freely, production with a rollback plan, and no purchase without the price and a yes.'
 tags: [org, deploy]
 ---
 Loads the vercel skill before a Vercel deploy or any purchase through the Vercel MCP server.

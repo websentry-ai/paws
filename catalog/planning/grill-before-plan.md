@@ -17,6 +17,7 @@ provenance:
   license: MIT
   last_push: 2026-10-27
   fetched: 2026-10-27
+summary: 'A relentless interview about a plan, in rounds of numbered questions with recommended answers, until nothing is assumed.'
 tags: [practice, planning]
 ---
 Loads Matt Pocock's grilling (the skill his user-only /grill-me hands off to) before a plan or spec file is written, so every open decision is put to the user first.

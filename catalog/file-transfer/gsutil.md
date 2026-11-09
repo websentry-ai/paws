@@ -9,6 +9,7 @@ action:
   skill: gsutil
   on_miss: digest
   digest: digests/gsutil.md
+summary: 'Safe Cloud Storage transfers: size big copies first, dry-run syncs, and copy only to buckets your org owns.'
 tags: [org, cloud]
 ---
 Loads the gsutil skill before objects are copied, synced, moved or removed in Google Cloud Storage.

@@ -8,6 +8,7 @@ action:
   skill: linear
   on_miss: digest
   digest: digests/linear.md
+summary: 'Clean Linear issues: search for duplicates first, use the team''s real statuses, and link each issue to its project.'
 tags: [org, issues]
 ---
 Loads the linear skill before Linear issues, projects, initiatives or comments are written or deleted.

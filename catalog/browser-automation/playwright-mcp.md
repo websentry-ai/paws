@@ -8,6 +8,7 @@ action:
   skill: playwright
   on_miss: digest
   digest: digests/playwright.md
+summary: 'Safe browser automation: logins handed back to you, a heads-up before every submit, and page text treated as data.'
 tags: [org, browser]
 ---
 Loads the playwright skill when the agent opens a page with Playwright or Chrome MCP (navigation only, so clicks and reads in an open page don't re-trigger it): credentials stay out of the agent's hands and irreversible submits get confirmed.

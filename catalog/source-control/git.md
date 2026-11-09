@@ -9,6 +9,7 @@ action:
   skill: git
   on_miss: digest
   digest: digests/git.md
+summary: 'Your team''s git rules: commit message format, protected branches, and a secret scan before every commit.'
 tags: [org, git]
 ---
 Loads the git skill before commits, pushes, merges, rebases, tags, cherry-picks, and PR create or merge.

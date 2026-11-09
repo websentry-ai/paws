@@ -9,6 +9,7 @@ action:
   skill: npm-deps
   on_miss: digest
   digest: digests/npm-deps.md
+summary: 'Safe npm installs: npm ci in existing projects, a check before adding a package, and install scripts off at first.'
 tags: [org, dependencies]
 ---
 Loads the npm-deps skill before a new package is added: npm install/i/add <pkg>, yarn add, pnpm add, bun add.

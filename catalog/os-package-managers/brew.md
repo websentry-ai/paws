@@ -9,6 +9,7 @@ action:
   skill: brew
   on_miss: digest
   digest: digests/brew.md
+summary: 'Safe Homebrew habits: never sudo, check what is outdated before bulk upgrades, and preview what a removal deletes.'
 tags: [org, packages]
 ---
 Loads the brew skill before Homebrew installs, upgrades, removals, taps, pins, cleanups and links.

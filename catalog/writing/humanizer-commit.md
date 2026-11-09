@@ -16,6 +16,7 @@ provenance:
   license: MIT
   last_push: 2026-10-16
   fetched: 2026-10-27
+summary: 'Rewrites text that sounds machine-written so it reads like a person wrote it, without changing what it says.'
 tags: [practice, writing]
 ---
 Loads humanizer before a commit message is written.

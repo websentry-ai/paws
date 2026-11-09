@@ -8,6 +8,7 @@ action:
   skill: vault
   on_miss: digest
   digest: digests/vault.md
+summary: 'Safe Vault use: secrets never printed or passed as arguments, rotation after a leak, and short-lived narrow tokens.'
 tags: [org, secrets]
 ---
 Loads the vault skill before a Vault MCP secret write, delete or token create.

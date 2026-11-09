@@ -18,6 +18,7 @@ provenance:
   license: MIT
   last_push: 2026-04-20
   fetched: 2026-10-27
+summary: 'Coding discipline: state assumptions, write the least code that works, touch only what the task needs, and verify.'
 tags: [practice, discipline]
 ---
 Loads karpathy-guidelines before the agent creates a new source file, the moment overbuilding usually starts.

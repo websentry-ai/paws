@@ -17,6 +17,7 @@ provenance:
   license: MIT
   last_push: 2026-10-23
   fetched: 2026-10-27
+summary: 'Find out what to build and why before building it, then weigh a few approaches and write a short design.'
 tags: [practice, planning]
 ---
 Loads superpowers' brainstorming before a plan or spec file is written, so the design is explored with the user before it is written down.

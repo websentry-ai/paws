@@ -9,6 +9,7 @@ action:
   skill: datadog
   on_miss: digest
   digest: digests/datadog.md
+summary: 'Tidy Datadog changes: mutes that expire, monitors diffed before edits, and an owner tag on everything new.'
 tags: [org, observability]
 ---
 Loads the datadog skill before a Datadog MCP create, update or delete (monitors, incidents, dashboards, downtimes).

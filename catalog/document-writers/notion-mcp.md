@@ -8,6 +8,7 @@ action:
   skill: notion
   on_miss: digest
   digest: digests/notion.md
+summary: 'Tidy Notion pages: the right parent, a named owner, your templates, and a changelog entry on every edit.'
 tags: [org, docs]
 ---
 Loads the notion skill before Notion pages, databases or comments are created, edited, moved or archived.

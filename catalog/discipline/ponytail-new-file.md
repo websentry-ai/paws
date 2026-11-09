@@ -18,6 +18,7 @@ provenance:
   license: MIT
   last_push: 2026-10-18
   fetched: 2026-10-28
+summary: 'The smallest change that fully solves the task: reuse what exists, add nothing extra, and say what was skipped.'
 tags: [practice, discipline]
 ---
 Loads ponytail before the agent creates a new source file, so it checks whether the file needs to exist and reuses what the codebase already has.

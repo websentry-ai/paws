@@ -43,10 +43,18 @@ provenance:
   license: MIT
   last_push: 2026-10-16
   fetched: 2026-10-27
+summary: 'Rewrites text that sounds machine-written so it reads like a person wrote it.' # first binding only
 tags: [practice, writing]
 ---
 What the binding does, in a sentence or two.
 ```
+
+`summary` says what the skill is about, not who acts on it, in one plain sentence of at
+most 140 characters: "Your team's git rules: commit message format, protected branches,
+and a secret scan before every commit." The portal shows it on the add-skill page. A skill
+bound by several files takes it from the first one by path (`writing/humanizer-commit.md`
+before `writing/humanizer-pr.md`), so put it there. `unbound-paws index --portal` emits it as
+`summary`, next to `source_url`, the skill's folder on GitHub at its pinned ref.
 
 Rules for a valid binding (`unbound-paws validate` checks each one):
 

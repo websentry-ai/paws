@@ -9,6 +9,7 @@ action:
   skill: bigquery
   on_miss: digest
   digest: digests/bigquery.md
+summary: 'Careful BigQuery use: see the cost before a query runs, expiring scratch datasets, and sensitive data kept in place.'
 tags: [org, data]
 ---
 Loads the bigquery skill before a BigQuery MCP tool runs SQL (cost preview first), whatever the tool is called.

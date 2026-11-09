@@ -16,6 +16,7 @@ provenance:
   license: Apache-2.0
   last_push: 2026-10-27
   fetched: 2026-10-27
+summary: 'Browser automation from the terminal with agent-browser: open pages, click, fill forms, take screenshots.'
 tags: [practice, browser]
 ---
 Loads agent-browser when the agent opens a page with Playwright or Chrome MCP (navigation only, so clicks and reads in an open page don't re-trigger it), so it weighs the faster agent-browser CLI first.

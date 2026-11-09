@@ -9,6 +9,7 @@ action:
   skill: salesforce
   on_miss: digest
   digest: digests/salesforce.md
+summary: 'Clean Salesforce records: query for duplicates first, describe the object before writing, and follow stage rules.'
 tags: [org, crm]
 ---
 Loads the salesforce skill before a Salesforce MCP DML call (insert, update, delete, upsert), whose tool name carries no write verb.

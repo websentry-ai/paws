@@ -9,6 +9,7 @@ action:
   skill: rsync
   on_miss: digest
   digest: digests/rsync.md
+summary: 'Safe rsync habits: preview anything that deletes, get the trailing slash right, and keep a backup when a sync removes files.'
 tags: [org, network]
 ---
 Loads the rsync skill before an rsync that propagates deletes or crosses to a remote host.

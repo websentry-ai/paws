@@ -9,6 +9,7 @@ action:
   skill: npm
   on_miss: digest
   digest: digests/npm.md
+summary: 'Safe npm publishing: version bumps with npm version, a dry-run tarball review, and deprecate instead of unpublish.'
 tags: [org, publishing]
 ---
 Loads the npm skill before packages are published, unpublished, deprecated or re-tagged, or access and tokens change.

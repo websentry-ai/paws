@@ -9,6 +9,7 @@ action:
   skill: curl
   on_miss: digest
   digest: digests/curl.md
+summary: 'Safe curl use: credentials from environment variables, TLS checks kept on, and scripts read before they run.'
 tags: [org, network]
 ---
 Loads the curl skill before curl or wget sends credentials, disables TLS checks, writes to an API, or pipes a download into a shell.

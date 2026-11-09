@@ -9,6 +9,7 @@ action:
   skill: docker
   on_miss: digest
   digest: digests/docker.md
+summary: 'Safe local Docker: ports bound to localhost, unfamiliar images inspected, narrow mounts, and volumes kept on cleanup.'
 tags: [org, containers]
 ---
 Loads the docker skill before local containers are run, built, exec'd, pushed or removed, and before volumes or networks change.

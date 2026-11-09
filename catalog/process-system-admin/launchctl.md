@@ -9,6 +9,7 @@ action:
   skill: launchctl
   on_miss: digest
   digest: digests/launchctl.md
+summary: 'Careful launchd changes on macOS: read existing jobs first, review the full plist, and flag anything that persists.'
 tags: [org, system]
 ---
 Loads the launchctl skill before launchd jobs are loaded, unloaded, enabled, disabled, kicked or killed.

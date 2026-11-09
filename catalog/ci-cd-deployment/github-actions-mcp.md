@@ -8,6 +8,7 @@ action:
   skill: github-actions
   on_miss: digest
   digest: digests/github-actions.md
+summary: 'Careful deploys with GitHub Actions: a rollback plan first, deploy windows respected, and no skipped required checks.'
 tags: [org, deploy]
 ---
 Loads the github-actions skill before a GitHub MCP workflow dispatch, rerun or cancel.

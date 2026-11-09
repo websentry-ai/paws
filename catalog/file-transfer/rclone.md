@@ -9,6 +9,7 @@ action:
   skill: rclone
   on_miss: digest
   digest: digests/rclone.md
+summary: 'Safe rclone transfers: pick from known remotes, dry-run syncs that delete, and state the size of big moves.'
 tags: [org, cloud]
 ---
 Loads the rclone skill before bulk copies, syncs, moves and deletes, and before remotes are configured.

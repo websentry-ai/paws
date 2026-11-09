@@ -9,6 +9,7 @@ action:
   skill: gmail
   on_miss: digest
   digest: digests/gmail.md
+summary: 'Safe Gmail: drafts instead of sends, a recipient-domain check, and replies that stay in the right thread.'
 tags: [org, comms]
 ---
 Loads the gmail skill before the agent sends, drafts, replies to, forwards or labels mail, so external recipients, threads and voice are checked.

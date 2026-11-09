@@ -8,6 +8,7 @@ action:
   skill: github
   on_miss: digest
   digest: digests/github.md
+summary: 'Your GitHub rules for MCP writes: branch off protected refs, merge only through PRs, and scan files for secrets.'
 tags: [org, git]
 ---
 Loads the github skill before GitHub MCP writes: files, pushes, branches, pull requests, merges and new repositories.

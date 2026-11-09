@@ -18,6 +18,7 @@ provenance:
   license: MIT
   last_push: 2026-10-27
   fetched: 2026-10-27
+summary: 'Test-driven development: one failing test first, then just enough code to make it pass.'
 tags: [practice, testing]
 ---
 Loads Matt Pocock's tdd before source under src/ changes while no test file has been edited this session, so the work goes red-green-refactor.

@@ -181,7 +181,7 @@ type portalStatus struct {
 // portalView is the portal link as the CLI sees it: credentials.json, and the skills the applied
 // config turned on with their rule files under $PAWS_HOME/portal and local fire counts.
 func portalView() portalStatus {
-	v := portalStatus{SyncMinutes: int(defaultSyncInterval.Minutes()), ConfigMinutes: int(defaultConfigInterval.Minutes()),
+	v := portalStatus{SyncMinutes: int(defaultSyncInterval.Minutes()), ConfigMinutes: int(defaultSyncInterval.Minutes()),
 		Run: cliName, Skills: []portalSkillView{}}
 	if c, err := loadCredentials(); err == nil && c != nil {
 		v.LoggedIn, v.Account, v.API = true, c.AccountEmail, c.API

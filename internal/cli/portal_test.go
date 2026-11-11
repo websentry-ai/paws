@@ -21,9 +21,7 @@ func portalEnv(t *testing.T, h http.Handler) string {
 	t.Setenv("HOME", t.TempDir())
 	t.Setenv("CLAUDE_CONFIG_DIR", "") // skills install under the temp HOME, never a real config dir
 	t.Setenv("PAWS_HOME", home)
-	for _, env := range []string{"PAWS_SYNC_INTERVAL", "PAWS_CONFIG_INTERVAL"} {
-		t.Setenv(env, "")
-	}
+	t.Setenv("PAWS_SYNC_INTERVAL", "")
 	srv := httptest.NewServer(h)
 	t.Cleanup(srv.Close)
 	t.Setenv("PAWS_PORTAL_API", srv.URL+"/")

@@ -158,7 +158,6 @@ func (f failingTransport) RoundTrip(r *http.Request) (*http.Response, error) {
 func TestGateNeverUsesNetworkBeforeTools(t *testing.T) {
 	home, srv := syncEnv(t)
 	t.Setenv("PAWS_SYNC_INTERVAL", "0s")
-	t.Setenv("PAWS_CONFIG_INTERVAL", "0s")
 	writeRule(t, filepath.Join(home, "r.md"), "name: r\nevent: pre-tool\nmatcher:\n  tool: Bash\n  command_regex: deploy\naction:\n  type: require-skill\n  skill: deployer\n")
 	appendLines(t, filepath.Join(home, "audit.log"), actionLine("2026-10-01T10:00:00Z", `"tool":"Bash","action":"ls","command":"ls"`))
 	oldTransport := http.DefaultTransport
@@ -197,58 +196,118 @@ func setState(t *testing.T, edit func(*portalState)) {
 	}
 }
 
-func TestStopHookThrottlesUploadAndConfigCheck(t *testing.T) {
+// The Stop hook makes one portal round at most every 5 minutes: a single POST /sync that uploads
+// any new records and returns the config hash, plus GET /config only when that hash changed.
+func TestStopHookThrottlesOneRoundEveryFiveMinutes(t *testing.T) {
 	home, srv := syncEnv(t)
 	srv.configHash = "h1"
 	log := filepath.Join(home, "audit.log")
-	stop := func() {
+	stop := func() []string {
 		t.Helper()
+		before := srv.count("")
 		if out := runGate(t, map[string]any{"hook_event_name": "Stop", "cwd": t.TempDir(), "session_id": "s1"}); out != "{}" {
 			t.Fatalf("Stop must answer {}, got %q", out)
 		}
+		return srv.requests[before:]
+	}
+	expire := func(ago time.Duration) {
+		setState(t, func(st *portalState) { st.LastUpload = time.Now().Add(-ago) })
 	}
 	appendLines(t, log, actionLine("2026-10-01T10:00:00Z", `"tool":"Bash","action":"ls"`))
 
 	// First turn: upload; its response names a new config, which is fetched and applied at once.
-	stop()
-	if got := srv.requests; strings.Join(got, ",") != "POST /paws/v1/sync,GET /paws/v1/config,POST /paws/v1/sync" {
+	if got := stop(); strings.Join(got, ",") != "POST /paws/v1/sync,GET /paws/v1/config,POST /paws/v1/sync" {
 		t.Fatalf("first Stop requests: %v", got)
 	}
 	if st := loadPortalState(); st.AppliedHash != "h1" {
 		t.Errorf("applied hash %q, want h1", st.AppliedHash)
 	}
 
-	// Within both intervals: nothing, even with a new record.
+	// Inside the interval: nothing, even with a new record.
 	appendLines(t, log, actionLine("2026-10-01T10:00:01Z", `"tool":"Bash","action":"pwd"`))
-	stop()
-	if n := srv.count(""); n != 3 {
-		t.Fatalf("a Stop inside the intervals made requests: %v", srv.requests[3:])
+	expire(4 * time.Minute)
+	if got := stop(); len(got) != 0 {
+		t.Fatalf("a Stop inside 5 minutes made requests: %v", got)
 	}
 
-	// Upload interval passed: the new record goes up; the hash is unchanged, so no config fetch.
-	setState(t, func(st *portalState) { st.LastUpload = time.Now().Add(-11 * time.Minute) })
-	stop()
-	if got := srv.requests[3:]; strings.Join(got, ",") != "POST /paws/v1/sync" {
-		t.Fatalf("Stop after the upload interval: %v", got)
+	// Interval passed: one POST carries the new record; the hash is unchanged, so no config fetch.
+	expire(5 * time.Minute)
+	if got := stop(); strings.Join(got, ",") != "POST /paws/v1/sync" {
+		t.Fatalf("Stop after 5 minutes: %v", got)
 	}
 	if recs := decodeSync(t, srv.bodies[len(srv.bodies)-1]); len(recs) != 1 || recs[0]["action"] != "pwd" {
 		t.Errorf("uploaded %v, want the one new record", recs)
 	}
 
-	// Config interval passed with nothing to upload: only the hash is checked.
-	setState(t, func(st *portalState) { st.LastConfigCheck = time.Now().Add(-16 * time.Minute) })
-	stop()
-	if got := srv.requests[4:]; strings.Join(got, ",") != "GET /paws/v1/config/hash" {
-		t.Fatalf("Stop after the config interval: %v", got)
+	// Nothing new to upload: the same single POST still checks the config, and a change is pulled.
+	srv.configHash = "h2"
+	expire(5 * time.Minute)
+	if got := stop(); strings.Join(got, ",") != "POST /paws/v1/sync,GET /paws/v1/config,POST /paws/v1/sync" {
+		t.Fatalf("Stop with a changed config: %v", got)
+	}
+	if recs := decodeSync(t, srv.bodies[len(srv.bodies)-2]); len(recs) != 0 {
+		t.Errorf("the round with nothing new uploaded %v", recs)
 	}
 
-	// The env vars override both intervals.
+	// PAWS_SYNC_INTERVAL overrides the interval.
 	t.Setenv("PAWS_SYNC_INTERVAL", "0s")
-	t.Setenv("PAWS_CONFIG_INTERVAL", "1h")
-	appendLines(t, log, actionLine("2026-10-01T10:00:02Z", `"tool":"Bash","action":"date"`))
-	stop()
-	if got := srv.requests[5:]; strings.Join(got, ",") != "POST /paws/v1/sync" {
+	if got := stop(); strings.Join(got, ",") != "POST /paws/v1/sync" {
 		t.Fatalf("Stop with PAWS_SYNC_INTERVAL=0s: %v", got)
+	}
+}
+
+// A new session starts a background round so portal changes reach it without waiting for a turn
+// to end; the gate never waits on the network itself.
+func TestSessionStartSpawnsABackgroundSync(t *testing.T) {
+	_, srv := syncEnv(t)
+	var spawned []string
+	old := spawnSessionSync
+	spawnSessionSync = func(cwd string) { spawned = append(spawned, cwd) }
+	t.Cleanup(func() { spawnSessionSync = old })
+	start := func(source string) bool {
+		t.Helper()
+		before := len(spawned)
+		runGate(t, map[string]any{"hook_event_name": "SessionStart", "source": source, "cwd": t.TempDir(), "session_id": "s1"})
+		return len(spawned) > before
+	}
+	for _, source := range []string{"startup", "resume", "clear"} {
+		if !start(source) {
+			t.Errorf("SessionStart %s did not start a sync", source)
+		}
+	}
+	if start("compact") {
+		t.Error("a compaction is the same session: no sync")
+	}
+	if srv.count("") != 0 {
+		t.Errorf("the SessionStart gate made requests itself: %v", srv.requests)
+	}
+
+	// The spawned process: one silent round, then the floor stops the next session's spawn.
+	code, out := captureStdout(t, func() int { return Sync([]string{"--background"}) })
+	if code != 0 || out != "" {
+		t.Errorf("sync --background: code %d, stdout %q", code, out)
+	}
+	if srv.count("POST /paws/v1/sync") == 0 {
+		t.Errorf("sync --background requests: %v", srv.requests)
+	}
+	if start("startup") {
+		t.Error("a session within a minute of the last round started another sync")
+	}
+	n := srv.count("")
+	if code, _ := captureStdout(t, func() int { return Sync([]string{"--background"}) }); code != 0 || srv.count("") != n {
+		t.Errorf("a second background round inside the floor reached the portal: %v", srv.requests)
+	}
+}
+
+func TestSessionStartLoggedOutSpawnsNothing(t *testing.T) {
+	portalEnv(t, http.NotFoundHandler())
+	called := false
+	old := spawnSessionSync
+	spawnSessionSync = func(string) { called = true }
+	t.Cleanup(func() { spawnSessionSync = old })
+	runGate(t, map[string]any{"hook_event_name": "SessionStart", "source": "startup", "cwd": t.TempDir()})
+	if called {
+		t.Error("logged out, SessionStart started a sync")
 	}
 }
 

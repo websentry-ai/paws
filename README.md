@@ -149,11 +149,12 @@ Never prompts, replies, file contents, tool output, absolute paths or session
 ids. Field by field: [docs/telemetry.md](docs/telemetry.md#portal-upload).
 
 When: after Claude finishes a turn, from the async Stop hook, at most every
-10 minutes (`PAWS_SYNC_INTERVAL`); on `unbound-paws sync`; and once at `unbound-paws login`.
+5 minutes (`PAWS_SYNC_INTERVAL`); in the background when a session starts, at
+most once a minute; on `unbound-paws sync`; and once at `unbound-paws login`.
 
 Settings come down from the portal: the skills you turn on in the browser
-and the actions each one runs before. The Stop hook checks for a change at
-most every 15 minutes (`PAWS_CONFIG_INTERVAL`), then writes them as rule files
+and the actions each one runs before. The same request that uploads checks
+for a change, and paws then writes them as rule files
 under `~/.paws/portal/`. Only skills in the catalog this unbound-paws version ships
 can install, into `~/.claude/skills` at their pinned commit, and are refused
 if their content hash differs; the portal can't name other code to download.

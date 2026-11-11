@@ -128,3 +128,10 @@ rejects an upstream binding without one.
 ```
 unbound-paws validate .
 ```
+
+A trigger that fires when its skill doesn't apply blocks Claude until it loads a skill it doesn't need, so each
+binding's trigger is tested against real calls. `internal/catalog/testdata/trigger_cases.json` lists, per binding
+name, calls the trigger must fire on and near misses it must ignore, as `[tool, target]` pairs; the target is what
+the hook matches (the command, file path, URL, subagent prompt, MCP input as JSON, or session source). Add a few of
+each with a new binding: a key word inside another word, the tool named in `echo` or a commit message, `--help`, a
+read-only subcommand when the skill is about writes. `go test ./internal/catalog` checks them.

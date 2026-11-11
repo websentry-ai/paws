@@ -100,8 +100,10 @@ and credentials saved for any other http address are refused. From then on:
   after 12; any failure is dropped silently and retried later;
 - the **SessionStart hook** starts the same round in a separate background
   process (`unbound-paws sync --background`) when a session starts, resumes or
-  is cleared, at most once a minute, so the session gets portal changes
-  without waiting for a turn to end. The hook itself never waits on it;
+  is cleared, at most once a minute, without waiting for a turn to end. The
+  hook itself never waits on it, so a change to a tool rule applies from the
+  next tool call after the round lands, and a new session-start rule from the
+  next session;
 - **`unbound-paws sync`** does both at once and prints what it did;
 - **`unbound-paws login`** syncs once, so the portal sees the machine right away.
 

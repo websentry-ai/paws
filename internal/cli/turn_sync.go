@@ -88,9 +88,11 @@ var spawnSessionSync = func(cwd string) {
 	}
 }
 
-// syncAtSessionStart pulls portal changes when a session starts, so a skill turned on in the
-// browser reaches the next session without waiting for a turn to end. It spawns only when logged
-// in and the last round is older than sessionStartFloor, so the gate pays two small file reads.
+// syncAtSessionStart pulls portal changes when a session starts, without waiting for a turn to end.
+// Tool rules are read on every tool call, so they apply in this session as soon as the round lands.
+// A session-start rule's context went out before the round, so a new one applies from the next
+// session; waiting here would put the network in front of every session start. It spawns only when
+// logged in and the last round is older than sessionStartFloor, so the gate pays two small file reads.
 func syncAtSessionStart(cwd, source string) {
 	if source == "compact" { // the same session carrying on, not a new one
 		return

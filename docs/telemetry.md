@@ -92,12 +92,18 @@ the account's email when the portal sends it, in `~/.paws/credentials.json`
 must be https; plain http works only for `localhost`, `127.0.0.1` or `::1`,
 and credentials saved for any other http address are refused. From then on:
 
-- the async **Stop hook** (after each Claude turn) uploads new records when
-  there are some and the last upload was more than `PAWS_SYNC_INTERVAL` ago
-  (default `10m`), and checks the portal's config hash when the last check
-  was more than `PAWS_CONFIG_INTERVAL` ago (default `15m`). Each request times
-  out after 5 seconds and the whole step, skill downloads included, after 12;
-  any failure is dropped silently and retried later;
+- the async **Stop hook** (after each Claude turn), when the last round was
+  more than `PAWS_SYNC_INTERVAL` ago (default `5m`), sends one upload: the new
+  records, or none, with the inventory. Its reply carries the portal's config
+  hash, and the config is fetched only when that hash changed. Each request
+  times out after 5 seconds and the whole step, skill downloads included,
+  after 12; any failure is dropped silently and retried later;
+- the **SessionStart hook** starts the same round in a separate background
+  process (`unbound-paws sync --background`) when a session starts, resumes or
+  is cleared, at most once a minute, without waiting for a turn to end. The
+  hook itself never waits on it, so a change to a tool rule applies from the
+  next tool call after the round lands, and a new session-start rule from the
+  next session;
 - **`unbound-paws sync`** does both at once and prints what it did;
 - **`unbound-paws login`** syncs once, so the portal sees the machine right away.
 

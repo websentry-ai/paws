@@ -73,6 +73,9 @@ func Gate() (code int) {
 	}
 	wrote = true
 	emit(out)
+	if in.HookEventName == "SessionStart" {
+		syncAtSessionStart(cwd, in.Source) // spawns a background sync; the gate itself stays offline
+	}
 	return 0
 }
 

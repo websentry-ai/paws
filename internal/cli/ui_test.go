@@ -86,7 +86,7 @@ func TestUIPortalView(t *testing.T) {
 	os.WriteFile(filepath.Join(home, "portal", "humanizer--x--3.md"), []byte("---\nname: humanizer--x--3\nevent: pre-tool\nmatcher:\n  tool: Bash\naction:\n  type: require-skill\n  skill: humanizer--x\n---\n"), 0o600)
 	os.WriteFile(filepath.Join(home, "portal", "humanizer--7.md"), []byte("---\nname: humanizer--7\nevent: pre-tool\nmatcher:\n  tool: Bash\naction:\n  type: require-skill\n  skill: humanizer\n---\n"), 0o600)
 	v := portalView()
-	if !v.LoggedIn || v.Account != "a@example.com" || v.SyncMinutes != 10 {
+	if !v.LoggedIn || v.Account != "a@example.com" || v.SyncMinutes != 5 || v.ConfigMinutes != 5 {
 		t.Errorf("login state: %+v", v)
 	}
 	if len(v.Skills) != 2 || v.Skills[0].Name != "humanizer" || len(v.Skills[0].Bindings) != 1 || v.Skills[0].Bindings[0].Name != "humanizer--7" ||

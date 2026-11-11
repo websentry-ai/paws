@@ -3,7 +3,7 @@ name: azure-deploy
 event: pre-tool
 matcher:
   tool: Bash
-  command_regex: (^|[;&|\n(])\s*(sudo\s+)?(azd\s+(up|deploy)([\s;&|)]|$)|azd\s+provision\s*($|[;&|\n)])|az\s+deployment\s+(group|sub|mg|tenant)\s+create\b)
+  command_regex: (^|[;&|\n(])\s*(sudo\s+)?(azd\s+(up|deploy|provision)([\s;&|)]|$)|az\s+deployment\s+(group|sub|mg|tenant)\s+create\b)
 action:
   type: require-skill
   skill: azure-deploy

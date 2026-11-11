@@ -3,7 +3,7 @@ name: appinsights-instrumentation
 event: pre-tool
 matcher:
   tool: Bash
-  command_regex: (^|[;&|\n(])\s*(sudo\s+)?((npm|pnpm|yarn|bun)\s+(i|install|add)\b[^;&|\n]*(@azure/monitor-opentelemetry|applicationinsights)|(pip3?|uv)\s+(install|add|pip\s+install)\b[^;&|\n]*azure-monitor-opentelemetry|dotnet\s+add\b[^;&|\n]*package\s+(Azure\.Monitor\.OpenTelemetry|Microsoft\.ApplicationInsights))
+  command_regex: (^|[;&|\n(])\s*(sudo\s+)?((npm|pnpm|yarn|bun)\s+(i|install|add)\b[^;&|\n]*\s(@azure/monitor-opentelemetry|applicationinsights)(@[^\s;&|)]*)?($|[\s;&|)])|(pip3?|uv)\s+(install|add|pip\s+install)\b[^;&|\n]*\sazure-monitor-opentelemetry([=<>~!][^\s;&|)]*)?($|[\s;&|)])|dotnet\s+add\b[^;&|\n]*package\s+(Azure\.Monitor\.OpenTelemetry|Microsoft\.ApplicationInsights))
 action:
   type: require-skill
   skill: appinsights-instrumentation

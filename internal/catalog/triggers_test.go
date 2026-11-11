@@ -3,6 +3,7 @@ package catalog
 import (
 	"encoding/json"
 	"os"
+	"strings"
 	"testing"
 )
 
@@ -33,6 +34,29 @@ func TestCatalogTriggersFireOnlyWhereReviewed(t *testing.T) {
 	byName := map[string]*Binding{}
 	for _, b := range c.Bindings {
 		byName[b.Name] = b
+	}
+	// Every binding needs cases, except the ones from before this file, listed in without_trigger_cases.txt.
+	older := map[string]bool{}
+	list, err := os.ReadFile("testdata/without_trigger_cases.txt")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, line := range strings.Split(string(list), "\n") {
+		if line = strings.TrimSpace(line); line != "" && !strings.HasPrefix(line, "#") {
+			older[line] = true
+		}
+	}
+	for name := range byName {
+		if _, ok := cases[name]; !ok && !older[name] {
+			t.Errorf("%s: add its fire and ignore cases to testdata/trigger_cases.json", name)
+		}
+	}
+	for name := range older {
+		if byName[name] == nil {
+			t.Errorf("%s: in without_trigger_cases.txt but no longer in the catalog; remove it from the list", name)
+		} else if _, ok := cases[name]; ok {
+			t.Errorf("%s: has cases now; remove it from without_trigger_cases.txt", name)
+		}
 	}
 	for name, tc := range cases {
 		b := byName[name]

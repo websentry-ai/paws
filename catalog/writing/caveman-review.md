@@ -3,7 +3,7 @@ name: caveman-review
 event: pre-tool
 matcher:
   tool: Bash
-  command_regex: (^|[;&|\n(])\s*gh\s+pr\s+review($|\s)[^;&|\n]*\s(-b|--body|-F|--body-file)(\s|=|$)
+  command_regex: (^|[;&|\n(])\s*gh\s+pr\s+review(\s+[^;&|\n]*)?\s(-b|--body|-F|--body-file)(\s|=|$)
 action:
   type: require-skill
   skill: caveman-review

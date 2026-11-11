@@ -3,7 +3,7 @@ name: deploy-to-vercel
 event: pre-tool
 matcher:
   tool: Bash
-  command_regex: (^|[;&|\n(])\s*(sudo\s+)?([A-Z_][A-Z0-9_]*=\S*\s+)*(npx\s+(-y\s+|--yes\s+)?|bunx\s+(--bun\s+)?|pnpm\s+(dlx\s+|exec\s+)?|yarn\s+(dlx\s+)?|npm\s+exec\s+)?vercel(@\S+)?(\s+(deploy|--prod|--prebuilt|--yes|-y)($|[^\w-])|\s*($|[;&|]))
+  command_regex: (^|[;&|\n(])\s*(sudo\s+)?([A-Z_][A-Z0-9_]*=\S*\s+)*(npx\s+(-y\s+|--yes\s+)?|bunx\s+(--bun\s+)?|pnpm\s+(dlx\s+|exec\s+)?|yarn\s+(dlx\s+)?|npm\s+exec\s+)?vercel(@[^\s;&|]*)?(([ \t]|\\\n)+((--scope|-S|--cwd|-A|--local-config|-Q|--global-config|-t|--token|--team)(=[^\s;&|]+|([ \t]|\\\n)+[^\s;&|]+)|--[\w-]+=[^\s;&|]+|-d|--debug|--no-color|--public|-f|--force|--with-cache|--no-wait|--skip-domain|-l|--logs|\.{0,2}/[^\s;&|]*|[\w.-]+/[^\s;&|]*))*(([ \t]|\\\n)+(deploy|--prod|--prebuilt|--yes|-y)($|[^\w-])|[ \t]*($|[;&|]))
 action:
   type: require-skill
   skill: deploy-to-vercel

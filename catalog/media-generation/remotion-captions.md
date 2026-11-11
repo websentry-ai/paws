@@ -3,7 +3,7 @@ name: remotion-captions
 event: pre-tool
 matcher:
   tool: Bash
-  command_regex: (^|[;&|\n(])\s*(sudo\s+)?([A-Z_][A-Z0-9_]*=\S*\s+)*((npm|pnpm|yarn|bun)\s+(i|install|add)|(npx|bunx|pnpm\s+exec|yarn)\s+remotion\s+(i|install|add))\b[^\n;&|]*\s@remotion/(captions|install-whisper-cpp|whisper-web|openai-whisper)(@\S*)?($|[\s;&|)])
+  command_regex: (^|[;&|\n(])\s*(sudo\s+)?([A-Z_][A-Z0-9_]*=\S*\s+)*((npm|pnpm|yarn|bun)\s+(i|install|add)|(npx|bunx|pnpm\s+exec|yarn)\s+remotion\s+(i|install|add)(\s+[^\s;&|-][^\s;&|]*)*)\s@remotion/(captions|install-whisper-cpp|whisper-web|openai-whisper)(@\S*)?($|[\s;&|)])
 action:
   type: require-skill
   skill: remotion-captions

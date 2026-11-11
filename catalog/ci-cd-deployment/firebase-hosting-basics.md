@@ -3,7 +3,7 @@ name: firebase-hosting-basics
 event: pre-tool
 matcher:
   tool: Bash
-  command_regex: (^|[;&|\n(])\s*(sudo\s+)?(npx\s+(-y\s+|--yes\s+)?|bunx\s+|pnpm\s+dlx\s+)?firebase(-tools(@\S*)?)?\s+(-\S+(\s+[^-\s]\S*)?\s+)*(hosting:|deploy\b[^;&|\n]*--only[\s=]+([\w:-]*,)*hosting\b|emulators:start\b[^;&|\n]*--only[\s=]+([\w:-]*,)*hosting\b|init\s+hosting\b)
+  command_regex: (^|[;&|\n(])\s*(sudo\s+)?(npx\s+(-y\s+|--yes\s+)?|bunx\s+|pnpm\s+dlx\s+)?firebase(-tools(@\S*)?)?\s+(-\S+(\s+[^-\s]\S*)?\s+)*(hosting:|deploy\b[^;&|\n]*--only[\s=]+["']?([\w:-]*,)*hosting\b|emulators:start\b[^;&|\n]*--only[\s=]+["']?([\w:-]*,)*hosting\b|init\s+hosting\b)
 action:
   type: require-skill
   skill: firebase-hosting-basics

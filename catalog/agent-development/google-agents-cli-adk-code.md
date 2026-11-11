@@ -3,7 +3,7 @@ name: google-agents-cli-adk-code
 event: pre-tool
 matcher:
   tool: Bash
-  command_regex: (^|[;&|\n(])\s*(sudo\s+)?(((python3?\s+-m\s+)?pip3?|uv\s+pip)\s+install|uv\s+add|poetry\s+add)(\s+((-t|--target|--prefix|-r|--requirement|-c|--constraint|-i|--index-url|--extra-index-url|--root|--src|--group|--extra|--optional)(=[^\s;&|]+|\s+[^\s;&|]+)|-U|--upgrade|--user|-q|--quiet|--no-deps|--pre|--no-cache-dir|--force-reinstall|-I|--ignore-installed|--dev|-D|[^\s;&|-][^\s;&|]*))*\s+[\"']?google-adk(\[[^\]]*\])?([\"']|[=<>~!@]\S*)?($|[\s;&|)])
+  command_regex: (^|[;&|\n(])\s*(sudo\s+)?(((python3?\s+-m\s+)?pip3?|uv\s+pip)\s+install|uv\s+add|poetry\s+add)([ \t]+((-t|--target|--prefix|-r|--requirement|-c|--constraint|-i|--index-url|--extra-index-url|--root|--src|--group|--extra|--optional)(=[^\s;&|]+|[ \t]+[^\s;&|]+)|-U|--upgrade|--user|-q|--quiet|--no-deps|--pre|--no-cache-dir|--force-reinstall|-I|--ignore-installed|--dev|-D|[^\s;&|-][^\s;&|]*))*[ \t]+["']?[\"']?google-adk(\[[^\]]*\])?([\"']|[=<>~!@]\S*)?["']?($|[\s;&|)])
 action:
   type: require-skill
   skill: google-agents-cli-adk-code

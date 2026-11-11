@@ -299,6 +299,38 @@ func TestSessionStartSpawnsABackgroundSync(t *testing.T) {
 	}
 }
 
+// Rounds in parallel processes are serialized by $PAWS_HOME/portal/sync.lock: while another round holds
+// it, a round makes no request; a lock its round died holding is taken over once stale.
+func TestSyncRoundLock(t *testing.T) {
+	home, srv := syncEnv(t)
+	lock := filepath.Join(home, "portal", "sync.lock")
+	if err := os.MkdirAll(filepath.Dir(lock), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(lock, nil, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	syncRound(t.TempDir(), 0)
+	if n := srv.count(""); n != 0 {
+		t.Fatalf("a round ran while another held the lock: %v", srv.requests)
+	}
+	if st := loadPortalState(); !st.LastUpload.IsZero() {
+		t.Errorf("a locked-out round claimed the slot: %v", st.LastUpload)
+	}
+
+	old := time.Now().Add(-2 * time.Minute)
+	if err := os.Chtimes(lock, old, old); err != nil {
+		t.Fatal(err)
+	}
+	syncRound(t.TempDir(), 0)
+	if srv.count("POST /paws/v1/sync") == 0 {
+		t.Fatalf("a stale lock blocked the round: %v", srv.requests)
+	}
+	if _, err := os.Stat(lock); !os.IsNotExist(err) {
+		t.Error("the round left its lock behind")
+	}
+}
+
 func TestSessionStartLoggedOutSpawnsNothing(t *testing.T) {
 	portalEnv(t, http.NotFoundHandler())
 	called := false

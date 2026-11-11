@@ -5,6 +5,7 @@ import (
 	"net/http"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"time"
 )
 
@@ -35,6 +36,11 @@ func syncRound(cwd string, every time.Duration) {
 	if err != nil || creds == nil {
 		return
 	}
+	unlock, ok := lockSyncRound()
+	if !ok {
+		return // another process is in a round right now
+	}
+	defer unlock()
 	st := loadPortalState()
 	now := time.Now().UTC()
 	if now.Sub(st.LastUpload) < every {
@@ -62,6 +68,33 @@ func syncRound(cwd string, every time.Duration) {
 	if res.Hash == st.AppliedHash {
 		reportApplied(creds, st.AppliedHash, cwd)
 	}
+}
+
+// syncLockStale is the age past which a round's lock is taken to be left by a round that died: a live
+// round ends within stopHookDeadline.
+const syncLockStale = time.Minute
+
+// lockSyncRound takes the background-round lock, $PAWS_HOME/portal/sync.lock, or reports false while
+// another process holds it. Without it, rounds in parallel processes (two sessions starting together, a
+// Stop hook beside a session start) could both pass the interval check before either saved its claim,
+// and upload the same records twice.
+func lockSyncRound() (unlock func(), ok bool) {
+	dir := portalDir()
+	if dir == "" || os.MkdirAll(dir, 0o700) != nil {
+		return nil, false
+	}
+	path := filepath.Join(dir, "sync.lock")
+	for try := 0; try < 2; try++ {
+		if f, err := os.OpenFile(path, os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0o600); err == nil {
+			f.Close()
+			return func() { os.Remove(path) }, true
+		}
+		if fi, err := os.Stat(path); err != nil || time.Since(fi.ModTime()) < syncLockStale {
+			return nil, false
+		}
+		os.Remove(path) // stale: its round died without unlocking
+	}
+	return nil, false
 }
 
 // syncInterval is PAWS_SYNC_INTERVAL (a Go duration), else the default.

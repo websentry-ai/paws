@@ -3,7 +3,7 @@ name: firebase-auth-basics
 event: pre-tool
 matcher:
   tool: Bash
-  command_regex: (^|[;&|\n(])\s*(sudo\s+)?(npx\s+(-y\s+|--yes\s+)?|bunx\s+|pnpm\s+dlx\s+)?firebase(-tools(@\S*)?)?\s+(-\S+(\s+[^-\s]\S*)?\s+)*(init\s+auth\b|deploy\b[^;&|\n]*--only[\s=]+([\w:-]*,)*auth\b)
+  command_regex: (^|[;&|\n(])\s*(sudo\s+)?(npx\s+(-y\s+|--yes\s+)?|bunx\s+|pnpm\s+dlx\s+)?firebase(-tools(@\S*)?)?\s+(-\S+(\s+[^-\s]\S*)?\s+)*(init\s+auth\b|deploy\b[^;&|\n]*--only[\s=]+["']?([\w:-]*,)*auth\b)
 action:
   type: require-skill
   skill: firebase-auth-basics

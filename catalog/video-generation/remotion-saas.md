@@ -3,7 +3,7 @@ name: remotion-saas
 event: pre-tool
 matcher:
   tool: Bash
-  command_regex: (^|[;&|\n(])\s*(sudo\s+)?([A-Z_][A-Z0-9_]*=\S*\s+)*(npm\s+(i|install|add)|pnpm\s+(i|install|add)|yarn\s+(global\s+)?add|bun\s+(i|install|add))\b[^;&|\n]*\s@remotion/(player|lambda|renderer|vercel|cloudrun|web-renderer)(@\S*)?($|[\s;&|)])
+  command_regex: (^|[;&|\n(])\s*(sudo\s+)?([A-Z_][A-Z0-9_]*=\S*\s+)*(npm\s+(i|install|add)|pnpm\s+(i|install|add)|yarn\s+(global\s+)?add|bun\s+(i|install|add))(\s+((--filter|-F|-w|--workspace|--prefix|-C|--dir|--cwd|--registry)(=[^\s;&|]+|\s+[^\s;&|]+)|-D|--save-dev|-S|--save|-E|--save-exact|-O|--save-optional|-P|--save-prod|-g|--global|-d|--dev|--exact|-W|--ignore-workspace-root-check|--legacy-peer-deps|--no-save|--ignore-scripts|[^\s;&|-][^\s;&|]*))*\s+@remotion/(player|lambda|renderer|vercel|cloudrun|web-renderer)(@\S*)?($|[\s;&|)])
 action:
   type: require-skill
   skill: remotion-saas

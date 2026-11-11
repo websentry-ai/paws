@@ -3,7 +3,7 @@ name: setup-pre-commit
 event: pre-tool
 matcher:
   tool: Bash
-  command_regex: (^|[;&|\n(])\s*(sudo\s+)?((npx\s+(-y\s+)?|bunx\s+|pnpm\s+(exec\s+|dlx\s+)?|yarn\s+(dlx\s+)?)husky\s+init\b|(npm|pnpm|yarn|bun)\s+(i|install|add)\b[^;&|\n]*\s(husky|lint-staged)(@\S+)?([\s;&|)]|$))
+  command_regex: (^|[;&|\n(])\s*(sudo\s+)?((npx\s+(-y\s+)?|bunx\s+|pnpm\s+(exec\s+|dlx\s+)?|yarn\s+(dlx\s+)?)husky\s+init\b|(npm|pnpm|yarn|bun)\s+(i|install|add)(\s+((--filter|-F|-w|--workspace|--prefix|-C|--dir|--cwd|--registry)(=[^\s;&|]+|\s+[^\s;&|]+)|-D|--save-dev|-S|--save|-E|--save-exact|-O|--save-optional|-P|--save-prod|-g|--global|-d|--dev|--exact|-W|--ignore-workspace-root-check|--legacy-peer-deps|--no-save|--ignore-scripts|[^\s;&|-][^\s;&|]*))*\s+(husky|lint-staged)(@\S+)?([\s;&|)]|$))
 action:
   type: require-skill
   skill: setup-pre-commit

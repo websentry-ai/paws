@@ -3,7 +3,7 @@ name: gsap-core
 event: pre-tool
 matcher:
   tool: Bash
-  command_regex: (^|[;&|\n(])\s*(npm|pnpm|yarn|bun)\s+(i|install|add)\b[^;&|\n]*\s(gsap|@gsap/react)(@\S+)?(\s|$)
+  command_regex: (^|[;&|\n(])\s*(npm|pnpm|yarn|bun)\s+(i|install|add)(\s+((--filter|-F|-w|--workspace|--prefix|-C|--dir|--cwd|--registry)(=[^\s;&|]+|\s+[^\s;&|]+)|-D|--save-dev|-S|--save|-E|--save-exact|-O|--save-optional|-P|--save-prod|-g|--global|-d|--dev|--exact|-W|--ignore-workspace-root-check|--legacy-peer-deps|--no-save|--ignore-scripts|[^\s;&|-][^\s;&|]*))*\s+(gsap|@gsap/react)(@\S+)?(\s|$)
 action:
   type: require-skill
   skill: gsap-core

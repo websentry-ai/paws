@@ -3,7 +3,7 @@ name: stripe-best-practices
 event: pre-tool
 matcher:
   tool: Bash
-  command_regex: (^|[;&|\n(])\s*(sudo\s+)?([A-Z_][A-Z0-9_]*=\S*\s+)*((npm|pnpm|yarn|bun)\s+(i|install|add)\b[^;&|\n]*(\sstripe(@\S+)?|\s@stripe/(stripe-js|react-stripe-js|stripe-react-native|connect-js|react-connect-js)(@\S+)?)($|[\s;&|)])|(python3?\s+-m\s+pip\s+install|pip3?\s+install|uv\s+pip\s+install|uv\s+add|poetry\s+add)\b[^;&|\n]*\sstripe((==|>=|~=)\S+)?($|[\s;&|)])|gem\s+install\s+stripe($|[\s;&|)])|bundle\s+add\s+stripe($|[\s;&|)])|composer\s+require\s+stripe/stripe-php|go\s+get\s+github\.com/stripe/stripe-go|dotnet\s+add\s+package\s+Stripe\.net)
+  command_regex: (^|[;&|\n(])\s*(sudo\s+)?([A-Z_][A-Z0-9_]*=\S*\s+)*((npm|pnpm|yarn|bun)\s+(i|install|add)\b[^;&|\n]*(\sstripe(@\S+)?|\s@stripe/(stripe-js|react-stripe-js|stripe-react-native|connect-js|react-connect-js)(@\S+)?)($|[\s;&|)])|(python3?\s+-m\s+pip\s+install|pip3?\s+install|uv\s+pip\s+install|uv\s+add|poetry\s+add)(\s+((-t|--target|--prefix|-r|--requirement|-c|--constraint|-i|--index-url|--extra-index-url|--root|--src|--group|--extra|--optional)(=[^\s;&|]+|\s+[^\s;&|]+)|-U|--upgrade|--user|-q|--quiet|--no-deps|--pre|--no-cache-dir|--force-reinstall|-I|--ignore-installed|--dev|-D|[^\s;&|-][^\s;&|]*))*\s+stripe((==|>=|~=)\S+)?($|[\s;&|)])|gem\s+install\s+stripe($|[\s;&|)])|bundle\s+add\s+stripe($|[\s;&|)])|composer\s+require\s+stripe/stripe-php|go\s+get\s+github\.com/stripe/stripe-go|dotnet\s+add\s+package\s+Stripe\.net)
 action:
   type: require-skill
   skill: stripe-best-practices

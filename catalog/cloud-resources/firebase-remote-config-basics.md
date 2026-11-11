@@ -3,7 +3,7 @@ name: firebase-remote-config-basics
 event: pre-tool
 matcher:
   tool: Bash
-  command_regex: (^|[;&|\n(])\s*(sudo\s+)?(npx\s+(-y\s+|--yes\s+)?|bunx\s+|pnpm\s+dlx\s+)?firebase(-tools(@\S*)?)?\s+(-\S+(\s+[^-\s]\S*)?\s+)*(remoteconfig:|deploy\b[^;&|\n]*--only[\s=]+([\w:-]*,)*remoteconfig\b)
+  command_regex: (^|[;&|\n(])\s*(sudo\s+)?(npx\s+(-y\s+|--yes\s+)?|bunx\s+|pnpm\s+dlx\s+)?firebase(-tools(@\S*)?)?\s+(-\S+(\s+[^-\s]\S*)?\s+)*(remoteconfig:|deploy\b[^;&|\n]*--only[\s=]+["']?([\w:-]*,)*remoteconfig\b)
 action:
   type: require-skill
   skill: firebase-remote-config-basics

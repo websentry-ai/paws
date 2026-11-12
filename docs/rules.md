@@ -24,8 +24,8 @@ Loads humanizer before a PR body goes out.
 | `event:` | Fires on | Target the regex sees |
 |---|---|---|
 | `pre-tool` | any tool call | see the table below |
-| `pre-commit` | a Bash call that runs `git commit` or `git commit-tree` (flags and `-C dir` allowed; not `commit-graph`) | the command |
-| `pre-push` | a Bash call that runs `git push` | the command |
+| `pre-commit` | a Bash call that runs `git commit` or `git commit-tree` anywhere in it (flags and `-C dir` allowed; not `commit-graph`) | the command |
+| `pre-push` | a Bash call that runs `git push` anywhere in it | the command |
 | `session-start` | a session starting | `startup`, `resume`, `clear` or `compact` |
 
 Per tool, `pre-tool` matches against:
@@ -46,9 +46,29 @@ Per tool, `pre-tool` matches against:
 | Field | Matches |
 |---|---|
 | `tool` | a name, a pattern where `*` stands for any characters (e.g. `mcp__slack__*`, `mcp__*__get_issue`), an `A\|B` list, or omitted for any |
-| `command_regex` | Go RE2 regex over the target |
+| `command_regex` | Go RE2 regex over the target; for Bash, over each command in it (see below) |
 | `file_glob` | `**`, `*`, `?`, `{a,b}` over the absolute path; Read/Write/Edit/NotebookEdit only |
 | `mcp_action` | `send`, `create`, `update`, `delete` (or `A\|B`): MCP tools whose name says so |
+
+### Bash: one command at a time
+
+A `command_regex` is matched against the whole Bash call, and also against
+each command the shell will run, which paws finds with a shell parser. A rule
+fires if either matches, so the parser only adds matches:
+
+- `cd web && npm install x` holds the command `npm install x`.
+- Commands run by `bash -c "..."` (any flags, as in `bash -euo pipefail -c`),
+  `sh <<EOF`, `bash <<< '...'`, `cat <<EOF | bash`, `echo ... | sh`, `eval`,
+  `( )`, `$( )`, `if` and loops count. So does a function's body where the
+  line calls the function, but not where it only defines it.
+- A command behind `sudo`, `env`, `xargs`, `time`, `nohup`, `command` or
+  `exec` is tested with and without that prefix.
+- A command's quotes and backslashes are removed, as the program sees them
+  (`\git push` is `git push`). `$VAR`, `$(...)` and assignments
+  (`HUSKY=0 git commit`, `export X=1`) stay as written.
+- A call that isn't valid Bash is matched whole only.
+
+`pre-commit` and `pre-push` find git the same way.
 
 ### RE2, not PCRE
 

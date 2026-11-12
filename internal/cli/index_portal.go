@@ -20,6 +20,7 @@ type portalCatalogSkill struct {
 	Summary        string          `json:"summary"`    // the first binding's summary: what the skill teaches
 	SourceURL      string          `json:"source_url"` // the skill's folder on GitHub, at the pinned ref
 	License        string          `json:"license"`
+	Official       bool            `json:"official"` // from the binding's provenance; only an upstream skill can be
 	Upstream       *portalUpstream `json:"upstream"` // null for skills this repo ships
 	Version        string          `json:"version"`
 	ContentHash    string          `json:"content_hash"`
@@ -71,7 +72,7 @@ func newCatalogSkill(c *catalog.Catalog, b *catalog.Binding) *portalCatalogSkill
 	if u := b.Upstream; u.Repo != "" {
 		s.Upstream = &portalUpstream{Repo: u.Repo, Path: u.Path, Ref: u.Ref}
 		s.SourceURL = strings.TrimSuffix("https://"+u.Repo+"/tree/"+u.Ref+"/"+path.Dir(u.Path), "/.")
-		s.Version, s.ContentHash, s.License = u.Ref[:7], u.ContentHash, b.Provenance.License
+		s.Version, s.ContentHash, s.License, s.Official = u.Ref[:7], u.ContentHash, b.Provenance.License, b.Provenance.Official
 		return s
 	}
 	s.License = repoLicense // no source link: these files are published with the catalog, not on GitHub

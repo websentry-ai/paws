@@ -35,6 +35,11 @@ func TestGitFoundByTheShellParser(t *testing.T) {
 		{"cat <<'EOF' | bash\ngit push\nEOF", false, true},
 		{"cat <<'EOF' | sudo sh -s\ngit commit -m x\nEOF", true, false},
 		{`echo "git push" | bash`, false, true},
+		{`echo -e "cd app\ngit push" | bash`, false, true},
+		{`printf '%s\n' 'git push' | bash`, false, true},
+		{`printf 'cd x\ngit commit -m y\n' | sh`, true, false},
+		// A nested script that isn't valid Bash: the line is read whole, as before.
+		{`bash -c "git commit -m 'unclosed"`, true, false},
 		{`publish() { git push; }; publish`, false, true},
 		{`f() { g; }; g() { git commit -m x; }; f`, true, false},
 		{`rec() { rec; }; rec`, false, false},

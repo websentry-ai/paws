@@ -2,6 +2,7 @@ package rule
 
 import (
 	"path"
+	"regexp"
 	"strings"
 	"sync"
 
@@ -58,7 +59,7 @@ func split(line string, out *[]command, depth int) bool {
 	if err != nil {
 		return false
 	}
-	s := splitter{out: out, funcs: map[string]*syntax.Stmt{}}
+	s := splitter{out: out, funcs: map[string]*syntax.Stmt{}, ok: true}
 	syntax.Walk(f, func(n syntax.Node) bool {
 		if fd, ok := n.(*syntax.FuncDecl); ok {
 			s.funcs[fd.Name.Value] = fd.Body
@@ -66,7 +67,7 @@ func split(line string, out *[]command, depth int) bool {
 		return true
 	})
 	s.walk(f, depth, map[string]bool{})
-	return true
+	return s.ok
 }
 
 // splitter collects the commands of one parsed line. funcs are the functions it defines: defining one runs nothing,
@@ -74,6 +75,14 @@ func split(line string, out *[]command, depth int) bool {
 type splitter struct {
 	out   *[]command
 	funcs map[string]*syntax.Stmt
+	ok    bool // false once a nested script didn't parse: the whole line is then read the old way
+}
+
+// nested splits a script the line runs (bash -c, a heredoc, eval, a pipe into a shell).
+func (s *splitter) nested(script string, depth int) {
+	if !split(script, s.out, depth+1) {
+		s.ok = false
+	}
 }
 
 func (s *splitter) walk(node syntax.Node, depth int, calling map[string]bool) {
@@ -127,15 +136,15 @@ func (s *splitter) stmt(stmt *syntax.Stmt, depth int, calling map[string]bool) {
 			switch head := path.Base(bare[0]); {
 			case shells[head]: // bash -c "script", bash <<EOF script EOF
 				if script, ok := shellScript(bare[1:]); ok {
-					split(script, s.out, depth+1)
+					s.nested(script, depth)
 				}
 				for _, r := range stmt.Redirs {
 					if (r.Op == syntax.Hdoc || r.Op == syntax.DashHdoc) && r.Hdoc != nil {
-						split(wordString(r.Hdoc), s.out, depth+1)
+						s.nested(wordString(r.Hdoc), depth)
 					}
 				}
 			case head == "eval":
-				split(strings.Join(bare[1:], " "), s.out, depth+1)
+				s.nested(strings.Join(bare[1:], " "), depth)
 			case s.funcs[bare[0]] != nil && !calling[bare[0]] && depth < maxNesting:
 				calling[bare[0]] = true
 				s.walk(s.funcs[bare[0]], depth+1, calling)
@@ -186,18 +195,32 @@ func (s *splitter) pipedScript(pipe *syntax.BinaryCmd, depth int) {
 	}
 	for _, r := range left.Redirs {
 		if (r.Op == syntax.Hdoc || r.Op == syntax.DashHdoc) && r.Hdoc != nil {
-			split(wordString(r.Hdoc), s.out, depth+1)
+			s.nested(wordString(r.Hdoc), depth)
 		}
 	}
 	if call, ok := left.Cmd.(*syntax.CallExpr); ok && len(call.Args) > 1 {
-		if head := wordString(call.Args[0]); head == "echo" || head == "printf" {
-			args := make([]string, 0, len(call.Args)-1)
-			for _, w := range call.Args[1:] {
-				args = append(args, wordString(w))
+		args := make([]string, 0, len(call.Args)-1)
+		for _, w := range call.Args[1:] {
+			args = append(args, wordString(w))
+		}
+		switch wordString(call.Args[0]) {
+		case "echo": // echo -e "a\nb" too
+			for len(args) > 0 && (args[0] == "-e" || args[0] == "-n" || args[0] == "-E" || args[0] == "-en" || args[0] == "-ne") {
+				args = args[1:]
 			}
-			split(strings.Join(args, " "), s.out, depth+1)
+			s.nested(unescape(strings.Join(args, " ")), depth)
+		case "printf": // printf '%s\n' 'git push': the format's text, then each argument on its own line
+			lines := append([]string{printfVerb.ReplaceAllString(unescape(args[0]), "")}, args[1:]...)
+			s.nested(strings.Join(lines, "\n"), depth)
 		}
 	}
+}
+
+var printfVerb = regexp.MustCompile(`%[-+ #0-9.]*[a-zA-Z%]`)
+
+// unescape turns the \n and \t that echo -e and printf print into the characters.
+func unescape(s string) string {
+	return strings.NewReplacer(`\n`, "\n", `\t`, "\t").Replace(s)
 }
 
 func commandText(words, redirs []string) string {

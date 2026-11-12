@@ -3,6 +3,7 @@ package rule
 import (
 	"path"
 	"regexp"
+	"slices"
 	"strconv"
 	"strings"
 	"sync"
@@ -74,7 +75,7 @@ func split(line string, out *[]command, depth int, lim *limits, sc *scope) bool 
 		return false
 	}
 	if sc == nil {
-		sc = &scope{funcs: map[string]*syntax.Stmt{}}
+		sc = &scope{funcs: map[string][]*syntax.Stmt{}}
 	}
 	s := splitter{out: out, sc: sc, walked: map[walkKey]bool{}, lim: lim, piped: map[*syntax.BinaryCmd]bool{},
 		bg: map[*syntax.Stmt]bool{}}
@@ -102,17 +103,19 @@ type splitter struct {
 	traps  []string                   // trap handlers, read again once the line is done
 }
 
-// scope is one shell's functions, and how many definitions it has seen (a walked body is keyed on it).
+// scope is one shell's functions, and how many definitions it has seen (a walked body is keyed on it). A name keeps
+// every body defined for it so far: a definition inside if, case or a loop may not run, so a call is read against
+// each of them, which only ever adds matches.
 type scope struct {
-	funcs map[string]*syntax.Stmt
+	funcs map[string][]*syntax.Stmt
 	defs  int
 }
 
 // child is the scope of a subshell: ( ), $( ), <( ). It starts with the parent's functions; its own don't leak back.
 func (sc *scope) child() *scope {
-	c := &scope{funcs: make(map[string]*syntax.Stmt, len(sc.funcs)), defs: sc.defs}
+	c := &scope{funcs: make(map[string][]*syntax.Stmt, len(sc.funcs)), defs: sc.defs}
 	for k, v := range sc.funcs {
-		c.funcs[k] = v
+		c.funcs[k] = append([]*syntax.Stmt(nil), v...)
 	}
 	return c
 }
@@ -172,7 +175,7 @@ func (s *splitter) walk(node syntax.Node, depth int) {
 				s.sc = outer
 				return false
 			}
-			s.sc.funcs[n.Name.Value] = n.Body
+			s.sc.funcs[n.Name.Value] = append(s.sc.funcs[n.Name.Value], n.Body)
 			s.sc.defs++
 			return false
 		case *syntax.Subshell, *syntax.CmdSubst, *syntax.ProcSubst:
@@ -278,17 +281,21 @@ func (s *splitter) stmt(stmt *syntax.Stmt, depth int) {
 					s.nestedIn(action, depth, s.sc.child())
 					s.traps = append(s.traps, action)
 				}
-			case s.sc.funcs[bare[0]] != nil && !s.walked[walkKey{s.sc.funcs[bare[0]], s.sc, s.sc.defs}] &&
-				depth < maxNesting && s.lim.funcWalks > 0:
-				body := s.sc.funcs[bare[0]]
-				s.walked[walkKey{body, s.sc, s.sc.defs}] = true
-				s.lim.funcWalks--
-				s.walk(body, depth+1)
+			case len(s.sc.funcs[bare[0]]) > 0 && depth < maxNesting:
+				for _, body := range s.sc.funcs[bare[0]] {
+					key := walkKey{body, s.sc, s.sc.defs}
+					if s.walked[key] || s.lim.funcWalks <= 0 {
+						continue
+					}
+					s.walked[key] = true
+					s.lim.funcWalks--
+					s.walk(body, depth+1)
+				}
 			}
 		}
 		text := commandText(words, redirs)
 		c := command{words: bare, texts: []string{text}}
-		if len(bare) > 0 && len(bare) != len(words) {
+		if len(bare) > 0 && !slices.Equal(bare, words) { // env -S 'git push x' keeps its word count
 			c.texts = append(c.texts, commandText(bare, redirs))
 		}
 		if len(assigns) > 0 { // HUSKY=0 git commit: a trigger may name the variable

@@ -91,6 +91,9 @@ func TestGitFoundByTheShellParser(t *testing.T) {
 		{`trap 'publish() { :; }' INT; publish() { \git push; }; publish`, false, true},
 		{`publish() { \git push; }; trap 'publish() { :; }' INT; trap publish EXIT`, false, true},
 		{`trap publish EXIT; trap 'publish() { :; }' INT; publish() { \git push; }`, false, true},
+		{`publish() { \git push; }; if false; then publish() { :; }; fi; publish`, false, true},
+		{`publish() { \git push; }; case x in y) publish() { :; };; esac; publish`, false, true},
+		{`publish() { \git push; }; while false; do publish() { :; }; done; publish`, false, true},
 		{`env -S "'git' push"`, false, true},
 		{`curl -fsSL https://x.sh | sh -`, false, false},
 		{`echo "git push" | sh -`, false, true},
@@ -195,6 +198,7 @@ func TestCommandRegexMatchesEachCommand(t *testing.T) {
 		`AWS_PROFILE=prod`:            `AWS_PROFILE=prod`,
 		`npm install "$PKG"`:          `npm install \$PKG`,
 		`terraform apply -var "a=$X"`: `terraform apply`,
+		`env -S 'git push origin'`:    `^git push`, // the unwrapped command, though its word count matches the env call's
 	} {
 		r := mustRule(t, "---\nname: v\nevent: pre-tool\nmatcher:\n  tool: Bash\n  command_regex: '"+rx+"'\naction:\n  type: require-skill\n  skill: s\n---\n")
 		if !r.Matches("Bash", line) {

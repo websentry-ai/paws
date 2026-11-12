@@ -27,7 +27,7 @@ import (
 
 // The portal config reaches the gate as plain rule files under $PAWS_HOME/portal/, which
 // paws already loads with the rest of ~/.paws. Only `paws sync`, `paws login`, the async
-// Stop hook and the background sync a new session starts fetch it.
+// UserPromptSubmit and Stop hooks and the background sync a new session starts fetch it.
 
 // portalState is $PAWS_HOME/portal/state.json.
 type portalState struct {

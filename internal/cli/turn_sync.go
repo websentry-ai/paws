@@ -10,24 +10,25 @@ import (
 )
 
 const (
-	// defaultSyncInterval is how often the Stop hook uploads records (PAWS_SYNC_INTERVAL).
+	// defaultSyncInterval is how often a hook round uploads records (PAWS_SYNC_INTERVAL).
 	defaultSyncInterval = 5 * time.Minute
-	// defaultCheckInterval is how often, between uploads, the Stop hook asks the portal whether the
+	// defaultCheckInterval is how often, between uploads, a hook round asks the portal whether the
 	// config changed (PAWS_CHECK_INTERVAL): one small GET, so a skill turned on in the browser lands
-	// within a minute of a turn ending.
-	defaultCheckInterval = time.Minute
+	// with the next prompt sent to Claude.
+	defaultCheckInterval = 30 * time.Second
 	// sessionStartFloor spaces out the syncs new sessions start, so several sessions opened
 	// together (or a run of /clear) make one round, not one each.
 	sessionStartFloor = time.Minute
-	stopHookTimeout   = 5 * time.Second // per portal request
+	stopHookTimeout   = 5 * time.Second // per portal request in a hook round
 )
 
-// stopHookDeadline bounds a background portal round, skill downloads included. Tests shorten it.
+// stopHookDeadline bounds a hook's portal round, skill downloads included. Tests shorten it.
 var stopHookDeadline = 12 * time.Second
 
-// syncAfterTurn is the portal step of the async Stop hook: an upload at most every PAWS_SYNC_INTERVAL,
-// and a config check at most every PAWS_CHECK_INTERVAL in between.
-func syncAfterTurn(cwd string) {
+// syncInHook is the portal step of the async UserPromptSubmit and Stop hooks: an upload at most every
+// PAWS_SYNC_INTERVAL, and a config check at most every PAWS_CHECK_INTERVAL in between. paws keeps no
+// process running between hooks, so a laptop where nobody is prompting Claude sends nothing.
+func syncInHook(cwd string) {
 	syncRound(cwd, syncInterval())
 }
 
@@ -90,7 +91,7 @@ const syncLockStale = time.Minute
 
 // lockSyncRound takes the background-round lock, $PAWS_HOME/portal/sync.lock, or reports false while
 // another process holds it. Without it, rounds in parallel processes (two sessions starting together, a
-// Stop hook beside a session start) could both pass the interval check before either saved its claim,
+// prompt hook beside a session start) could both pass the interval check before either saved its claim,
 // and upload the same records twice.
 func lockSyncRound() (unlock func(), ok bool) {
 	dir := portalDir()
@@ -144,7 +145,7 @@ var spawnSessionSync = func(cwd string) {
 	}
 }
 
-// syncAtSessionStart pulls portal changes when a session starts, without waiting for a turn to end.
+// syncAtSessionStart pulls portal changes when a session starts, before the first prompt.
 // Tool rules are read on every tool call, so they apply in this session as soon as the round lands.
 // A session-start rule's context went out before the round, so a new one applies from the next
 // session; waiting here would put the network in front of every session start. It spawns only when

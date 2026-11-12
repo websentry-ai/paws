@@ -19,8 +19,8 @@ import (
 	"github.com/websentry-ai/paws/internal/gate"
 )
 
-// The portal is opt-in. Only `paws login`, `paws sync` and, once logged in, the async Stop
-// hook talk to it. The PreToolUse gate never does.
+// The portal is opt-in. Only `paws login`, `paws sync` and, once logged in, the async
+// UserPromptSubmit and Stop hooks and the session-start sync talk to it. The PreToolUse gate never does.
 
 // defaultPortalAPI is a placeholder until the hosted portal's address is final.
 const defaultPortalAPI = "https://paws-api.getunbound.ai"
@@ -31,7 +31,7 @@ var (
 	openURL = openBrowser
 )
 
-// portalClient and portalCtx carry every portal request; the Stop hook swaps in a shorter
+// portalClient and portalCtx carry every portal request; a hook round swaps in a shorter
 // per-request timeout and an overall deadline (portalCtx also bounds skill downloads).
 var (
 	portalClient = &http.Client{Timeout: 30 * time.Second}

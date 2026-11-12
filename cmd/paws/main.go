@@ -95,8 +95,9 @@ Rules are .paws/**/*.md files; paws reads every .paws/ from the working
 directory up to the repo root (or $HOME if no repo), plus ~/.paws.
 
 Nothing leaves the machine unless you run unbound-paws login. Once logged in, the
-async Stop hook uploads records and pulls portal settings after Claude's
-turns (throttled); the gate itself never uses the network. The portal
+async prompt and Stop hooks pull portal settings when you send Claude a
+message and upload records (throttled); the gate itself never uses the
+network. The portal
 address is $PAWS_PORTAL_API (default https://paws-api.getunbound.ai).
 `)
 }

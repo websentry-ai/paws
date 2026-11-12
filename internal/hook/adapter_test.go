@@ -19,7 +19,7 @@ func TestToEventKind(t *testing.T) {
 	if ev := ToEvent(in); ev.Kind != rule.KindSession || ev.Target != "compact" {
 		t.Errorf("SessionStart should map to KindSession with the source, got %+v", ev)
 	}
-	// Stop is telemetry; UserPromptSubmit is a retired event an older settings file may still send.
+	// Stop and UserPromptSubmit run no rules: telemetry and the portal round only.
 	for _, name := range []string{"Stop", "UserPromptSubmit"} {
 		if ev := ToEvent(&Input{HookEventName: name}); ev.Kind != "" {
 			t.Errorf("%s should have no Kind, got %+v", name, ev)
@@ -111,7 +111,7 @@ func TestRenderSessionStartContext(t *testing.T) {
 }
 
 func TestTelemetryHooksAreAsync(t *testing.T) {
-	for _, ev := range []string{"PostToolUse", "Stop"} {
+	for _, ev := range []string{"UserPromptSubmit", "PostToolUse", "Stop"} {
 		e := SettingsEntry(ev, "'/x/paws' gate")
 		inner := e["hooks"].([]any)[0].(map[string]any)
 		if inner["async"] != true {

@@ -77,7 +77,7 @@ var errRevoked = errors.New("your login was revoked")
 // Sync uploads new records and pulls the portal config now: `paws sync [--dry-run]`.
 func Sync(args []string) int {
 	if len(args) == 1 && args[0] == "--background" {
-		// Internal: the SessionStart hook's detached round. Silent and throttled like the Stop hook's.
+		// Internal: the SessionStart hook's detached round. Silent and throttled like a prompt or Stop hook's.
 		cwd, _ := os.Getwd()
 		syncRound(cwd, sessionStartFloor)
 		return 0

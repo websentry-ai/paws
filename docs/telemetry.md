@@ -60,8 +60,9 @@ the skill on its own), `loaded-after-deny`, and `delivered` (digest or
 session context). It also lists rules in scope that never fired, skill
 invocations, and session, turn and successful tool-call totals.
 
-The PostToolUse and Stop hooks are registered `async`: Claude Code does not
-wait for them. Matched targets are capped at 2,000 bytes per record.
+The UserPromptSubmit, PostToolUse and Stop hooks are registered `async`:
+Claude Code does not wait for them. UserPromptSubmit never reads or records
+the prompt; it only runs the portal round below. Matched targets are capped at 2,000 bytes per record.
 
 ## Redaction
 
@@ -92,18 +93,21 @@ the account's email when the portal sends it, in `~/.paws/credentials.json`
 must be https; plain http works only for `localhost`, `127.0.0.1` or `::1`,
 and credentials saved for any other http address are refused. From then on:
 
-- the async **Stop hook** (after each Claude turn), when the last round was
-  more than `PAWS_SYNC_INTERVAL` ago (default `5m`), sends one upload: the new
-  records, or none, with the inventory. Its reply carries the portal's config
-  hash, and the config is fetched only when that hash changed. Between
-  uploads, when the last check was more than `PAWS_CHECK_INTERVAL` ago
-  (default `1m`), it asks `GET /config/hash` alone, uploads nothing, and fetches
-  the config only when the hash changed. Each request times out after 5 seconds
+- the async **UserPromptSubmit** and **Stop hooks** (when you send Claude a
+  message, and after each Claude turn), when the last upload was more than
+  `PAWS_SYNC_INTERVAL` ago (default `5m`), send one upload: the new records,
+  or none, with the inventory. Its reply carries the portal's config hash, and
+  the config is fetched only when that hash changed. Between uploads, when the
+  last check was more than `PAWS_CHECK_INTERVAL` ago (default `30s`), they ask
+  `GET /config/hash` alone, upload nothing, and fetch the config only when the
+  hash changed. A config the prompt hook pulls applies from the next tool call
+  in that turn. No paws process runs between hooks: with no prompts and no
+  turns, nothing is sent. Each request times out after 5 seconds
   and the whole step, skill downloads included, after 12; any failure is
   dropped silently and retried later;
 - the **SessionStart hook** starts the same round in a separate background
   process (`unbound-paws sync --background`) when a session starts, resumes or
-  is cleared, at most once a minute, without waiting for a turn to end. The
+  is cleared, at most once a minute, before the first prompt. The
   hook itself never waits on it, so a change to a tool rule applies from the
   next tool call after the round lands, and a new session-start rule from the
   next session;
@@ -112,7 +116,7 @@ and credentials saved for any other http address are refused. From then on:
 
 `unbound-paws logout` deletes the token and removes every rule and digest the portal
 config wrote, and `~/.paws/portal/state.json`. A 401 from the portal (the
-login was revoked) does the same, from `unbound-paws sync` or the Stop hook; `paws
+login was revoked) does the same, from `unbound-paws sync` or a hook round; `paws
 sync` then says the login was revoked.
 
 The PreToolUse and SessionStart hooks, which decide tool calls, never touch

@@ -3,6 +3,7 @@ package rule
 import (
 	"path"
 	"regexp"
+	"slices"
 	"strings"
 	"sync"
 
@@ -393,22 +394,9 @@ func gitSubcommand(words []string) string {
 	return ""
 }
 
-// commandText joins words for a regex. ; & | and newlines inside an argument become spaces, so text quoted in an
-// argument (git commit -m "a; npm install x") can't look like the start of a command.
+// commandText is what a command_regex sees for one command: its words and redirections joined by spaces.
 func commandText(words, redirs []string) string {
-	parts := make([]string, 0, len(words)+len(redirs))
-	for i, w := range words {
-		if i > 0 {
-			w = strings.Map(func(r rune) rune {
-				if r == ';' || r == '&' || r == '|' || r == '\n' {
-					return ' '
-				}
-				return r
-			}, w)
-		}
-		parts = append(parts, w)
-	}
-	return strings.Join(append(parts, redirs...), " ")
+	return strings.Join(slices.Concat(words, redirs), " ")
 }
 
 func callWords(call *syntax.CallExpr) []string {

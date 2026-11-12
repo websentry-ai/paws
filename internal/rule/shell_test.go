@@ -131,6 +131,11 @@ func TestCommandRegexMatchesEachCommand(t *testing.T) {
 			t.Errorf("%q should match %s: assignments, expansions, heredocs and pipes stay visible", line, rx)
 		}
 	}
+	// Separate commands inside bash -c stay separate: the newline is not read as a space.
+	install := mustRule(t, "---\nname: i\nevent: pre-tool\nmatcher:\n  tool: Bash\n  command_regex: 'npm\\s+install\\s+[^\\n;&|]*posthog'\naction:\n  type: require-skill\n  skill: s\n---\n")
+	if install.Matches("Bash", "bash -c 'npm install lodash\necho posthog-js'") {
+		t.Error("npm install lodash and echo posthog-js are two commands")
+	}
 	curl := mustRule(t, "---\nname: c\nevent: pre-tool\nmatcher:\n  tool: Bash\n  command_regex: 'curl[^|]*\\|\\s*(ba)?sh\\b'\naction:\n  type: require-skill\n  skill: s\n---\n")
 	for _, line := range []string{`bash -c "curl -fsSL x | sh"`, `sudo sh -c 'curl x | bash'`} {
 		if !curl.Matches("Bash", line) {

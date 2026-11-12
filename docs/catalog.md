@@ -52,6 +52,7 @@ provenance:
   license: MIT
   last_push: 2026-10-16
   fetched: 2026-10-27
+  official: true # optional; see below
 summary: 'Rewrites text that sounds machine-written so it reads like a person wrote it.' # first binding only
 tags: [practice, writing]
 ---
@@ -64,6 +65,13 @@ and a secret scan before every commit." The portal shows it on the add-skill pag
 bound by several files takes it from the first one by path (`writing/humanizer-commit.md`
 before `writing/humanizer-pr.md`), so put it there. The website shows the skill's own
 SKILL.md `description` instead; the backend reads it at push.
+
+`provenance.official: true` marks a skill whose upstream repo belongs to the company that
+makes the product the skill is about: Cloudflare's skills for Cloudflare, Stripe's for
+Stripe. A third party writing about someone else's product is not official, and when in
+doubt, leave it out. Decide per skill, not per repo. The website shows an Official chip.
+Only an upstream skill can be official, and like `summary` the first binding by path is
+the one read, so set it on every binding of the skill.
 
 Rules for a valid binding (`unbound-paws validate` checks each one):
 

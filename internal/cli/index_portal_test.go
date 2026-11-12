@@ -48,7 +48,7 @@ func TestIndexPortalMatchesCatalogContract(t *testing.T) {
 	}
 	bySkill := map[string]map[string]any{}
 	for _, s := range doc["skills"] {
-		if got := keysOf(s); got != "add,content_hash,default_actions,kind,license,name,source_url,tags,upstream,version" {
+		if got := keysOf(s); got != "add,content_hash,default_actions,kind,license,name,official,source_url,tags,upstream,version" {
 			t.Errorf("%v: keys %s", s["name"], got)
 		}
 		for _, a := range s["default_actions"].([]any) {
@@ -101,5 +101,32 @@ func TestIndexPortalMatchesCatalogContract(t *testing.T) {
 	}
 	if g["source_url"] != "" { // its files are published with the catalog, not on GitHub
 		t.Errorf("git source_url %v", g["source_url"])
+	}
+}
+
+// provenance.official reaches the portal document for an upstream skill; every other skill says false.
+func TestIndexPortalSaysWhichSkillsAreOfficial(t *testing.T) {
+	dir := writeTestCatalog(t)
+	for _, f := range []string{"catalog/testing/tdd.md", "catalog/source-control/git.md"} {
+		p := filepath.Join(dir, f)
+		data, _ := os.ReadFile(p)
+		text := strings.Replace(string(data), "  license: MIT\n", "  license: MIT\n  official: true\n", 1)
+		writeFile(t, p, strings.Replace(text, "tags: [org, git]", "provenance:\n  official: true\ntags: [org, git]", 1))
+	}
+	out := filepath.Join(t.TempDir(), "catalog.json")
+	if code := Index([]string{"--catalog", dir, "--portal", "-o", out}); code != 0 {
+		t.Fatalf("index --portal exit %d", code)
+	}
+	data, _ := os.ReadFile(out)
+	var doc struct{ Skills []map[string]any }
+	if err := json.Unmarshal(data, &doc); err != nil {
+		t.Fatal(err)
+	}
+	got := map[string]any{}
+	for _, s := range doc.Skills {
+		got[s["name"].(string)] = s["official"]
+	}
+	if got["tdd"] != true || got["humanizer"] != false || got["git"] != false {
+		t.Errorf("official: %v, want tdd true, humanizer false, and git false since Unbound wrote it", got)
 	}
 }

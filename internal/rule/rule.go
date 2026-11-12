@@ -72,6 +72,7 @@ type Provenance struct {
 	License  string `yaml:"license" json:"license,omitempty"`
 	LastPush string `yaml:"last_push" json:"last_push,omitempty"`
 	Fetched  string `yaml:"fetched" json:"fetched,omitempty"`
+	Official bool   `yaml:"official" json:"official,omitempty"` // the repo belongs to the maker of what the skill is about
 }
 
 // Rule is one .paws/*.md file: frontmatter directives + a human-readable body.

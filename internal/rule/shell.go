@@ -106,6 +106,17 @@ func (s *splitter) walk(node syntax.Node, depth int) {
 			s.funcs[n.Name.Value] = n.Body
 			s.defs++
 			return false
+		case *syntax.Subshell: // ( ... ) runs in a copy of the shell: functions it defines don't reach the line
+			outer := s.funcs
+			s.funcs = make(map[string]*syntax.Stmt, len(outer))
+			for k, v := range outer {
+				s.funcs[k] = v
+			}
+			for _, st := range n.Stmts {
+				s.walk(st, depth)
+			}
+			s.funcs = outer
+			return false
 		case *syntax.BinaryCmd:
 			if n.Op == syntax.Pipe || n.Op == syntax.PipeAll {
 				s.pipedScript(n, depth)
@@ -361,7 +372,7 @@ func stripWrappers(w []string) []string {
 	for len(w) > 0 {
 		switch path.Base(w[0]) {
 		case "sudo":
-			w = skipFlags(w[1:], "ugCDhprtU", "--user", "--group", "--chdir", "--chroot", "--host", "--prompt",
+			w = skipFlags(w[1:], "ugCDhprtUTR", "--user", "--group", "--chdir", "--chroot", "--host", "--prompt",
 				"--role", "--type", "--other-user", "--close-from")
 		case "env":
 			w = envCommand(w[1:])
@@ -499,7 +510,11 @@ func writePartIn(b *strings.Builder, p syntax.WordPart, inDouble bool) {
 	case *syntax.Lit:
 		b.WriteString(unbackslash(p.Value, inDouble))
 	case *syntax.SglQuoted:
-		b.WriteString(p.Value)
+		if p.Dollar { // $'git\tpush'
+			b.WriteString(ansiC(p.Value))
+		} else {
+			b.WriteString(p.Value)
+		}
 	case *syntax.DblQuoted:
 		for _, q := range p.Parts {
 			writePartIn(b, q, true)
@@ -507,6 +522,50 @@ func writePartIn(b *strings.Builder, p syntax.WordPart, inDouble bool) {
 	default:
 		b.WriteString(source(p))
 	}
+}
+
+// ansiC decodes the escapes of a $'...' string that can change what a command reads: \n \t \\ \' \" \e and
+// \xHH / octal bytes.
+func ansiC(s string) string {
+	var b strings.Builder
+	for i := 0; i < len(s); i++ {
+		if s[i] != '\\' || i+1 == len(s) {
+			b.WriteByte(s[i])
+			continue
+		}
+		i++
+		switch c := s[i]; c {
+		case 'n':
+			b.WriteByte('\n')
+		case 't':
+			b.WriteByte('\t')
+		case 'r':
+			b.WriteByte('\r')
+		case 'e', 'E':
+			b.WriteByte(0x1b)
+		case 'x':
+			n, j := 0, i+1
+			for ; j < len(s) && j < i+3 && strings.IndexByte("0123456789abcdefABCDEF", s[j]) >= 0; j++ {
+				n = n*16 + strings.IndexByte("0123456789abcdef", s[j]|0x20)
+			}
+			if j == i+1 {
+				b.WriteString(`\x`)
+				continue
+			}
+			b.WriteByte(byte(n))
+			i = j - 1
+		case '0', '1', '2', '3', '4', '5', '6', '7':
+			n, j := 0, i
+			for ; j < len(s) && j < i+3 && s[j] >= '0' && s[j] <= '7'; j++ {
+				n = n*8 + int(s[j]-'0')
+			}
+			b.WriteByte(byte(n))
+			i = j - 1
+		default: // \\ \' \" and anything else: the character itself
+			b.WriteByte(c)
+		}
+	}
+	return b.String()
 }
 
 func unbackslash(s string, inDouble bool) string {

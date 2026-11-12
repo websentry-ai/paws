@@ -57,6 +57,14 @@ func TestGitFoundByTheShellParser(t *testing.T) {
 		{`\git push`, false, true},
 		{`sudo -iu deploy git push`, false, true},
 		{`sudo -Hu deploy git commit -m x`, true, false},
+		{`sudo -uroot git push`, false, true},
+		{`sudo -u root -- git push`, false, true},
+		{`env -S 'git push'`, false, true},
+		{`env -iS'git commit -m x'`, true, false},
+		{`env --split-string='git push origin main'`, false, true},
+		{`env -u HOME git push`, false, true},
+		{`echo "git push" | bash | tee log`, false, true},
+		{`printf '%s\n' 'git commit -m x' | sh 2>&1 | tee out`, true, false},
 		{`g() { echo; }; f() { g; }; f; g() { git push; }; f`, false, true},
 		// Not a git command, though the words are there.
 		{`echo "git commit"`, false, false},
@@ -138,5 +146,21 @@ func TestFunctionChainsStayCheap(t *testing.T) {
 	p := parseLine(line)
 	if !p.ok || len(p.cmds) > 100 {
 		t.Fatalf("ok %v, %d commands: each body should be read once", p.ok, len(p.cmds))
+	}
+}
+
+// A function that defines functions each time it runs can't make the parser expand without end.
+func TestFunctionsThatDefineFunctionsStayBounded(t *testing.T) {
+	line := ""
+	for i := 0; i < 8; i++ {
+		body := "x() { :; }; "
+		for j := 0; j < 10; j++ {
+			body += "f" + string(rune('1'+i)) + "; "
+		}
+		line += "f" + string(rune('0'+i)) + "() { " + body + "}; "
+	}
+	line += "f8() { git status; }; f0"
+	if p := parseLine(line); len(p.cmds) > 2000 {
+		t.Fatalf("%d commands: function expansion must stay bounded", len(p.cmds))
 	}
 }

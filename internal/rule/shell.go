@@ -26,6 +26,10 @@ var shells = map[string]bool{"bash": true, "sh": true, "zsh": true, "dash": true
 
 const maxNesting = 8 // bash -c inside eval inside bash -c ...
 
+// maxFuncWalks caps how many function bodies one line may expand, however its functions define and call each other,
+// so no line can make the hook slow.
+const maxFuncWalks = 64
+
 // parsedLine is a Bash line's commands; ok is false when the line, or a script it runs, isn't valid Bash.
 type parsedLine struct {
 	cmds []command
@@ -46,12 +50,13 @@ func parseLine(line string) *parsedLine {
 		return splitCache.parsed
 	}
 	p := &parsedLine{cmds: []command{}}
-	p.ok = split(line, &p.cmds, 0)
+	budget := maxFuncWalks
+	p.ok = split(line, &p.cmds, 0, &budget)
 	splitCache.line, splitCache.parsed = line, p
 	return p
 }
 
-func split(line string, out *[]command, depth int) bool {
+func split(line string, out *[]command, depth int, budget *int) bool {
 	if depth > maxNesting {
 		return true
 	}
@@ -59,7 +64,8 @@ func split(line string, out *[]command, depth int) bool {
 	if err != nil {
 		return false
 	}
-	s := splitter{out: out, funcs: map[string]*syntax.Stmt{}, walked: map[walkKey]bool{}, ok: true}
+	s := splitter{out: out, funcs: map[string]*syntax.Stmt{}, walked: map[walkKey]bool{}, budget: budget,
+		piped: map[*syntax.BinaryCmd]bool{}, ok: true}
 	s.walk(f, depth)
 	return s.ok
 }
@@ -73,7 +79,9 @@ type splitter struct {
 	funcs  map[string]*syntax.Stmt
 	defs   int
 	walked map[walkKey]bool
-	ok     bool // false once a nested script didn't parse: the whole line is then read the old way
+	budget *int                       // function-body walks left for the whole line
+	piped  map[*syntax.BinaryCmd]bool // pipes already read as one pipeline
+	ok     bool                       // false once a nested script didn't parse: the whole line is then read the old way
 }
 
 type walkKey struct {
@@ -84,7 +92,7 @@ type walkKey struct {
 // nested splits a script the line runs (bash -c, a heredoc, a here-string, eval, a pipe into a shell). Its whole
 // text is one more text to match, so a rule spanning commands (`curl x | sh`) sees it too.
 func (s *splitter) nested(script string, depth int) {
-	if !split(script, s.out, depth+1) {
+	if !split(script, s.out, depth+1, s.budget) {
 		s.ok = false
 		return
 	}
@@ -157,9 +165,11 @@ func (s *splitter) stmt(stmt *syntax.Stmt, depth int) {
 				}
 			case head == "eval":
 				s.nested(strings.Join(bare[1:], " "), depth)
-			case s.funcs[bare[0]] != nil && !s.walked[walkKey{s.funcs[bare[0]], s.defs}] && depth < maxNesting:
+			case s.funcs[bare[0]] != nil && !s.walked[walkKey{s.funcs[bare[0]], s.defs}] && depth < maxNesting &&
+				*s.budget > 0:
 				body := s.funcs[bare[0]]
 				s.walked[walkKey{body, s.defs}] = true
+				*s.budget--
 				s.walk(body, depth+1)
 			}
 		}
@@ -175,47 +185,73 @@ func (s *splitter) stmt(stmt *syntax.Stmt, depth int) {
 	}
 }
 
-// pipedScript reads a script piped into a shell: `cat <<EOF | bash`, `echo "git push" | sh`.
+// pipedScript reads scripts piped into a shell: `cat <<EOF | bash`, `echo "git push" | sh | tee log`. Each stage of
+// the pipeline that is a shell reading stdin runs what the stage before it prints.
 func (s *splitter) pipedScript(pipe *syntax.BinaryCmd, depth int) {
-	sh, ok := pipe.Y.Cmd.(*syntax.CallExpr)
-	if !ok || len(sh.Args) == 0 {
+	if s.piped[pipe] {
 		return
+	}
+	var stages []*syntax.Stmt
+	var flatten func(st *syntax.Stmt)
+	flatten = func(st *syntax.Stmt) {
+		if b, ok := st.Cmd.(*syntax.BinaryCmd); ok && (b.Op == syntax.Pipe || b.Op == syntax.PipeAll) && len(st.Redirs) == 0 {
+			s.piped[b] = true
+			flatten(b.X)
+			flatten(b.Y)
+			return
+		}
+		stages = append(stages, st)
+	}
+	s.piped[pipe] = true
+	flatten(pipe.X)
+	flatten(pipe.Y)
+	for i := 1; i < len(stages); i++ {
+		if readsShellStdin(stages[i]) {
+			s.printed(stages[i-1], depth)
+		}
+	}
+}
+
+// readsShellStdin reports whether st is a shell (behind any wrapper) that runs the script on its stdin.
+func readsShellStdin(st *syntax.Stmt) bool {
+	sh, ok := st.Cmd.(*syntax.CallExpr)
+	if !ok || len(sh.Args) == 0 {
+		return false
 	}
 	words := make([]string, len(sh.Args))
 	for i, w := range sh.Args {
 		words[i] = wordString(w)
 	}
 	bare := stripWrappers(words)
-	if len(bare) == 0 || !shells[path.Base(bare[0])] || !readsStdin(bare[1:]) {
+	return len(bare) > 0 && shells[path.Base(bare[0])] && readsStdin(bare[1:])
+}
+
+// printed splits what a pipeline stage prints, when that can be read off the line: a heredoc, echo or printf.
+func (s *splitter) printed(st *syntax.Stmt, depth int) {
+	for _, r := range st.Redirs {
+		switch {
+		case (r.Op == syntax.Hdoc || r.Op == syntax.DashHdoc) && r.Hdoc != nil:
+			s.nested(wordString(r.Hdoc), depth)
+		case r.Op == syntax.WordHdoc && r.Word != nil:
+			s.nested(wordString(r.Word), depth)
+		}
+	}
+	call, ok := st.Cmd.(*syntax.CallExpr)
+	if !ok || len(call.Args) < 2 {
 		return
 	}
-	left := pipe.X
-	for {
-		inner, ok := left.Cmd.(*syntax.BinaryCmd)
-		if !ok {
-			break
-		}
-		left = inner.Y
+	args := make([]string, 0, len(call.Args)-1)
+	for _, w := range call.Args[1:] {
+		args = append(args, wordString(w))
 	}
-	for _, r := range left.Redirs {
-		if (r.Op == syntax.Hdoc || r.Op == syntax.DashHdoc) && r.Hdoc != nil {
-			s.nested(wordString(r.Hdoc), depth)
+	switch wordString(call.Args[0]) {
+	case "echo": // echo -e "a\nb" too
+		for len(args) > 0 && (args[0] == "-e" || args[0] == "-n" || args[0] == "-E" || args[0] == "-en" || args[0] == "-ne") {
+			args = args[1:]
 		}
-	}
-	if call, ok := left.Cmd.(*syntax.CallExpr); ok && len(call.Args) > 1 {
-		args := make([]string, 0, len(call.Args)-1)
-		for _, w := range call.Args[1:] {
-			args = append(args, wordString(w))
-		}
-		switch wordString(call.Args[0]) {
-		case "echo": // echo -e "a\nb" too
-			for len(args) > 0 && (args[0] == "-e" || args[0] == "-n" || args[0] == "-E" || args[0] == "-en" || args[0] == "-ne") {
-				args = args[1:]
-			}
-			s.nested(unescape(strings.Join(args, " ")), depth)
-		case "printf": // printf '%s %s\n' git push: what it prints
-			s.nested(printf(args[0], args[1:]), depth)
-		}
+		s.nested(unescape(strings.Join(args, " ")), depth)
+	case "printf": // printf '%s %s\n' git push: what it prints
+		s.nested(printf(args[0], args[1:]), depth)
 	}
 }
 
@@ -325,24 +361,15 @@ func stripWrappers(w []string) []string {
 	for len(w) > 0 {
 		switch path.Base(w[0]) {
 		case "sudo":
-			w = skipFlags(w[1:], "-u", "-g", "-C", "-D", "-h", "-p", "-r", "-t", "-U", "--user", "--group", "--chdir",
-				"--chroot", "--host", "--prompt", "--role", "--type", "--other-user", "--close-from")
+			w = skipFlags(w[1:], "ugCDhprtU", "--user", "--group", "--chdir", "--chroot", "--host", "--prompt",
+				"--role", "--type", "--other-user", "--close-from")
 		case "env":
-			w = w[1:]
-			for len(w) > 0 && (strings.HasPrefix(w[0], "-") || strings.Contains(w[0], "=")) {
-				if w[0] == "-u" || w[0] == "-C" || w[0] == "-S" || w[0] == "--unset" || w[0] == "--chdir" ||
-					w[0] == "--split-string" {
-					w = w[1:]
-				}
-				if len(w) > 0 {
-					w = w[1:]
-				}
-			}
+			w = envCommand(w[1:])
 		case "command", "exec", "nohup", "time":
-			w = skipFlags(w[1:], "-a")
+			w = skipFlags(w[1:], "a")
 		case "xargs":
-			w = skipFlags(w[1:], "-I", "-d", "-E", "-n", "-L", "-P", "-s", "-a", "--delimiter", "--eof", "--max-args",
-				"--max-lines", "--max-procs", "--max-chars", "--arg-file")
+			w = skipFlags(w[1:], "IdEnLPsa", "--delimiter", "--eof", "--max-args", "--max-lines", "--max-procs",
+				"--max-chars", "--arg-file")
 		default:
 			return w
 		}
@@ -350,23 +377,87 @@ func stripWrappers(w []string) []string {
 	return w
 }
 
-// skipFlags drops leading flags. A flag in withValue also drops the word after it, and so does a cluster of short
-// flags that ends in a letter that takes a value (sudo -iu deploy).
-func skipFlags(w []string, withValue ...string) []string {
-	for len(w) > 0 && strings.HasPrefix(w[0], "-") && w[0] != "-" {
-		if w[0] == "--" {
-			return w[1:]
-		}
-		takes := false
-		for _, f := range withValue {
-			takes = takes || w[0] == f
-			if len(f) == 2 && !strings.HasPrefix(w[0], "--") && len(w[0]) > 2 && strings.HasSuffix(w[0], f[1:]) {
-				takes = true
-			}
-		}
-		w = w[1:]
-		if takes && len(w) > 0 {
+// envCommand is the command `env [assignments] [flags] command...` runs. -S (--split-string) holds a command line of
+// its own: env -S 'git push' runs git push.
+func envCommand(w []string) []string {
+	for len(w) > 0 {
+		a := w[0]
+		switch {
+		case strings.Contains(a, "=") && !strings.HasPrefix(a, "-"):
 			w = w[1:]
+		case a == "--split-string":
+			if len(w) < 2 {
+				return nil
+			}
+			w = append(strings.Fields(w[1]), w[2:]...)
+		case strings.HasPrefix(a, "--split-string="):
+			w = append(strings.Fields(strings.TrimPrefix(a, "--split-string=")), w[1:]...)
+		case a == "--unset" || a == "--chdir":
+			w = w[min(2, len(w)):]
+		case a == "--":
+			return w[1:]
+		case strings.HasPrefix(a, "--"):
+			w = w[1:]
+		case strings.HasPrefix(a, "-") && a != "-":
+			w = envShortFlags(a, w[1:])
+		default:
+			return w
+		}
+	}
+	return w
+}
+
+// envShortFlags reads one cluster of env's short flags (-iS'cmd', -u NAME) and returns the words after it.
+func envShortFlags(a string, rest []string) []string {
+	for i := 1; i < len(a); i++ {
+		attached := a[i+1:]
+		switch a[i] {
+		case 'S':
+			if attached != "" {
+				return append(strings.Fields(attached), rest...)
+			}
+			if len(rest) == 0 {
+				return nil
+			}
+			return append(strings.Fields(rest[0]), rest[1:]...)
+		case 'u', 'C':
+			if attached != "" || len(rest) == 0 {
+				return rest
+			}
+			return rest[1:]
+		}
+	}
+	return rest
+}
+
+// skipFlags drops leading flags. In a cluster of short flags (-iu), a letter in shortValue takes a value: the rest of
+// the word when there is one (-uroot), else the next word (-iu deploy). A long flag in longValue takes the next word
+// unless written with =. -- ends the flags.
+func skipFlags(w []string, shortValue string, longValue ...string) []string {
+	for len(w) > 0 && strings.HasPrefix(w[0], "-") && w[0] != "-" {
+		a := w[0]
+		w = w[1:]
+		switch {
+		case a == "--":
+			return w
+		case strings.HasPrefix(a, "--"):
+			if !strings.Contains(a, "=") && len(w) > 0 {
+				for _, f := range longValue {
+					if a == f {
+						w = w[1:]
+						break
+					}
+				}
+			}
+		default:
+			for i := 1; i < len(a); i++ {
+				if strings.IndexByte(shortValue, a[i]) >= 0 {
+					if i == len(a)-1 && len(w) > 0 {
+						w = w[1:]
+					}
+					break
+				}
+			}
 		}
 	}
 	return w

@@ -6,6 +6,7 @@ import (
 	"strings"
 	"sync"
 
+	"mvdan.cc/sh/v3/expand"
 	"mvdan.cc/sh/v3/syntax"
 )
 
@@ -423,6 +424,12 @@ func writePart(b *strings.Builder, p syntax.WordPart, inDouble bool) {
 	case *syntax.Lit:
 		b.WriteString(unbackslash(p.Value, inDouble))
 	case *syntax.SglQuoted:
+		if p.Dollar { // $'git\tpush': the library decodes the escapes as bash does
+			if s, err := expand.Literal(nil, &syntax.Word{Parts: []syntax.WordPart{p}}); err == nil {
+				b.WriteString(s)
+				return
+			}
+		}
 		b.WriteString(p.Value)
 	case *syntax.DblQuoted:
 		for _, q := range p.Parts {

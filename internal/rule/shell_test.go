@@ -40,6 +40,8 @@ func TestGitFoundByTheShellParser(t *testing.T) {
 		{`timeout -s KILL 30 git push`, false, true},
 		{`nohup git push`, false, true},
 		{`\git push`, false, true},
+		{`bash -c $'git\tpush'`, false, true},
+		{`bash -c $'cd x\ngit commit -m y'`, true, false},
 		{`git -c user.name=x -C repo commit -m x`, true, false},
 		{`git --git-dir=.git push`, false, true},
 		{`git commit-tree HEAD^{tree} -m x`, true, false},

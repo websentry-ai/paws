@@ -58,7 +58,7 @@ fires if either matches, so the parser only adds matches:
 
 - `cd web && npm install x` holds the command `npm install x`.
 - Commands run by `bash -c "..."` (any flags, as in `bash -euo pipefail -c`),
-  `sh <<EOF`, `bash <<< '...'`, `cat <<EOF | bash`, `printf ... | sh`, `eval`,
+  `sh <<EOF`, `bash <<< '...'`, `cat <<EOF | bash`, `echo ... | sh`, `eval`,
   `( )`, `$( )`, `if` and loops count. So does a function's body where the
   line calls the function, but not where it only defines it.
 - A command behind `sudo`, `env`, `xargs`, `time`, `nohup`, `command` or

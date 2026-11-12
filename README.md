@@ -148,13 +148,18 @@ What leaves the machine once you are logged in:
 Never prompts, replies, file contents, tool output, absolute paths or session
 ids. Field by field: [docs/telemetry.md](docs/telemetry.md#portal-upload).
 
-When: after Claude finishes a turn, from the async Stop hook, at most every
-5 minutes (`PAWS_SYNC_INTERVAL`); in the background when a session starts, at
-most once a minute; on `unbound-paws sync`; and once at `unbound-paws login`.
+When: from the async hooks that run when you send Claude a message and when
+Claude finishes a turn, at most every 5 minutes (`PAWS_SYNC_INTERVAL`); in the
+background when a session starts, at most once a minute; on `unbound-paws sync`;
+and once at `unbound-paws login`. No paws process runs between hooks, so a
+laptop where nobody is using Claude sends nothing.
 
 Settings come down from the portal: the skills you turn on in the browser
-and the actions each one runs before. The same request that uploads checks
-for a change, and paws then writes them as rule files
+and the actions each one runs before. Each upload checks for a change, and
+between uploads the same hooks ask for the settings' hash alone at most every
+30 seconds (`PAWS_CHECK_INTERVAL`). A skill you turn on in the browser reaches
+the laptop the next time you send Claude a message, or at once with
+`unbound-paws sync`. paws then writes them as rule files
 under `~/.paws/portal/`. Only skills in the catalog this unbound-paws version ships
 can install, into `~/.claude/skills` at their pinned commit, and are refused
 if their content hash differs; the portal can't name other code to download.

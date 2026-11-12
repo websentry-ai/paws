@@ -294,12 +294,14 @@ func TestSyncRefusesHTTPCredentialsForARemoteHost(t *testing.T) {
 	if code != 1 || !strings.Contains(errOut, "must use https") || !strings.Contains(errOut, "paws login` again") {
 		t.Errorf("exit %d, stderr %q", code, errOut)
 	}
-	// The Stop hook stays silent and offline too.
+	// The prompt and Stop hooks stay silent and offline too.
 	oldTransport := http.DefaultTransport
 	http.DefaultTransport = failingTransport{t}
 	defer func() { http.DefaultTransport = oldTransport }()
-	if out := runGate(t, map[string]any{"hook_event_name": "Stop", "cwd": t.TempDir()}); out != "{}" {
-		t.Errorf("Stop must answer {}, got %q", out)
+	for _, event := range []string{"UserPromptSubmit", "Stop"} {
+		if out := runGate(t, map[string]any{"hook_event_name": event, "cwd": t.TempDir()}); out != "{}" {
+			t.Errorf("%s must answer {}, got %q", event, out)
+		}
 	}
 	if srv.count("") != 0 {
 		t.Errorf("requests made: %v", srv.requests)

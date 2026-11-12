@@ -36,20 +36,24 @@ func Gate() (code int) {
 		in.CWD, _ = os.Getwd()
 	}
 	ev := hook.ToEvent(&in)
-	// Telemetry-only events: count and leave. No rules run after a tool or at turn end.
+	// Telemetry-only events: count and leave. No rules run on a prompt, after a tool or at turn end.
 	switch in.HookEventName {
 	case "Stop":
 		gate.LogTelemetry("turn_end", ev, nil)
 		allow()
-		wrote = true          // a panic below must not print a second decision
-		syncAfterTurn(in.CWD) // the async Stop hook is the only hook that may use the network
+		wrote = true       // a panic below must not print a second decision
+		syncInHook(in.CWD) // the async UserPromptSubmit and Stop hooks are the only hooks that use the network
+		return 0
+	case "UserPromptSubmit":
+		// Async, so Claude starts on the prompt without waiting. The prompt itself is never read or kept;
+		// a config change this round pulls applies from the next tool call.
+		allow()
+		wrote = true
+		syncInHook(in.CWD)
 		return 0
 	case "PostToolUse":
 		gate.LogTelemetry("tool_result", ev, map[string]any{"tool": in.ToolName})
 		gate.LogAction(ev)
-		return allow()
-	case "UserPromptSubmit":
-		// Retired event: a settings entry from an older build may still call us until `paws init` reruns.
 		return allow()
 	case "PreToolUse":
 		if in.ToolName == "Skill" {

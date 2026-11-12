@@ -27,13 +27,14 @@ import (
 
 // The portal config reaches the gate as plain rule files under $PAWS_HOME/portal/, which
 // paws already loads with the rest of ~/.paws. Only `paws sync`, `paws login`, the async
-// Stop hook and the background sync a new session starts fetch it.
+// UserPromptSubmit and Stop hooks and the background sync a new session starts fetch it.
 
 // portalState is $PAWS_HOME/portal/state.json.
 type portalState struct {
 	AppliedHash string    `json:"applied_config_hash,omitempty"`
 	Skills      []string  `json:"skills,omitempty"`  // skills the applied config turns on
-	LastUpload  time.Time `json:"last_upload"`       // the last portal round: upload and config check together
+	LastUpload  time.Time `json:"last_upload"`       // the last upload, which also checks the config
+	LastCheck   time.Time `json:"last_check"`        // the last config check, with or without an upload
 	Revoked     bool      `json:"revoked,omitempty"` // the portal answered 401; login was forgotten
 }
 

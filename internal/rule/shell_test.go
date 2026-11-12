@@ -1,0 +1,72 @@
+package rule
+
+import "testing"
+
+func gitRule(t *testing.T, event string) *Rule {
+	t.Helper()
+	return mustRule(t, "---\nname: g\nevent: "+event+"\naction:\n  type: require-skill\n  skill: s\n---\n")
+}
+
+// The shell parser finds git however the shell gets to run it, and only where it runs.
+func TestGitFoundByTheShellParser(t *testing.T) {
+	commit, push := gitRule(t, "pre-commit"), gitRule(t, "pre-push")
+	for _, c := range []struct {
+		line         string
+		commit, push bool
+	}{
+		{`git commit -m x`, true, false},
+		{`cd app && git commit -m x && git push`, true, true},
+		{`bash --login -c "git commit -m x"`, true, false},
+		{`bash -o pipefail -c 'git push origin main'`, false, true},
+		{`GIT_DIR=.git git commit -m x`, true, false},
+		{`env GIT_AUTHOR_NAME=x git commit -m x`, true, false},
+		{`sudo -u deploy git push`, false, true},
+		{`echo a | xargs -I{} git commit -m {}`, true, false},
+		{`eval "git commit -m x"`, true, false},
+		{`git -c user.name=x -C repo commit -m x`, true, false},
+		{`git --git-dir=.git push`, false, true},
+		{`time git push`, false, true},
+		{`if true; then git commit -m x; fi`, true, false},
+		{`out=$(git commit -m x)`, true, false},
+		{"bash <<'EOF'\ngit push\nEOF", false, true},
+		{`git commit-tree HEAD^{tree} -m x`, true, false},
+		// Not a git command, though the words are there.
+		{`echo "git commit"`, false, false},
+		{`echo "a; git commit -m x"`, false, false},
+		{`git log --grep "git push"`, false, false},
+		{`git commit-graph write`, false, false},
+		{"cat <<'EOF'\ngit push\nEOF", false, false},
+		{`grep -r "bash -c git push" .`, false, false},
+		{`gitk`, false, false},
+		// Not valid Bash: the regex reads the line whole, as before.
+		{`git commit -m "unclosed`, true, false},
+	} {
+		if got := commit.Matches("Bash", c.line); got != c.commit {
+			t.Errorf("pre-commit on %q = %v, want %v", c.line, got, c.commit)
+		}
+		if got := push.Matches("Bash", c.line); got != c.push {
+			t.Errorf("pre-push on %q = %v, want %v", c.line, got, c.push)
+		}
+	}
+}
+
+// A command_regex is matched against each command, as written and without wrappers like sudo.
+func TestCommandRegexMatchesEachCommand(t *testing.T) {
+	r := mustRule(t, "---\nname: n\nevent: pre-tool\nmatcher:\n  tool: Bash\n  command_regex: (^|[;&|\\n])\\s*npm\\s+install\\s+posthog\naction:\n  type: require-skill\n  skill: s\n---\n")
+	sudo := mustRule(t, "---\nname: n\nevent: pre-tool\nmatcher:\n  tool: Bash\n  command_regex: ^sudo\\b\naction:\n  type: require-skill\n  skill: s\n---\n")
+	for line, want := range map[string]bool{
+		`npm install posthog-js`:                 true,
+		`cd web && npm install posthog-js`:       true,
+		`sudo npm install posthog-js`:            true,
+		`bash -c "npm install posthog-js"`:       true,
+		`echo "a; npm install posthog-js"`:       false,
+		`git commit -m "npm install posthog-js"`: false,
+	} {
+		if got := r.Matches("Bash", line); got != want {
+			t.Errorf("%q = %v, want %v", line, got, want)
+		}
+	}
+	if !sudo.Matches("Bash", `sudo npm install x`) {
+		t.Error("a rule about sudo itself still sees it")
+	}
+}

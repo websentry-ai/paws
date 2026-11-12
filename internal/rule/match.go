@@ -5,6 +5,9 @@ import (
 	"strings"
 )
 
+// The regexes below read a Bash line whole. They decide only when a line isn't valid Bash; otherwise the line is
+// split into its commands (shell.go) and git is found by its words.
+//
 // gitAnchor requires git to start a command: at the start, after ;/&/|/newline, or inside $( ) (which runs even
 // within double quotes), then through any mix of ( subshells and shells that run a script (bash -c "...",
 // sh -lc '...', /bin/zsh -ec "...": c anywhere in the combined short flags), as in bash -c '(git push)'. Echoed
@@ -35,16 +38,48 @@ func (r *Rule) Matches(tool, target string) bool {
 	if r.fileRe != nil && (!fileTools[tool] || !r.fileRe.MatchString(target)) {
 		return false
 	}
-	if r.re != nil && !r.re.MatchString(target) {
+	if tool != "Bash" {
+		return (r.re == nil || r.re.MatchString(target)) && r.Event != "pre-commit" && r.Event != "pre-push"
+	}
+	cmds, ok := commands(target)
+	if !ok { // not valid Bash: read the line whole
+		if r.re != nil && !r.re.MatchString(target) {
+			return false
+		}
+		switch r.Event {
+		case "pre-commit":
+			return gitCommitRe.MatchString(target)
+		case "pre-push":
+			return gitPushRe.MatchString(target)
+		}
+		return true
+	}
+	if r.re != nil && !anyCommand(cmds, func(c command) bool {
+		for _, t := range c.texts {
+			if r.re.MatchString(t) {
+				return true
+			}
+		}
+		return false
+	}) {
 		return false
 	}
 	switch r.Event {
 	case "pre-commit":
-		return tool == "Bash" && gitCommitRe.MatchString(target)
+		return anyCommand(cmds, func(c command) bool { sub := gitSubcommand(c.words); return sub == "commit" || sub == "commit-tree" })
 	case "pre-push":
-		return tool == "Bash" && gitPushRe.MatchString(target)
+		return anyCommand(cmds, func(c command) bool { return gitSubcommand(c.words) == "push" })
 	}
 	return true
+}
+
+func anyCommand(cmds []command, f func(command) bool) bool {
+	for _, c := range cmds {
+		if f(c) {
+			return true
+		}
+	}
+	return false
 }
 
 // matchTool matches a matcher tool spec ("", "*", or a pipe list of names where * stands for any run of

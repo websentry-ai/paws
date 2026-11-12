@@ -24,8 +24,8 @@ Loads humanizer before a PR body goes out.
 | `event:` | Fires on | Target the regex sees |
 |---|---|---|
 | `pre-tool` | any tool call | see the table below |
-| `pre-commit` | a Bash call that runs `git commit` or `git commit-tree` (flags and `-C dir` allowed; not `commit-graph`) | the command |
-| `pre-push` | a Bash call that runs `git push` | the command |
+| `pre-commit` | a Bash call that runs `git commit` or `git commit-tree` anywhere in it (flags and `-C dir` allowed; not `commit-graph`) | the command |
+| `pre-push` | a Bash call that runs `git push` anywhere in it | the command |
 | `session-start` | a session starting | `startup`, `resume`, `clear` or `compact` |
 
 Per tool, `pre-tool` matches against:
@@ -46,9 +46,21 @@ Per tool, `pre-tool` matches against:
 | Field | Matches |
 |---|---|
 | `tool` | a name, a pattern where `*` stands for any characters (e.g. `mcp__slack__*`, `mcp__*__get_issue`), an `A\|B` list, or omitted for any |
-| `command_regex` | Go RE2 regex over the target |
+| `command_regex` | Go RE2 regex over the target; for Bash, over each command in it (see below) |
 | `file_glob` | `**`, `*`, `?`, `{a,b}` over the absolute path; Read/Write/Edit/NotebookEdit only |
 | `mcp_action` | `send`, `create`, `update`, `delete` (or `A\|B`): MCP tools whose name says so |
+
+### Bash: one command at a time
+
+paws splits a Bash call into the commands the shell will run and tests
+`command_regex` against each one. `cd web && npm install x` is two commands,
+`npm install x` one of them. Commands inside `bash -c "..."`, `sh <<EOF`,
+`eval`, `( )`, `$( )`, `if`, loops and pipes count too. So does a command
+behind `sudo`, `env`, `xargs`, `time`, `nohup`, `command` or `exec`, which is
+tested both with and without that prefix. Quotes are removed, as the program
+sees them. A `;`, `&` or `|` inside an argument becomes a space, so
+`echo "a; npm install x"` holds no `npm install` command. A call that isn't
+valid Bash is matched whole. `pre-commit` and `pre-push` find git the same way.
 
 ### RE2, not PCRE
 

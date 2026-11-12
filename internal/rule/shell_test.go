@@ -106,6 +106,9 @@ func TestGitFoundByTheShellParser(t *testing.T) {
 		{`(trap publish EXIT; publish() { \git push; })`, false, true},
 		{`publish() { :; }; while publish; do publish() { \git push; }; done`, false, true},
 		{`until publish; do publish() { \git commit -m x; }; done`, true, false},
+		{`eval 'trap publish EXIT'; publish() { \git push; }`, false, true},
+		{`source <(echo 'trap publish EXIT'); publish() { \git push; }`, false, true},
+		{`bash -c 'trap publish EXIT'; publish() { \git push; }`, false, false}, // a new shell: its trap can't see these
 		{`printf 'git %xommit -m x\n' 12 | bash`, true, false},
 		{`printf 'git pu%c%c\n' 115 104 | bash`, false, false}, // %c prints the first character, "1" and "1"
 		{`printf 'git p%sh %d\n' us 0x1 | bash`, false, true},

@@ -60,14 +60,16 @@ func parseLine(line string) *parsedLine {
 		return splitCache.parsed
 	}
 	p := &parsedLine{cmds: []command{}}
-	split(line, &p.cmds, 0, &limits{funcWalks: maxFuncWalks, scriptBytes: maxScriptBytes}, nil)
+	split(line, &p.cmds, 0, &limits{funcWalks: maxFuncWalks, scriptBytes: maxScriptBytes}, nil, nil)
 	splitCache.line, splitCache.parsed = line, p
 	return p
 }
 
 // split adds line's commands to out. sc is the shell's function scope: eval runs in the same shell and shares it; a
 // new shell (bash -c) starts with none (nil).
-func split(line string, out *[]command, depth int, lim *limits, sc *scope) bool {
+// owner is the splitter of the shell this line runs in when that shell is the caller's (eval, source): the line's
+// loops and traps are then replayed when that shell's whole line is done, not when this part of it is.
+func split(line string, out *[]command, depth int, lim *limits, sc *scope, owner *splitter) bool {
 	if depth > maxNesting {
 		return true
 	}
@@ -79,8 +81,11 @@ func split(line string, out *[]command, depth int, lim *limits, sc *scope) bool 
 		sc = &scope{funcs: map[string][]*syntax.Stmt{}}
 	}
 	s := splitter{out: out, sc: sc, walked: map[walkKey]bool{}, lim: lim, piped: map[*syntax.BinaryCmd]bool{},
-		bg: map[*syntax.Stmt]bool{}, seenLoop: map[syntax.Node]bool{}, rewalked: map[syntax.Node]bool{}}
+		bg: map[*syntax.Stmt]bool{}, seenLoop: map[syntax.Node]bool{}, rewalked: map[syntax.Node]bool{}, owner: owner}
 	s.walk(f, depth)
+	if owner != nil {
+		return true // the enclosing shell replays this line's loops and traps with its own
+	}
 	// A loop body runs again and again: a call early in it may run a function defined later in it, or after it in an
 	// earlier pass. Each loop's body is read once more now that every definition is known (within the line's budget).
 	// Each loop is read in the scope it sits in: a loop inside ( ) sees that subshell's functions.
@@ -122,6 +127,7 @@ type splitter struct {
 	// loops are the while, until, for and select loops met, read once more once the line is done.
 	loops              []loopAt
 	seenLoop, rewalked map[syntax.Node]bool
+	owner              *splitter // the enclosing shell's splitter, for a line eval or source runs in it
 }
 
 // scope is one shell's functions, and how many definitions it has seen (a walked body is keyed on it). A name keeps
@@ -152,12 +158,24 @@ type walkKey struct {
 func (s *splitter) nested(script string, depth int) { s.nestedIn(script, depth, nil) }
 
 // nestedIn splits a script run with these functions defined; eval passes its own shell's.
+// root is the splitter of the shell s runs in: itself, or the enclosing one when s reads an eval or source line.
+func (s *splitter) root() *splitter {
+	for s.owner != nil {
+		s = s.owner
+	}
+	return s
+}
+
 func (s *splitter) nestedIn(script string, depth int, sc *scope) {
 	if len(script) > s.lim.scriptBytes {
 		return // past the line's budget: the whole-line regexes still apply
 	}
 	s.lim.scriptBytes -= len(script)
-	if split(script, s.out, depth+1, s.lim, sc) {
+	var owner *splitter
+	if sc == s.sc { // eval and source run in this shell: their loops and traps wait for this shell's line
+		owner = s.root()
+	}
+	if split(script, s.out, depth+1, s.lim, sc, owner) {
 		*s.out = append(*s.out, command{texts: []string{script}})
 	}
 }
@@ -239,9 +257,9 @@ func (s *splitter) walk(node syntax.Node, depth int) {
 			s.sc = outer
 			return false
 		case *syntax.WhileClause, *syntax.ForClause:
-			if !s.seenLoop[n] {
-				s.seenLoop[n] = true
-				s.loops = append(s.loops, loopAt{n, s.sc})
+			if r := s.root(); !r.seenLoop[n] {
+				r.seenLoop[n] = true
+				r.loops = append(r.loops, loopAt{n, s.sc})
 			}
 		case *syntax.BinaryCmd:
 			if n.Op == syntax.Pipe || n.Op == syntax.PipeAll {
@@ -329,7 +347,8 @@ func (s *splitter) stmt(stmt *syntax.Stmt, depth int) {
 					// Read now in a copy of the scope (a signal may come at any time; what the handler defines
 					// stays out of the line), and again once the line is done, with every function defined by then.
 					s.nestedIn(action, depth, s.sc.child())
-					s.traps = append(s.traps, trapAt{action, s.sc})
+					r := s.root()
+					r.traps = append(r.traps, trapAt{action, s.sc})
 				}
 			case len(s.sc.funcs[bare[0]]) > 0 && depth < maxNesting:
 				for _, body := range s.sc.funcs[bare[0]] {

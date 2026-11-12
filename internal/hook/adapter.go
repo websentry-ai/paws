@@ -15,10 +15,7 @@ import (
 const Agent = "claude-code"
 
 // RegisteredEvents are the Claude Code hook events `paws init` subscribes to.
-var RegisteredEvents = []string{"PreToolUse", "SessionStart", "PostToolUse", "Stop"}
-
-// RetiredEvents were registered by earlier builds; `paws init` removes paws entries from them.
-var RetiredEvents = []string{"UserPromptSubmit"}
+var RegisteredEvents = []string{"PreToolUse", "SessionStart", "UserPromptSubmit", "PostToolUse", "Stop"}
 
 // ToEvent normalizes a Claude Code hook event into the engine's terms.
 func ToEvent(in *Input) gate.Event {
@@ -90,8 +87,8 @@ func EventName(e string) string {
 // SettingsEntry is the hooks-array element `paws init` writes; Claude Code timeouts are seconds, matcher is tool-events-only.
 func SettingsEntry(event, command string) map[string]any {
 	inner := []any{map[string]any{"type": "command", "command": command, "timeout": 15}}
-	if event == "PostToolUse" || event == "Stop" {
-		// Telemetry only: nothing waits on the answer, so the agent never pays for it.
+	if event == "UserPromptSubmit" || event == "PostToolUse" || event == "Stop" {
+		// Telemetry and the portal round: nothing waits on the answer, so the agent never pays for it.
 		inner[0].(map[string]any)["async"] = true
 	}
 	if event == "PreToolUse" || event == "PostToolUse" {

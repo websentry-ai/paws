@@ -74,10 +74,42 @@ const (
 
 var errRevoked = errors.New("your login was revoked")
 
+// errAccountDeleted is a revoked login whose account was deleted in the portal (403 account_deleted): this machine
+// is logged out the same way, and told why.
+var errAccountDeleted = fmt.Errorf("%w: the account was deleted", errRevoked)
+
+const accountDeletedMessage = "This account was deleted. Contact support to restore it."
+
+// loggedOutError is errRevoked for a 401 and errAccountDeleted for a 403 naming a deleted account, else nil.
+func loggedOutError(status int, body []byte) error {
+	switch {
+	case status == http.StatusUnauthorized:
+		return errRevoked
+	case status == http.StatusForbidden && isAccountDeleted(body):
+		return errAccountDeleted
+	}
+	return nil
+}
+
+func isAccountDeleted(body []byte) bool {
+	var e struct {
+		Error string `json:"error"`
+	}
+	return json.Unmarshal(body, &e) == nil && e.Error == "account_deleted"
+}
+
+// loggedOutNotice says why this machine was logged out.
+func loggedOutNotice(deleted bool) string {
+	if deleted {
+		return accountDeletedMessage + "\npaws logged this laptop out and removed its portal rules.\n"
+	}
+	return fmt.Sprintf("Your login was revoked and its portal rules were removed. Run `%s login`.\n", cliName)
+}
+
 // Sync uploads new records and pulls the portal config now: `paws sync [--dry-run]`.
 func Sync(args []string) int {
 	if len(args) == 1 && args[0] == "--background" {
-		// Internal: the SessionStart hook's detached round. Silent and throttled like the Stop hook's.
+		// Internal: the SessionStart hook's detached round. Silent and throttled like a prompt or Stop hook's.
 		cwd, _ := os.Getwd()
 		syncRound(cwd, sessionStartFloor)
 		return 0
@@ -96,8 +128,8 @@ func Sync(args []string) int {
 		return 1
 	}
 	if creds == nil && !dry {
-		if loadPortalState().Revoked {
-			fmt.Fprintf(os.Stderr, "Your login was revoked and its portal rules were removed. Run `%s login`.\n", cliName)
+		if st := loadPortalState(); st.Revoked {
+			fmt.Fprint(os.Stderr, loggedOutNotice(st.AccountDeleted))
 		} else {
 			fmt.Fprintf(os.Stderr, "Run `%s login` first.\n", cliName)
 		}
@@ -116,7 +148,7 @@ func Sync(args []string) int {
 	}
 	rep, err := syncNow(creds, cwd)
 	if errors.Is(err, errRevoked) {
-		fmt.Fprintf(os.Stderr, "Your login was revoked and its portal rules were removed. Run `%s login`.\n", cliName)
+		fmt.Fprint(os.Stderr, loggedOutNotice(errors.Is(err, errAccountDeleted)))
 		return 1
 	}
 	printSyncReport(rep)
@@ -153,7 +185,7 @@ func syncNow(creds *credentials, cwd string) (syncReport, error) {
 	}
 	rep.Uploads = true
 	now := time.Now().UTC()
-	st.LastUpload = now
+	st.LastUpload, st.LastCheck = now, now
 	rep.Config, err = pullConfig(creds, &st, res.configHash, cwd)
 	if forgetIfRevoked(err) {
 		return rep, err
@@ -457,15 +489,14 @@ func postSync(creds *credentials, body syncBody) (syncResponse, error) {
 	if err != nil {
 		return res, err
 	}
-	switch status {
-	case http.StatusOK:
-		json.Unmarshal(resp, &res)
-		return res, nil
-	case http.StatusUnauthorized:
-		return res, errRevoked
-	default:
+	if out := loggedOutError(status, resp); out != nil {
+		return res, out
+	}
+	if status != http.StatusOK {
 		return res, portalError(status, resp)
 	}
+	json.Unmarshal(resp, &res)
+	return res, nil
 }
 
 // reportApplied tells the portal which config this machine now runs, so the website can clear

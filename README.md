@@ -47,7 +47,7 @@ unbound-paws explain 'gh pr create --fill'
 ## Packs
 
 ```bash
-unbound-paws search aws            # browse the catalog built into the binary
+unbound-paws search aws            # search the catalog (or browse paws.getunbound.ai/catalog)
 unbound-paws add writing           # install for you (~/.paws, ~/.claude/skills)
 unbound-paws add --project writing # install into this repo, to commit for the team
 unbound-paws list                  # what's installed, how often each binding fired
@@ -55,9 +55,10 @@ unbound-paws ui                    # all of that as a local page
 unbound-paws remove writing
 ```
 
-`unbound-paws add` installs the bindings and the skills they require. Third-party
-skills are fetched from upstream at a pinned commit and refused if their
-content changed; skills you already have, or have edited, are left alone.
+`unbound-paws add` installs the bindings and the skills they require. The catalog
+lives on the paws server, so `add` and `search` need the network: each skill is
+downloaded from it and refused unless its files hash to the pinned content hash.
+Skills you already have, or have edited, are left alone.
 See [docs/catalog.md](docs/catalog.md).
 
 ## Your own rules
@@ -160,9 +161,9 @@ between uploads the same hooks ask for the settings' hash alone at most every
 30 seconds (`PAWS_CHECK_INTERVAL`). A skill you turn on in the browser reaches
 the laptop the next time you send Claude a message, or at once with
 `unbound-paws sync`. paws then writes them as rule files
-under `~/.paws/portal/`. Only skills in the catalog this unbound-paws version ships
-can install, into `~/.claude/skills` at their pinned commit, and are refused
-if their content hash differs; the portal can't name other code to download.
+under `~/.paws/portal/`. Each skill installs into `~/.claude/skills` from the
+paws server, pinned to a github.com repo at a commit and refused unless its files
+hash to the config's content hash.
 A skill's rules are written only once the skill is installed; a skill
 directory you wrote or edited is never replaced. The gate itself stays
 offline: it reads those files like any other rule, and a tool call is never
@@ -225,16 +226,17 @@ pins the skill itself.
 and stay that way. A hosted portal for synced, opt-in telemetry will be the
 paid part; the hook never needs it.
 
-**A catalog of injected instructions is an attack surface.** Third-party
-skills are installed from upstream at a pinned commit and refused if their
-content hash changes; nothing is redistributed from this repo.
+**A catalog of injected instructions is an attack surface.** Every catalog
+skill is pinned to a commit and a content hash; laptops install only files that
+hash to it, and a newer version reaches a laptop only after someone approves it
+in the portal. Only skills whose repos grant a licence are in the catalog.
 
 ## Develop
 
 ```bash
 go test ./...
-go run ./cmd/paws validate .                     # catalog bindings and packs
-go run ./cmd/paws pin .                          # pin upstream skill hashes
+go run ./cmd/paws validate <dir>                 # a catalog on disk: bindings and packs
+go run ./cmd/paws pin <dir>                      # pin upstream skill hashes
 python3 .github/release/smoke.py                 # build every archive, test the npm install
 ```
 
@@ -249,10 +251,9 @@ cmd/paws          CLI entrypoint
 internal/hook     Claude Code adapter (hook I/O, settings entries)
 internal/rule     rule format: parse, match, when-conditions (pure)
 internal/gate     decision engine: load, resolve, transcript scan, audit log
-internal/catalog  catalog bindings and pack manifests (disk or embedded)
+internal/catalog  catalog bindings, pack manifests and trigger cases
 internal/pack     unbound-paws add/remove: bindings, skill install, state
 internal/cli      the commands
-catalog, packs    shipped bindings and packs
 skills/paws       the skill `unbound-paws skill` installs
 web               the unbound-paws ui React app; web/dist is the committed build
 npm               the unbound-paws npm wrapper

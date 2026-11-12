@@ -1,8 +1,0 @@
-# Filled into SKILL.md at install: each KEY placeholder gets its value. Angle-bracket values are
-# org settings with no safe default; SKILL.md "Defaults" says what applies until set.
-placeholders:
-  AGENT_FORWARDING_POLICY: <agent-forwarding-policy>
-  BACKUP_POLICY: the backup policy (offer `--backup --backup-dir=` when a dry-run shows 50+ deletions or the target is not an obviously derived tree)
-  EPHEMERAL_HOSTS_POLICY: <ephemeral-hosts-policy>
-  HOSTKEY_VERIFICATION_PATH: the infra owner
-  PROD_HOSTS: prod hosts (names matching `*prod*`)

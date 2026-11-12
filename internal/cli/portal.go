@@ -25,6 +25,9 @@ import (
 // defaultPortalAPI is a placeholder until the hosted portal's address is final.
 const defaultPortalAPI = "https://paws-api.getunbound.ai"
 
+// defaultSiteURL is the paws website, where the catalog is browsed.
+const defaultSiteURL = "https://paws.getunbound.ai"
+
 // Test seams: tests replace these so polling doesn't wait and no browser opens.
 var (
 	sleep   = time.Sleep

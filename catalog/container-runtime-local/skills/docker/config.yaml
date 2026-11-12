@@ -1,7 +1,0 @@
-# Filled into SKILL.md at install: each KEY placeholder gets its value. Angle-bracket values are
-# org settings with no safe default; SKILL.md "Defaults" says what applies until set.
-placeholders:
-  DOCKER_CONTEXT: the CLI's current context (`docker context show`)
-  PORT_BIND_POLICY: 127.0.0.1 unless exposure is explicitly intended
-  PROTECTED_VOLUMES: <protected-volumes>
-  SANCTIONED_REGISTRY: the org's own registry

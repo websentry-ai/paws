@@ -5,14 +5,13 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"io/fs"
 	"net/http"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
 	"time"
-
-	"github.com/websentry-ai/paws/internal/pack"
 )
 
 // runGate feeds one hook event to `paws gate` and returns what it printed.
@@ -546,16 +545,15 @@ func TestStopHookHasADeadline(t *testing.T) {
 	tmp := t.TempDir()
 	t.Setenv("TMPDIR", tmp)
 	pinned := "sha256:" + strings.Repeat("a", 64)
-	pinCatalog(t, pinned)
-	orig, origDeadline := pack.Fetch, stopHookDeadline
+	origDeadline := stopHookDeadline
 	fetched := false
-	pack.Fetch = func(ctx context.Context, repo, ref, dest string) error {
+	serveSkills(t, func(ctx context.Context, _ string) (fs.FS, error) {
 		fetched = true
 		<-ctx.Done()
-		return ctx.Err()
-	}
+		return nil, ctx.Err()
+	})
 	stopHookDeadline = 200 * time.Millisecond
-	t.Cleanup(func() { pack.Fetch, stopHookDeadline = orig, origDeadline })
+	t.Cleanup(func() { stopHookDeadline = origDeadline })
 	srv.configHash = "h1"
 	srv.config = configJSON(t, "h1", humanizerSkill(pinned))
 	setState(t, func(st *portalState) {})

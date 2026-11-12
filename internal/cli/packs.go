@@ -11,7 +11,6 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/websentry-ai/paws"
 	"github.com/websentry-ai/paws/internal/catalog"
 	"github.com/websentry-ai/paws/internal/gate"
 	"github.com/websentry-ai/paws/internal/pack"
@@ -76,17 +75,25 @@ func parsePackFlags(args []string, allowed ...string) (packFlags, error) {
 	return f, nil
 }
 
-// loadCatalog reads the embedded catalog, or a directory given with --catalog.
-func loadCatalog(dir string) (*catalog.Catalog, error) {
-	var c *catalog.Catalog
-	var probs []catalog.Problem
-	// Full validation either way: names become paths and refs reach git, so a catalog that
-	// fails any check installs nothing.
+// errNoCatalogDir: a command that reads a whole catalog needs one on disk; the published catalog is on the server.
+var errNoCatalogDir = fmt.Errorf("the catalog lives on the paws server now: browse it at %s/catalog, or pass --catalog <dir> for one on disk", defaultSiteURL)
+
+// loadCatalog reads the catalog in a directory given with --catalog or, with none, the slice of the published
+// catalog that names needs (from the paws backend, which then also serves the skill files).
+func loadCatalog(dir string, names ...string) (*catalog.Catalog, error) {
 	if dir == "" {
-		c, probs = catalog.ValidateFS(paws.Catalog, "embedded")
-	} else {
-		c, probs = catalog.Validate(dir)
+		if len(names) == 0 {
+			return nil, errNoCatalogDir
+		}
+		api, err := catalogAPI()
+		if err != nil {
+			return nil, err
+		}
+		useSkillFiles(api)
+		return remoteCatalog(api, names)
 	}
+	// Full validation: names become paths and refs reach git, so a catalog that fails any check installs nothing.
+	c, probs := catalog.Validate(dir)
 	if len(probs) > 0 {
 		for _, p := range probs {
 			fmt.Fprintln(os.Stderr, "paws: catalog:", p)
@@ -114,10 +121,19 @@ func Add(args []string) int {
 		fmt.Fprintf(os.Stderr, "paws: %v\nusage: unbound-paws add [--project] [--pick group=option] <pack|category/binding>...\n", err)
 		return 2
 	}
-	c, err := loadCatalog(f.catalog)
+	c, err := loadCatalog(f.catalog, f.args...)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "paws: %v\n", err)
 		return 1
+	}
+	if f.catalog != "" {
+		// A catalog on disk still installs upstream skills from the backend, by hash: the same backend add asks.
+		api, err := catalogAPI()
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "paws: %v\n", err)
+			return 1
+		}
+		useSkillFiles(api)
 	}
 	t := target(f.project)
 	for _, name := range f.args {
@@ -131,20 +147,20 @@ func Add(args []string) int {
 			fmt.Fprintf(os.Stderr, "paws: add %s: %v\n", name, err)
 			return 1
 		}
-		n := fmt.Sprintf("%d bindings", len(res.Bindings))
-		if len(res.Bindings) == 1 {
-			n = "1 binding"
-		}
-		fmt.Printf("Added %s (%s) to %s\n", res.Pack, n, pack.InstallDir(t, res.Pack))
+		fmt.Printf("Added %s: %s\n", bold(res.Pack), count(len(res.Bindings), "rule"))
+		fmt.Printf("  %-12s %s\n", "rules", tilde(pack.InstallDir(t, res.Pack)))
 		for _, s := range res.Installed {
-			fmt.Printf("  skill %s installed in %s\n", s, t.SkillsDir)
+			fmt.Printf("  %-12s installed in %s\n", s, tilde(filepath.Join(t.SkillsDir, s)))
 		}
 		for _, s := range res.Kept {
-			fmt.Printf("  skill %s already in %s (not installed by paws); using it as is\n", s, t.SkillsDir)
+			fmt.Printf("  %-12s already in %s, not from paws; left as is\n", s, tilde(filepath.Join(t.SkillsDir, s)))
 		}
 	}
 	if !hookRegistered() {
-		fmt.Printf("paws is not registered as a hook here yet: run `%[1]s init` (this repo) or `%[1]s init --global`.\n", cliName)
+		fmt.Printf("\nClaude Code doesn't run paws here yet. Turn it on with one of:\n")
+		for _, l := range [][2]string{{cliName + " init --global", "every repo"}, {cliName + " init", "this repo only"}} {
+			fmt.Printf("  %s%s %s\n", cyan(l[0]), strings.Repeat(" ", max(0, 28-len(l[0]))), dim(l[1])) // pad the text, not the colour codes
+		}
 	}
 	return 0
 }
@@ -202,9 +218,9 @@ func Remove(args []string) int {
 		fmt.Fprintf(os.Stderr, "paws: %v\n", err)
 		return 1
 	}
-	fmt.Printf("Removed %s\n", f.args[0])
+	fmt.Printf("Removed %s\n", bold(f.args[0]))
 	for _, s := range skills {
-		fmt.Printf("  skill %s removed\n", s)
+		fmt.Printf("  %-12s removed\n", s)
 	}
 	return 0
 }
@@ -309,9 +325,9 @@ func fireCounts(path string) map[string]int {
 	return counts
 }
 
-// Search finds packs and bindings by name, tag, skill or description: `paws search TEXT`.
+// Search finds catalog skills by name, description or tag on the paws backend: `paws search TEXT`.
 func Search(args []string) int {
-	f, err := parsePackFlags(args, "--catalog")
+	f, err := parsePackFlags(args)
 	if err == nil && len(f.args) == 0 {
 		err = fmt.Errorf("give a search term")
 	}
@@ -319,52 +335,63 @@ func Search(args []string) int {
 		fmt.Fprintf(os.Stderr, "paws: %v\nusage: unbound-paws search <text>\n", err)
 		return 2
 	}
-	c, err := loadCatalog(f.catalog)
-	if err != nil {
-		fmt.Fprintf(os.Stderr, "paws: %v\n", err)
-		return 1
-	}
-	q := strings.ToLower(strings.Join(f.args, " "))
-	hit := func(fields ...string) bool {
-		return strings.Contains(strings.ToLower(strings.Join(fields, " ")), q)
-	}
-	found := 0
-	for _, n := range sortedKeys(c.Packs) {
-		p := c.Packs[n]
-		if hit(p.Name, p.Description, strings.Join(p.Tags, " ")) {
-			found++
-			fmt.Printf("pack %-20s %s\n     %s add %s\n", p.Name, p.Description, cliName, p.Name)
+	api, err := catalogAPI()
+	if err == nil {
+		var rows []catalogRow
+		var total int
+		if rows, total, err = searchCatalog(api, strings.Join(f.args, " ")); err == nil {
+			printSearch(rows, total, strings.Join(f.args, " "))
+			return 0
 		}
 	}
-	for _, rel := range sortedKeys(c.Bindings) {
-		b := c.Bindings[rel]
-		if hit(b.Name, rel, b.Action.Skill, strings.Join(b.Tags, " "), b.Body) {
-			found++
-			fmt.Printf("binding %-28s %s\n     %s add %s\n", b.Name, firstLine(b.Body), cliName, strings.TrimSuffix(rel, ".md"))
-		}
-	}
-	if found == 0 {
-		fmt.Printf("nothing matches %q\n", q)
-	}
-	return 0
+	fmt.Fprintf(os.Stderr, "paws: %v\n", err)
+	return 1
 }
 
-// Index writes the catalog as JSON for the website and the local UI: `paws index [-o file]`.
-// With --portal it writes the portal's /catalog shape: one entry per skill.
+func printSearch(rows []catalogRow, total int, q string) {
+	if total == 0 {
+		fmt.Printf("nothing matches %q\n", q)
+		return
+	}
+	noun := "skills match"
+	if total == 1 {
+		noun = "skill matches"
+	}
+	fmt.Printf("%d %s %q\n", total, noun, q)
+	for _, r := range rows {
+		fmt.Printf("\n  %s\n", bold(printable(r.Name)))
+		for _, line := range wrap(printable(r.Description), 76, 2) {
+			fmt.Printf("  %s\n", line)
+		}
+		if r.Add != "" {
+			fmt.Printf("  %s %s\n", dim("install:"), cyan(printable(r.Add)))
+		}
+	}
+	if total > len(rows) {
+		fmt.Printf("\n%d more. Narrow the search, or browse %s/catalog\n", total-len(rows), defaultSiteURL)
+	}
+}
+
+// Index writes a catalog on disk as JSON: `paws index --catalog <dir> [-o file]`. With --portal it writes the
+// document the paws backend loads: one record per skill plus every rule file, pack, digest and bundled skill.
 func Index(args []string) int {
 	f, err := parsePackFlags(args, "--catalog", "-o", "--portal")
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "paws: %v\n", err)
 		return 2
 	}
-	c, err := loadCatalog(f.catalog)
+	var index any
+	if f.portal && f.catalog != "" {
+		index, err = portalDocument(f.catalog)
+	} else {
+		var c *catalog.Catalog
+		if c, err = loadCatalog(f.catalog); err == nil {
+			index = buildIndex(c)
+		}
+	}
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "paws: %v\n", err)
 		return 1
-	}
-	var index any = buildIndex(c)
-	if f.portal {
-		index = buildPortalCatalog(c)
 	}
 	b, _ := json.MarshalIndent(index, "", "  ")
 	b = append(b, '\n')

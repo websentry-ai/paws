@@ -1,7 +1,0 @@
-name: git
-description: Verify work with real command output before every commit and push, and keep commit messages terse Conventional Commits.
-tags: [git]
-bindings:
-  - git/verify-before-commit.md
-  - git/verify-before-push.md
-  - git/caveman-commit-message.md

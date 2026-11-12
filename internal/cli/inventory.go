@@ -93,6 +93,7 @@ var (
 	// regexPrefixes are the command-start guards catalog regexes open with.
 	regexPrefixes = []string{
 		`(^|[;&|\n])\s*(\w+=\S*\s+)*(sudo(\s+-\S+(\s+[^-\s]\S*)?)*\s+)?`,
+		`^(\w+=\S*\s+)*(sudo(\s+-\S+(\s+[^-\s]\S*)?)*\s+)?`,
 		`(^|[;&|\n])\s*`,
 		`^`,
 	}
@@ -103,6 +104,9 @@ var (
 // regexDisplay reads a simple command regex as words: `(^|[;&|\n])\s*gh\s+pr\s+(create|edit)\b`
 // is "gh pr (create|edit)". A regex that doesn't reduce to plain words shows as "matching command".
 func regexDisplay(re string) string {
+	if rest, ok := strings.CutPrefix(re, rule.CommandStart); ok {
+		re = "^" + rest // the catalog's anchor; what follows reads like any other command
+	}
 	for _, p := range regexPrefixes {
 		if rest, ok := strings.CutPrefix(re, p); ok {
 			re = rest

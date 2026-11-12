@@ -73,7 +73,7 @@ func Explain(args []string) int {
 	ev := hook.ToEvent(in)
 
 	fmt.Printf("event : %s\ntool  : %s\ninput : %s\n.paws : %s\n",
-		in.HookEventName, in.ToolName, ev.Target, strings.Join(res.Dirs, ", "))
+		in.HookEventName, in.ToolName, ev.Target, strings.Join(tildeAll(res.Dirs), ", "))
 	if len(res.Dirs) == 0 {
 		fmt.Println("        (none found — no .paws directory in scope)")
 	}
@@ -98,7 +98,7 @@ func Explain(args []string) int {
 		if gate.Applies(r, ev) {
 			mark = "→ "
 		}
-		fmt.Printf("  %s%-24s event=%-12s action=%-14s [%s]\n", mark, r.Name, r.Event, r.Action.Type, r.SourcePath)
+		fmt.Printf("  %s%-24s event=%-12s action=%-14s %s\n", mark, r.Name, r.Event, r.Action.Type, tilde(r.SourcePath))
 		if mark == "→ " {
 			if p := gate.DigestProblem(r); p != "" {
 				fmt.Printf("      ! digest not used, the deny names the skill instead: %s\n", p)

@@ -36,9 +36,6 @@ type portalUpstream struct {
 // repoLicense covers the skills this repo ships under catalog/*/skills.
 const repoLicense = "Apache-2.0"
 
-// repoTree is where this repo's own skills are browsed on GitHub.
-const repoTree = "https://github.com/websentry-ai/paws/tree/main"
-
 // buildPortalCatalog groups bindings by the skill they require. Each binding becomes one of
 // the skill's default actions; the first binding (by path) supplies the description, summary and pin.
 func buildPortalCatalog(c *catalog.Catalog) map[string]any {
@@ -66,10 +63,9 @@ func buildPortalCatalog(c *catalog.Catalog) map[string]any {
 	return map[string]any{"skills": skills}
 }
 
-// newCatalogSkill fills a skill's pin: the upstream ref, or for a skill this repo ships its
-// content hash (the hash `paws sync` checks before installing it from the binary). Its source
-// link is the skill's folder at that ref, or in this repo on main; a SKILL.md at an upstream
-// repo's root links to the repo at the ref.
+// newCatalogSkill fills a skill's pin: the upstream ref, or for a skill Unbound wrote its content hash (the hash
+// installs check). Its source link is the skill's folder at the upstream ref; a SKILL.md at an upstream repo's root
+// links to the repo at the ref.
 func newCatalogSkill(c *catalog.Catalog, b *catalog.Binding) *portalCatalogSkill {
 	s := &portalCatalogSkill{Name: b.Action.Skill, Kind: "skill", Description: firstLine(b.Body), Summary: b.Summary, DefaultActions: []portalAction{}}
 	if u := b.Upstream; u.Repo != "" {
@@ -78,7 +74,7 @@ func newCatalogSkill(c *catalog.Catalog, b *catalog.Binding) *portalCatalogSkill
 		s.Version, s.ContentHash, s.License = u.Ref[:7], u.ContentHash, b.Provenance.License
 		return s
 	}
-	s.License, s.SourceURL = repoLicense, repoTree+"/"+catalog.LocalSkillDir(b)
+	s.License = repoLicense // no source link: these files are published with the catalog, not on GitHub
 	if sub, err := fs.Sub(c.FS, catalog.LocalSkillDir(b)); err == nil {
 		if h, err := pack.HashSkill(sub); err == nil {
 			s.ContentHash, s.Version = h, strings.TrimPrefix(h, "sha256:")[:7]

@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io/fs"
 	"os"
 	"path/filepath"
 	"sort"
@@ -12,42 +13,38 @@ import (
 	"testing"
 	"testing/fstest"
 
-	"github.com/websentry-ai/paws"
-	"github.com/websentry-ai/paws/internal/catalog"
 	"github.com/websentry-ai/paws/internal/pack"
 	"github.com/websentry-ai/paws/internal/rule"
 )
 
 const humanizerRef = "0123456789abcdef0123456789abcdef01234567"
 
-// fakeUpstream makes pack.Fetch check out a one-file skill whose SKILL.md is body, and
-// returns that skill's content hash.
+// serveSkills makes the paws backend answer skill-file downloads with get, and returns the hashes asked for.
+func serveSkills(t *testing.T, get func(ctx context.Context, hash string) (fs.FS, error)) *[]string {
+	t.Helper()
+	asked := &[]string{}
+	orig := skillFilesFor
+	skillFilesFor = func(string) func(context.Context, string) (fs.FS, error) {
+		return func(ctx context.Context, hash string) (fs.FS, error) {
+			*asked = append(*asked, hash)
+			return get(ctx, hash)
+		}
+	}
+	t.Cleanup(func() { skillFilesFor = orig })
+	return asked
+}
+
+// fakeUpstream makes the backend serve a one-file skill whose SKILL.md is body, whatever hash is asked for, and
+// returns that skill's content hash; the CLI's hash check decides whether it installs.
 func fakeUpstream(t *testing.T, body string) string {
 	t.Helper()
-	orig := pack.Fetch
-	pack.Fetch = func(_ context.Context, repo, ref, dest string) error {
-		return os.WriteFile(filepath.Join(dest, "SKILL.md"), []byte(body), 0o644)
-	}
-	t.Cleanup(func() { pack.Fetch = orig })
-	dir := t.TempDir()
-	os.WriteFile(filepath.Join(dir, "SKILL.md"), []byte(body), 0o644)
-	h, err := pack.HashSkill(os.DirFS(dir))
+	files := fstest.MapFS{"SKILL.md": {Data: []byte(body), Mode: 0o644}}
+	serveSkills(t, func(context.Context, string) (fs.FS, error) { return files, nil })
+	h, err := pack.HashSkill(files)
 	if err != nil {
 		t.Fatal(err)
 	}
 	return h
-}
-
-// pinCatalog makes the binary's catalog pin humanizer upstream at humanizerRef and hash: a
-// portal config can only install an upstream skill the catalog pins exactly.
-func pinCatalog(t *testing.T, hash string) {
-	t.Helper()
-	orig := catalogFS
-	catalogFS = fstest.MapFS{"catalog/writing/humanizer-pr.md": {Data: []byte("---\nname: humanizer-pr\nevent: pre-tool\n" +
-		"matcher:\n  tool: Bash\n  command_regex: gh pr create\naction:\n  type: require-skill\n  skill: humanizer\n" +
-		"upstream:\n  repo: github.com/blader/humanizer\n  path: SKILL.md\n  ref: " + humanizerRef + "\n  content_hash: " + hash + "\n" +
-		"tags: [writing]\n---\nHumanize PRs.\n")}}
-	t.Cleanup(func() { catalogFS = orig })
 }
 
 // userSkill puts a SKILL.md for name in the test HOME's ~/.claude/skills, as a user would.
@@ -125,7 +122,6 @@ func deny(t *testing.T, command string) string {
 func TestSyncAppliesRemovesAndTurnsOffConfig(t *testing.T) {
 	home, srv := syncEnv(t)
 	hash := fakeUpstream(t, "# humanizer\n")
-	pinCatalog(t, hash)
 	userSkill(t, "house-style", "# house style\n") // a custom skill is the user's to provide
 	custom := map[string]any{"name": "house-style", "kind": "skill", "load": "full", "status": "on",
 		"actions": []map[string]any{{"id": "x/../y", "label": "Edit docs", "event": "pre-tool", "tool": "Write|Edit", "file_glob": "docs/**"}}}
@@ -201,7 +197,6 @@ func TestSyncRefusesMismatchedSkillsAndKeepsUserCopies(t *testing.T) {
 	home, srv := syncEnv(t)
 	fakeUpstream(t, "# humanizer, changed upstream\n")
 	pinned := "sha256:" + strings.Repeat("a", 64)
-	pinCatalog(t, pinned)
 	skills := filepath.Join(os.Getenv("HOME"), ".claude", "skills")
 	// The user's own copy of a catalog skill the config also names: paws must leave it alone.
 	userSkill(t, "git", "mine\n")
@@ -229,45 +224,39 @@ func TestSyncRefusesMismatchedSkillsAndKeepsUserCopies(t *testing.T) {
 	}
 }
 
-// A compromised portal can't make a laptop download code from anywhere else: an upstream skill
-// installs only from the repo and path this binary's catalog pins for it, at a commit SHA.
-func TestSyncRefusesUpstreamNotInCatalog(t *testing.T) {
+// A config can only point a skill at a github.com repo at a commit, with a content hash; anything else installs
+// nothing and downloads nothing. A pin the backend serves other files for is refused by the hash check.
+func TestSyncRefusesABadPin(t *testing.T) {
 	home, srv := syncEnv(t)
 	pinned := "sha256:" + strings.Repeat("a", 64)
-	pinCatalog(t, pinned)
-	var fetched []string
-	orig := pack.Fetch
-	pack.Fetch = func(_ context.Context, repo, ref, dest string) error {
-		fetched = append(fetched, repo+"@"+ref)
-		return os.WriteFile(filepath.Join(dest, "SKILL.md"), []byte("evil\n"), 0o644)
-	}
-	t.Cleanup(func() { pack.Fetch = orig })
+	asked := serveSkills(t, func(context.Context, string) (fs.FS, error) {
+		return fstest.MapFS{"SKILL.md": {Data: []byte("evil\n"), Mode: 0o644}}, nil
+	})
 	variant := func(name string, edit func(u map[string]any)) map[string]any {
 		s := humanizerSkill(pinned)
 		s["name"] = name
-		u := s["upstream"].(map[string]any)
-		edit(u)
+		edit(s["upstream"].(map[string]any))
 		return s
 	}
-	userSkill(t, "renamed", "mine\n") // present, but its upstream is still not a catalog pin
 	srv.configHash = "h1"
 	srv.config = configJSON(t, "h1",
-		variant("evil", func(u map[string]any) { u["repo"] = "github.com/evil/skills" }),
 		variant("humanizer", func(u map[string]any) { u["ref"] = "main" }),
-		variant("renamed", func(u map[string]any) {}),
 		variant("gitlab", func(u map[string]any) { u["repo"] = "gitlab.com/blader/humanizer" }),
-		variant("humanizer", func(u map[string]any) { u["path"] = "evil/SKILL.md" }),
+		variant("evil", func(u map[string]any) { u["repo"] = "github.com/evil/skills" }),
 	)
 
 	code, out := captureStdout(t, func() int { return Sync(nil) })
 	if code != 0 || !strings.Contains(out, "Config: no skills applied.") {
 		t.Fatalf("sync exit %d, output %q", code, out)
 	}
-	if n := strings.Count(out, ": not in this paws version's catalog — update paws"); n != 5 {
-		t.Errorf("want 5 not-in-catalog skips, got %d in %q", n, out)
+	if n := strings.Count(out, ": its pin is not a github.com repo at a commit with a content hash; not installed"); n != 2 {
+		t.Errorf("want 2 bad-pin skips, got %d in %q", n, out)
 	}
-	if len(fetched) != 0 {
-		t.Errorf("fetched %v; nothing outside the catalog may be downloaded", fetched)
+	if !strings.Contains(out, "evil: content hash mismatch at the pinned ref; not installed") {
+		t.Errorf("the evil pin must fail its hash check: %q", out)
+	}
+	if fmt.Sprint(*asked) != "["+pinned+"]" {
+		t.Errorf("downloads %v; only the well-formed pin may be fetched", *asked)
 	}
 	if got := portalFiles(t, home); len(got) != 0 {
 		t.Errorf("portal files %v", got)
@@ -285,7 +274,6 @@ func TestSyncRefusesUpstreamNotInCatalog(t *testing.T) {
 func TestSyncRepairsSkillsAndRulesDeletedByHand(t *testing.T) {
 	home, srv := syncEnv(t)
 	v1 := fakeUpstream(t, "# humanizer\n")
-	pinCatalog(t, v1)
 	srv.configHash = "h1"
 	srv.config = configJSON(t, "h1", humanizerSkill(v1), backupRule())
 	if code, out := captureStdout(t, func() int { return Sync(nil) }); code != 0 {
@@ -324,16 +312,10 @@ func TestSyncRepairsSkillsAndRulesDeletedByHand(t *testing.T) {
 // the laptop installs it once the download hashes to the approved content.
 func TestSyncInstallsAnApprovedUpdate(t *testing.T) {
 	home, srv := syncEnv(t)
-	pinCatalog(t, "sha256:"+strings.Repeat("a", 64))
-	approved := fakeUpstream(t, "# humanizer v2\n")
+	files := fstest.MapFS{"SKILL.md": {Data: []byte("# humanizer v2\n"), Mode: 0o644}}
+	approved, _ := pack.HashSkill(files)
+	asked := serveSkills(t, func(context.Context, string) (fs.FS, error) { return files, nil })
 	newRef := strings.Repeat("b", 40)
-	var fetched []string
-	fetch := pack.Fetch
-	pack.Fetch = func(ctx context.Context, repo, ref, dest string) error {
-		fetched = append(fetched, repo+"@"+ref)
-		return fetch(ctx, repo, ref, dest)
-	}
-	t.Cleanup(func() { pack.Fetch = fetch })
 	s := humanizerSkill(approved)
 	s["upstream"].(map[string]any)["ref"] = newRef
 	srv.configHash = "h2"
@@ -343,8 +325,8 @@ func TestSyncInstallsAnApprovedUpdate(t *testing.T) {
 	if code != 0 || !strings.Contains(out, "Config: 1 skill (humanizer) applied.") {
 		t.Fatalf("sync exit %d, output %q", code, out)
 	}
-	if got := fmt.Sprint(fetched); got != "[github.com/blader/humanizer@"+newRef+"]" {
-		t.Errorf("fetched %s", got)
+	if got := fmt.Sprint(*asked); got != "["+approved+"]" {
+		t.Errorf("downloaded %s", got)
 	}
 	if data, _ := os.ReadFile(filepath.Join(os.Getenv("HOME"), ".claude", "skills", "humanizer", "SKILL.md")); string(data) != "# humanizer v2\n" {
 		t.Errorf("installed SKILL.md %q", data)
@@ -362,7 +344,6 @@ func TestSyncInstallsAnApprovedUpdate(t *testing.T) {
 func TestSyncKeepsTheInstalledVersionWhenAnUpdateFails(t *testing.T) {
 	home, srv := syncEnv(t)
 	v1 := fakeUpstream(t, "# humanizer v1\n")
-	pinCatalog(t, v1)
 	srv.configHash = "h1"
 	srv.config = configJSON(t, "h1", humanizerSkill(v1))
 	if code, out := captureStdout(t, func() int { return Sync(nil) }); code != 0 {
@@ -394,10 +375,7 @@ func TestSyncKeepsTheInstalledVersionWhenAnUpdateFails(t *testing.T) {
 
 func TestSyncRetriesAfterAFetchFailure(t *testing.T) {
 	home, srv := syncEnv(t)
-	orig := pack.Fetch
-	pack.Fetch = func(_ context.Context, repo, ref, dest string) error { return errors.New("network down") }
-	t.Cleanup(func() { pack.Fetch = orig })
-	pinCatalog(t, "sha256:"+strings.Repeat("a", 64))
+	serveSkills(t, func(context.Context, string) (fs.FS, error) { return nil, errors.New("network down") })
 	srv.configHash = "h1"
 	srv.config = configJSON(t, "h1", humanizerSkill("sha256:"+strings.Repeat("a", 64)), backupRule())
 
@@ -416,35 +394,30 @@ func TestSyncRetriesAfterAFetchFailure(t *testing.T) {
 	}
 }
 
-// A skill the catalog ships in this binary installs from it, checked against the hash
-// `paws index --portal` publishes for it.
-func TestSyncInstallsCatalogSkillFromTheBinary(t *testing.T) {
+// A skill Unbound wrote (no upstream) installs from the backend too, checked against its content hash.
+func TestSyncInstallsABundledSkillFromTheBackend(t *testing.T) {
 	home, srv := syncEnv(t)
-	c, probs := catalog.LoadFS(paws.Catalog, "embedded")
-	if len(probs) > 0 {
-		t.Fatal(probs)
-	}
-	var git *portalCatalogSkill
-	for _, s := range buildPortalCatalog(c)["skills"].([]*portalCatalogSkill) {
-		if s.Name == "git" {
-			git = s
-		}
-	}
-	if git == nil || git.Upstream != nil {
-		t.Fatalf("want git as a catalog-shipped skill, got %+v", git)
-	}
+	files := fstest.MapFS{"SKILL.md": {Data: []byte("---\nname: git\n---\nShow real output.\n"), Mode: 0o644},
+		"scripts/check.sh": {Data: []byte("#!/bin/sh\necho ok\n"), Mode: 0o755}}
+	hash, _ := pack.HashSkill(files)
+	serveSkills(t, func(context.Context, string) (fs.FS, error) { return files, nil })
 	srv.configHash = "h1"
 	srv.config = configJSON(t, "h1", map[string]any{"name": "git", "kind": "skill", "load": "full", "status": "on",
-		"content_hash": git.ContentHash, "version": git.Version, "actions": git.DefaultActions})
+		"content_hash": hash, "version": hash[7:14], "actions": []map[string]any{
+			{"id": "git", "label": "A commit", "event": "pre-commit", "tool": "Bash"}}})
 
 	if code, out := captureStdout(t, func() int { return Sync(nil) }); code != 0 || !strings.Contains(out, "Config: 1 skill (git) applied.") {
 		t.Fatalf("sync exit %d, output %q", code, out)
 	}
-	if _, err := os.Stat(filepath.Join(os.Getenv("HOME"), ".claude", "skills", "git", "SKILL.md")); err != nil {
+	dir := filepath.Join(os.Getenv("HOME"), ".claude", "skills", "git")
+	if _, err := os.Stat(filepath.Join(dir, "SKILL.md")); err != nil {
 		t.Errorf("git skill not installed: %v", err)
 	}
-	if got := portalFiles(t, home); len(got) != len(git.DefaultActions) {
-		t.Errorf("want one rule file per default action, got %v", got)
+	if st, err := os.Stat(filepath.Join(dir, "scripts", "check.sh")); err != nil || st.Mode().Perm()&0o100 == 0 {
+		t.Errorf("a script stays runnable: %v %v", st, err)
+	}
+	if got := portalFiles(t, home); fmt.Sprint(got) != "[git--git.md]" {
+		t.Errorf("want one rule file, got %v", got)
 	}
 }
 

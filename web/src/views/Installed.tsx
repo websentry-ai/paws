@@ -11,7 +11,7 @@ export function Installed({ load, portal }: { load: Load<InstalledPack[]>; porta
         if (!packs.length && !fromPortal.length) {
           return (
             <Empty>
-              No packs installed yet. Open <b>Catalog</b>, or run <Cmd text={`${run} add writing`} />
+              No packs installed yet. Browse the catalog, or run <Cmd text={`${run} add writing`} />
             </Empty>
           );
         }

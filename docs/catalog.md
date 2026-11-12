@@ -1,15 +1,24 @@
 # Catalog and packs
 
-The catalog is every binding paws ships. A pack is a named set of bindings and
+The catalog is every binding paws offers. A pack is a named set of bindings and
 is what a user installs (`unbound-paws add writing`).
 
+The published catalog lives in the paws backend's database, not in this repo or
+the binary. The website pages through it, `unbound-paws search` and `add` ask for
+just what they need, and every skill is downloaded from the backend by content
+hash.
+
 ## Layout
+
+A catalog on disk (what `--catalog <dir>` reads):
 
 ```
 catalog/<category>/<binding>.md              one binding
 catalog/<category>/digests/<name>.md         digest a binding's action.digest points at
 catalog/<category>/skills/<skill>/SKILL.md   a skill we own (org tag)
 packs/<pack>.yaml                            a pack manifest
+trigger_cases.json                           calls each binding must fire on and ignore
+without_trigger_cases.txt                    older bindings without cases yet
 ```
 
 Files named `README.md` or `SKILL.md`, and anything under `skills/` or
@@ -53,8 +62,8 @@ What the binding does, in a sentence or two.
 most 140 characters: "Your team's git rules: commit message format, protected branches,
 and a secret scan before every commit." The portal shows it on the add-skill page. A skill
 bound by several files takes it from the first one by path (`writing/humanizer-commit.md`
-before `writing/humanizer-pr.md`), so put it there. `unbound-paws index --portal` emits it as
-`summary`, next to `source_url`, the skill's folder on GitHub at its pinned ref.
+before `writing/humanizer-pr.md`), so put it there. The website shows the skill's own
+SKILL.md `description` instead; the backend reads it at push.
 
 Rules for a valid binding (`unbound-paws validate` checks each one):
 
@@ -94,11 +103,12 @@ of them. A binding appears once in what installs together: the top-level
 
 ## Install
 
-`unbound-paws add <pack>` reads the catalog embedded in the binary (`--catalog <dir>`
-reads a checkout instead) and:
+`unbound-paws add <pack>` asks the backend for that pack's bindings, digests and
+skills (`--catalog <dir>` reads one on disk instead), validates them like a
+catalog on disk, and:
 
-1. installs each required skill: upstream ones at `upstream.ref`, refused
-   unless the fetched directory hashes to `upstream.content_hash`; ours from
+1. installs each required skill: upstream ones downloaded from the backend and
+   refused unless the files hash to `upstream.content_hash`; ours from
    `catalog/<category>/skills/<skill>/` with `{{NAME}}` placeholders filled
    from that directory's `config.yaml` (`placeholders: {NAME: default}`);
 2. copies the bindings (with their digests) to
@@ -119,12 +129,21 @@ and `upstream.ref` a full commit SHA; `unbound-paws validate` rejects anything e
 and `unbound-paws add` validates whatever catalog it reads before installing.
 
 The content hash is sha256 over each file's path and bytes, in path order,
-skipping any path segment that starts with `.`. `unbound-paws pin .` fetches every
+skipping any path segment that starts with `.`. `unbound-paws pin <dir>` fetches every
 upstream skill and writes the hash into its bindings; `unbound-paws validate`
 rejects an upstream binding without one.
 
 ## Check it
 
 ```
-unbound-paws validate .
+unbound-paws validate <dir>
 ```
+
+With a `trigger_cases.json` in `<dir>`, `validate` also runs every trigger against its cases.
+
+A trigger that fires when its skill doesn't apply blocks Claude until it loads a skill it doesn't need, so each
+binding's trigger is tested against real calls. `trigger_cases.json` lists, per binding name, calls the trigger must
+fire on and near misses it must ignore, as `[tool, target]` pairs; the target is what the hook matches (the command,
+file path, URL, subagent prompt, MCP input as JSON, or session source). Add a few of each with a new binding: a key
+word inside another word, the tool named in `echo` or a commit message, `--help`, a read-only subcommand when the
+skill is about writes. The first fire case of each binding is also the example the website shows under its trigger.

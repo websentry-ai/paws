@@ -7,7 +7,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"io/fs"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -18,7 +17,6 @@ import (
 
 	"gopkg.in/yaml.v3"
 
-	"github.com/websentry-ai/paws"
 	"github.com/websentry-ai/paws/internal/catalog"
 	"github.com/websentry-ai/paws/internal/gate"
 	"github.com/websentry-ai/paws/internal/pack"
@@ -67,6 +65,8 @@ type portalAction struct {
 	CommandRegex string `json:"command_regex,omitempty"`
 	FileGlob     string `json:"file_glob,omitempty"`
 	MCPAction    string `json:"mcp_action,omitempty"`
+	// Example is a call the trigger fires on, from the catalog's reviewed cases; the website shows it.
+	Example string `json:"example,omitempty"`
 }
 
 // applyResult is what applying one config did.
@@ -76,10 +76,6 @@ type applyResult struct {
 	Skipped []string // "<skill>: <reason>"
 	Pending bool     // a skill waits for its SKILL.md; keep checking instead of recording the hash
 }
-
-// catalogFS is the catalog this binary ships: the only skills a portal config can install.
-// Tests replace it.
-var catalogFS fs.FS = paws.Catalog
 
 func portalDir() string {
 	dir := gate.UserDir()
@@ -203,6 +199,7 @@ func pullConfig(creds *credentials, st *portalState, known, cwd string) (*applyR
 	if err := portalGet(creds, "/config", &cfg); err != nil {
 		return nil, err
 	}
+	useSkillFiles(creds.API) // the backend that sent the config holds its skills' files
 	res, err := applyConfig(cfg, cwd)
 	st.Skills = res.Applied
 	if err == nil && !res.Pending {
@@ -264,14 +261,13 @@ func applyConfig(cfg portalConfig, cwd string) (applyResult, error) {
 	}
 	skillsDir := pack.UserTarget(gate.UserDir()).SkillsDir
 	projectSkills := pack.ProjectTarget(projectRoot(cwd)).SkillsDir
-	embedded, _ := catalog.LoadFS(catalogFS, "embedded")
 	want := map[string][]byte{} // path under dir -> content
 	var errs []error
 	for _, s := range cfg.Skills {
 		if s.Status == "off" {
 			continue
 		}
-		files, skip, err := skillFiles(s, skillsDir, embedded, dir)
+		files, skip, err := skillFiles(s, skillsDir, dir)
 		if err != nil {
 			errs = append(errs, fmt.Errorf("skill %s: %w", s.Name, err))
 		}
@@ -299,7 +295,7 @@ func applyConfig(cfg portalConfig, cwd string) (applyResult, error) {
 
 // skillFiles installs a skill when it comes from the catalog and returns its rule files.
 // skip says why some or all of it was left out; err is a failure worth retrying.
-func skillFiles(s portalSkill, skillsDir string, embedded *catalog.Catalog, dir string) (map[string][]byte, string, error) {
+func skillFiles(s portalSkill, skillsDir, dir string) (map[string][]byte, string, error) {
 	if !catalog.ValidSkillName(s.Name) {
 		return nil, "invalid skill name", nil
 	}
@@ -316,7 +312,7 @@ func skillFiles(s portalSkill, skillsDir string, embedded *catalog.Catalog, dir 
 		}
 		digest = "digests/" + s.Name + ".md"
 		files[digest] = []byte(text)
-	} else if skip, err := prepareSkill(s, skillsDir, embedded); skip != "" {
+	} else if skip, err := prepareSkill(s, skillsDir); skip != "" {
 		return nil, skip, err
 	} else {
 		installErr = err
@@ -343,8 +339,8 @@ func hasSkill(name string, skillsDirs ...string) bool {
 
 // prepareSkill installs a full skill before its rules go live. A non-empty skip means its
 // rules must not be written; an error with no skip means an older copy serves meanwhile.
-func prepareSkill(s portalSkill, skillsDir string, embedded *catalog.Catalog) (string, error) {
-	outcome, err := installPortalSkill(s, skillsDir, embedded)
+func prepareSkill(s portalSkill, skillsDir string) (string, error) {
+	outcome, err := installPortalSkill(s, skillsDir)
 	_, serr := os.Stat(filepath.Join(skillsDir, s.Name))
 	switch {
 	case outcome == pack.UpstreamMismatch && serr == nil:
@@ -353,8 +349,8 @@ func prepareSkill(s portalSkill, skillsDir string, embedded *catalog.Catalog) (s
 		return "", errors.New("content hash mismatch at the pinned ref; not installed; keeping the installed version")
 	case outcome == pack.UpstreamMismatch:
 		return "content hash mismatch at the pinned ref; not installed", nil
-	case outcome == notInCatalog:
-		return "not in this paws version's catalog — update paws", nil
+	case outcome == badPin:
+		return "its pin is not a github.com repo at a commit with a content hash; not installed", nil
 	case err == nil:
 		return "", nil
 	case serr != nil:
@@ -379,75 +375,26 @@ func actionFiles(s portalSkill, digest, dir string) (map[string][]byte, []string
 	return files, skips
 }
 
-// notInCatalog: the config names an upstream skill this binary's catalog doesn't pin.
-const notInCatalog = "not-in-catalog"
+// badPin: the config names an upstream skill without a github.com repo, a commit ref and a content hash.
+const badPin = "bad-pin"
 
-// installPortalSkill installs a full skill: from the upstream repo and path this binary's
-// catalog pins for it, or from the catalog inside this binary, checked against the config's
-// content hash either way. The portal picks the commit (an approved update) but can never point
-// at another repo or path. A custom skill (neither) is the user's to provide; "" with no error.
-func installPortalSkill(s portalSkill, skillsDir string, embedded *catalog.Catalog) (string, error) {
-	want := s.ContentHash
+// installPortalSkill installs a catalog skill from the paws backend: the files the config's content hash names,
+// checked against it. An upstream skill must name a github.com repo at a commit, where the backend got the files; a
+// custom skill (no hash) is the user's to provide, "" with no error.
+func installPortalSkill(s portalSkill, skillsDir string) (string, error) {
+	want, source := s.ContentHash, "catalog:"+s.Name
 	if u := s.Upstream; u != nil && u.Repo != "" {
 		if want == "" {
 			want = u.ContentHash
 		}
-		pin := catalogPin(embedded, s.Name, *u, want)
-		if pin == nil {
-			return notInCatalog, nil
+		if want == "" || !strings.HasPrefix(u.Repo, "github.com/") || !catalog.RepoRe.MatchString(u.Repo) || !catalog.RefRe.MatchString(u.Ref) {
+			return badPin, nil
 		}
-		return pack.InstallUpstreamSkill(portalCtx, skillsDir, s.Name, pin.Repo, pin.Path, pin.Ref, pin.ContentHash)
-	}
-	fsys, source := embeddedSkill(embedded, s.Name)
-	if fsys == nil {
+		source = u.Repo + "@" + u.Ref
+	} else if want == "" {
 		return "", nil
 	}
-	if have, err := pack.HashSkill(fsys); err != nil || want != "" && have != want {
-		return pack.UpstreamMismatch, err
-	}
-	return pack.InstallBundledSkill(fsys, skillsDir, s.Name, source)
-}
-
-// catalogPin returns where to install skill from: the repo and path this binary's catalog pins
-// for it, at the config's ref and content hash. The ref may differ from the catalog's when the
-// user approved an update in the portal; it must still be a commit SHA, and the download must
-// hash to the approved content. Only github.com repos qualify.
-func catalogPin(c *catalog.Catalog, skill string, u rule.Upstream, hash string) *rule.Upstream {
-	if c == nil || hash == "" || !strings.HasPrefix(u.Repo, "github.com/") || !catalog.RefRe.MatchString(u.Ref) {
-		return nil
-	}
-	for _, rel := range sortedKeys(c.Bindings) {
-		b := c.Bindings[rel]
-		p := b.Upstream
-		if b.Action.Skill == skill && p.Repo == u.Repo && p.Path == u.Path {
-			p.Ref, p.ContentHash = u.Ref, hash
-			return &p
-		}
-	}
-	return nil
-}
-
-// embeddedSkill finds a skill the built-in catalog ships (catalog/<category>/skills/<name>).
-func embeddedSkill(c *catalog.Catalog, name string) (fs.FS, string) {
-	if c == nil {
-		return nil, ""
-	}
-	for _, rel := range sortedKeys(c.Bindings) {
-		b := c.Bindings[rel]
-		if b.Action.Skill != name || b.Upstream.Repo != "" {
-			continue
-		}
-		dir := catalog.LocalSkillDir(b)
-		if sub, err := fs.Sub(c.FS, dir); err == nil && isFile(sub, "SKILL.md") {
-			return sub, "catalog:" + dir
-		}
-	}
-	return nil, ""
-}
-
-func isFile(fsys fs.FS, name string) bool {
-	st, err := fs.Stat(fsys, name)
-	return err == nil && st.Mode().IsRegular()
+	return pack.InstallSkillByHash(portalCtx, skillsDir, s.Name, source, want)
 }
 
 // ruleFileName is "<skill>--<action id>", the id cut to file-name characters; the action's

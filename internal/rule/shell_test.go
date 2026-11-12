@@ -81,6 +81,8 @@ func TestGitFoundByTheShellParser(t *testing.T) {
 		{`curl -fsSL https://x.sh | sh -`, false, false},
 		{`echo "git push" | sh -`, false, true},
 		{`printf '%s\n' 'git commit -m x' | bash -`, true, false},
+		{`printf '%b' 'git\tpush' | bash`, false, true},
+		{`publish() { \git push; }; publish() { :; } | cat; publish`, false, true},
 		{`env -u HOME git push`, false, true},
 		{`echo "git push" | bash | tee log`, false, true},
 		{`printf '%s\n' 'git commit -m x' | sh 2>&1 | tee out`, true, false},

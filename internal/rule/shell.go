@@ -144,6 +144,15 @@ func (s *splitter) walk(node syntax.Node, depth int) {
 	syntax.Walk(node, func(n syntax.Node) bool {
 		switch n := n.(type) {
 		case *syntax.FuncDecl:
+			// `f() { ...; } | cat` parses as a function whose body is the pipe; bash runs a pipeline whose first
+			// stage defines f in a subshell. The definition stays there, and the rest of the pipe runs.
+			if b, ok := n.Body.Cmd.(*syntax.BinaryCmd); ok && (b.Op == syntax.Pipe || b.Op == syntax.PipeAll) {
+				outer := s.sc
+				s.sc = outer.child()
+				s.walk(b.Y, depth)
+				s.sc = outer
+				return false
+			}
 			s.sc.funcs[n.Name.Value] = n.Body
 			s.sc.defs++
 			return false
@@ -158,7 +167,15 @@ func (s *splitter) walk(node syntax.Node, depth int) {
 			return false
 		case *syntax.BinaryCmd:
 			if n.Op == syntax.Pipe || n.Op == syntax.PipeAll {
+				// Each stage of a pipeline runs in a subshell: functions it defines don't reach the line.
 				s.pipedScript(n, depth)
+				for _, stage := range []*syntax.Stmt{n.X, n.Y} {
+					outer := s.sc
+					s.sc = outer.child()
+					s.walk(stage, depth)
+					s.sc = outer
+				}
+				return false
 			}
 		case *syntax.Stmt:
 			s.stmt(n, depth)
@@ -324,6 +341,9 @@ func printf(format string, args []string) string {
 			used = true
 			a := args[0]
 			args = args[1:]
+			if strings.HasSuffix(v, "b") { // %b decodes its argument's escapes, as echo -e does
+				return ansiC(a)
+			}
 			return a
 		}))
 		if !used || len(args) == 0 || b.Len() > maxScriptBytes {

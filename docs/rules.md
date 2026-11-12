@@ -55,10 +55,12 @@ Per tool, `pre-tool` matches against:
 paws splits a Bash call into the commands the shell will run and tests
 `command_regex` against each one. `cd web && npm install x` is two commands,
 `npm install x` one of them. Commands inside `bash -c "..."`, `sh <<EOF`,
-`eval`, `( )`, `$( )`, `if`, loops and pipes count too. So does a command
+`cat <<EOF | bash`, `eval`, `( )`, `$( )`, `if`, loops and pipes count too, and
+so does a function's body where the line calls it (not where it only defines it). So does a command
 behind `sudo`, `env`, `xargs`, `time`, `nohup`, `command` or `exec`, which is
 tested both with and without that prefix. Quotes are removed, as the program
-sees them. A `;`, `&` or `|` inside an argument becomes a space, so
+sees them; `$VAR` and `$(...)` stay as written. Variable assignments
+(`HUSKY=0 git commit`, `export X=1`) stay visible to the regex. A `;`, `&` or `|` inside an argument becomes a space, so
 `echo "a; npm install x"` holds no `npm install` command. A call that isn't
 valid Bash is matched whole. `pre-commit` and `pre-push` find git the same way.
 

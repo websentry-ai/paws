@@ -30,6 +30,14 @@ func TestGitFoundByTheShellParser(t *testing.T) {
 		{`out=$(git commit -m x)`, true, false},
 		{"bash <<'EOF'\ngit push\nEOF", false, true},
 		{`git commit-tree HEAD^{tree} -m x`, true, false},
+		{`bash -c "git push origin $BRANCH"`, false, true},
+		{`sh -c "git commit -m \"$(date)\""`, true, false},
+		{"cat <<'EOF' | bash\ngit push\nEOF", false, true},
+		{"cat <<'EOF' | sudo sh -s\ngit commit -m x\nEOF", true, false},
+		{`echo "git push" | bash`, false, true},
+		{`publish() { git push; }; publish`, false, true},
+		{`f() { g; }; g() { git commit -m x; }; f`, true, false},
+		{`rec() { rec; }; rec`, false, false},
 		// Not a git command, though the words are there.
 		{`echo "git commit"`, false, false},
 		{`echo "a; git commit -m x"`, false, false},
@@ -38,6 +46,9 @@ func TestGitFoundByTheShellParser(t *testing.T) {
 		{"cat <<'EOF'\ngit push\nEOF", false, false},
 		{`grep -r "bash -c git push" .`, false, false},
 		{`gitk`, false, false},
+		{`publish() { git push; }; echo ready`, false, false},
+		{`echo "git push" | bash script.sh`, false, false},
+		{`echo "git push" | tee log`, false, false},
 		// Not valid Bash: the regex reads the line whole, as before.
 		{`git commit -m "unclosed`, true, false},
 	} {
@@ -68,5 +79,17 @@ func TestCommandRegexMatchesEachCommand(t *testing.T) {
 	}
 	if !sudo.Matches("Bash", `sudo npm install x`) {
 		t.Error("a rule about sudo itself still sees it")
+	}
+	for line, rx := range map[string]string{
+		`HUSKY=0 git commit -m x`:     `HUSKY=0`,
+		`export AWS_PROFILE=prod`:     `AWS_PROFILE=prod`,
+		`AWS_PROFILE=prod`:            `AWS_PROFILE=prod`,
+		`npm install "$PKG"`:          `npm install \$PKG`,
+		`terraform apply -var "a=$X"`: `terraform apply`,
+	} {
+		r := mustRule(t, "---\nname: v\nevent: pre-tool\nmatcher:\n  tool: Bash\n  command_regex: '"+rx+"'\naction:\n  type: require-skill\n  skill: s\n---\n")
+		if !r.Matches("Bash", line) {
+			t.Errorf("%q should match %s: assignments and expansions stay visible", line, rx)
+		}
 	}
 }

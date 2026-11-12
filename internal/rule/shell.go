@@ -58,17 +58,68 @@ func split(line string, out *[]command, depth int) bool {
 	if err != nil {
 		return false
 	}
+	s := splitter{out: out, funcs: map[string]*syntax.Stmt{}}
 	syntax.Walk(f, func(n syntax.Node) bool {
-		stmt, ok := n.(*syntax.Stmt)
-		if !ok {
-			return true
+		if fd, ok := n.(*syntax.FuncDecl); ok {
+			s.funcs[fd.Name.Value] = fd.Body
 		}
-		call, ok := stmt.Cmd.(*syntax.CallExpr)
-		if !ok || len(call.Args) == 0 {
-			return true
+		return true
+	})
+	s.walk(f, depth, map[string]bool{})
+	return true
+}
+
+// splitter collects the commands of one parsed line. funcs are the functions it defines: defining one runs nothing,
+// so a body counts only where the line calls it.
+type splitter struct {
+	out   *[]command
+	funcs map[string]*syntax.Stmt
+}
+
+func (s *splitter) walk(node syntax.Node, depth int, calling map[string]bool) {
+	syntax.Walk(node, func(n syntax.Node) bool {
+		switch n := n.(type) {
+		case *syntax.FuncDecl:
+			return false
+		case *syntax.BinaryCmd:
+			if n.Op == syntax.Pipe || n.Op == syntax.PipeAll {
+				s.pipedScript(n, depth)
+			}
+		case *syntax.Stmt:
+			s.stmt(n, depth, calling)
 		}
-		words := make([]string, len(call.Args))
-		for i, w := range call.Args {
+		return true
+	})
+}
+
+func (s *splitter) stmt(stmt *syntax.Stmt, depth int, calling map[string]bool) {
+	// Redirections stay on the command's text ("python - <<'PY'", "cmd >log"): some triggers name them.
+	var redirs []string
+	for _, r := range stmt.Redirs {
+		if r.Word != nil {
+			redirs = append(redirs, r.Op.String()+wordString(r.Word))
+		}
+	}
+	switch cmd := stmt.Cmd.(type) {
+	case *syntax.DeclClause: // export X=1, declare, local, readonly
+		words := []string{cmd.Variant.Value}
+		for _, a := range cmd.Args {
+			words = append(words, source(a))
+		}
+		*s.out = append(*s.out, command{words: words, texts: []string{commandText(words, redirs)}})
+	case *syntax.CallExpr:
+		var assigns []string
+		for _, a := range cmd.Assigns {
+			assigns = append(assigns, source(a))
+		}
+		if len(cmd.Args) == 0 {
+			if len(assigns) > 0 {
+				*s.out = append(*s.out, command{texts: []string{strings.Join(assigns, " ")}})
+			}
+			return
+		}
+		words := make([]string, len(cmd.Args))
+		for i, w := range cmd.Args {
 			words[i] = wordString(w)
 		}
 		bare := stripWrappers(words)
@@ -76,32 +127,77 @@ func split(line string, out *[]command, depth int) bool {
 			switch head := path.Base(bare[0]); {
 			case shells[head]: // bash -c "script", bash <<EOF script EOF
 				if script, ok := shellScript(bare[1:]); ok {
-					split(script, out, depth+1)
+					split(script, s.out, depth+1)
 				}
 				for _, r := range stmt.Redirs {
 					if (r.Op == syntax.Hdoc || r.Op == syntax.DashHdoc) && r.Hdoc != nil {
-						split(wordString(r.Hdoc), out, depth+1)
+						split(wordString(r.Hdoc), s.out, depth+1)
 					}
 				}
 			case head == "eval":
-				split(strings.Join(bare[1:], " "), out, depth+1)
+				split(strings.Join(bare[1:], " "), s.out, depth+1)
+			case s.funcs[bare[0]] != nil && !calling[bare[0]] && depth < maxNesting:
+				calling[bare[0]] = true
+				s.walk(s.funcs[bare[0]], depth+1, calling)
+				delete(calling, bare[0])
 			}
 		}
-		// Redirections stay on the command's text ("python - <<'PY'", "cmd >log"): some triggers name them.
-		var redirs []string
-		for _, r := range stmt.Redirs {
-			if r.Word != nil {
-				redirs = append(redirs, r.Op.String()+wordString(r.Word))
-			}
-		}
-		c := command{words: bare, texts: []string{commandText(words, redirs)}}
+		text := commandText(words, redirs)
+		c := command{words: bare, texts: []string{text}}
 		if len(bare) > 0 && len(bare) != len(words) {
 			c.texts = append(c.texts, commandText(bare, redirs))
 		}
-		*out = append(*out, c)
-		return true
-	})
-	return true
+		if len(assigns) > 0 { // HUSKY=0 git commit: a trigger may name the variable
+			c.texts = append(c.texts, strings.Join(assigns, " ")+" "+text)
+		}
+		*s.out = append(*s.out, c)
+	}
+}
+
+// pipedScript reads a script piped into a shell: `cat <<EOF | bash`, `echo "git push" | sh`.
+func (s *splitter) pipedScript(pipe *syntax.BinaryCmd, depth int) {
+	sh, ok := pipe.Y.Cmd.(*syntax.CallExpr)
+	if !ok || len(sh.Args) == 0 {
+		return
+	}
+	words := make([]string, len(sh.Args))
+	for i, w := range sh.Args {
+		words[i] = wordString(w)
+	}
+	bare := stripWrappers(words)
+	if len(bare) == 0 || !shells[path.Base(bare[0])] {
+		return
+	}
+	for _, a := range bare[1:] {
+		if !strings.HasPrefix(a, "-") && !strings.HasPrefix(a, "+") {
+			return // the shell runs a script file; stdin is that script's input
+		}
+	}
+	if _, ok := shellScript(bare[1:]); ok {
+		return // bash -c: the script is its argument, not stdin
+	}
+	left := pipe.X
+	for {
+		inner, ok := left.Cmd.(*syntax.BinaryCmd)
+		if !ok {
+			break
+		}
+		left = inner.Y
+	}
+	for _, r := range left.Redirs {
+		if (r.Op == syntax.Hdoc || r.Op == syntax.DashHdoc) && r.Hdoc != nil {
+			split(wordString(r.Hdoc), s.out, depth+1)
+		}
+	}
+	if call, ok := left.Cmd.(*syntax.CallExpr); ok && len(call.Args) > 1 {
+		if head := wordString(call.Args[0]); head == "echo" || head == "printf" {
+			args := make([]string, 0, len(call.Args)-1)
+			for _, w := range call.Args[1:] {
+				args = append(args, wordString(w))
+			}
+			split(strings.Join(args, " "), s.out, depth+1)
+		}
+	}
 }
 
 func commandText(words, redirs []string) string {
@@ -201,20 +297,16 @@ func gitSubcommand(words []string) string {
 	return ""
 }
 
-// wordString is a word as the command sees it when it is literal (quotes removed); otherwise its source text.
+// wordString is a word as the command sees it, quotes removed; an expansion ($VAR, $(cmd)) stays as its source text.
 func wordString(w *syntax.Word) string {
 	var b strings.Builder
 	for _, p := range w.Parts {
-		if !literalPart(&b, p) {
-			var src strings.Builder
-			syntax.NewPrinter().Print(&src, w)
-			return src.String()
-		}
+		writePart(&b, p)
 	}
 	return b.String()
 }
 
-func literalPart(b *strings.Builder, p syntax.WordPart) bool {
+func writePart(b *strings.Builder, p syntax.WordPart) {
 	switch p := p.(type) {
 	case *syntax.Lit:
 		b.WriteString(p.Value)
@@ -222,12 +314,16 @@ func literalPart(b *strings.Builder, p syntax.WordPart) bool {
 		b.WriteString(p.Value)
 	case *syntax.DblQuoted:
 		for _, q := range p.Parts {
-			if !literalPart(b, q) {
-				return false
-			}
+			writePart(b, q)
 		}
 	default:
-		return false
+		b.WriteString(source(p))
 	}
-	return true
+}
+
+// source is a node's text as written.
+func source(n syntax.Node) string {
+	var b strings.Builder
+	syntax.NewPrinter().Print(&b, n)
+	return b.String()
 }

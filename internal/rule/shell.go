@@ -9,11 +9,10 @@ import (
 	"mvdan.cc/sh/v3/syntax"
 )
 
-// A Bash command line is split into the simple commands the shell would run, and a rule's command_regex is matched
-// against each one rather than against the whole line. So `bash -c "git commit"`, `(git commit)`, `sudo env X=1 git
-// commit` and `xargs git commit` are each seen as git commit, while the same words inside an argument
-// (`echo "a; npm install x"`, a commit message) are not a command. A line that doesn't parse falls back to matching
-// the whole line, as before.
+// A Bash command line is split into the simple commands the shell would run, and a rule's command_regex is also
+// matched against each one. So `bash -c "git commit"`, `sudo -iu x git push`, `xargs git commit` and `cat <<EOF |
+// bash` are each seen as the command they run. Matching only adds: what the whole-line regexes matched before still
+// matches. A line, or a script it runs, that doesn't parse adds nothing.
 
 // command is one simple command: its words with quotes removed, as the program receives them.
 type command struct {
@@ -27,14 +26,10 @@ var shells = map[string]bool{"bash": true, "sh": true, "zsh": true, "dash": true
 
 const maxNesting = 8 // bash -c inside eval inside bash -c ...
 
-// parsedLine is a Bash line read for matching: its commands, and the line itself with every ; & | and newline that
-// sits inside quotes turned into a space (flat). A command_regex matches if it matches flat or any command: flat keeps
-// rules that span commands (`curl ... | sh`) or name a heredoc's text working as before, and the commands catch what
-// runs inside bash -c, eval, wrappers and piped scripts.
+// parsedLine is a Bash line's commands; ok is false when the line, or a script it runs, isn't valid Bash.
 type parsedLine struct {
 	cmds []command
-	flat string
-	ok   bool // false when the line, or a script it runs, isn't valid Bash
+	ok   bool
 }
 
 // splitCache holds the last line read: the gate checks every rule against the same line.
@@ -52,32 +47,8 @@ func parseLine(line string) *parsedLine {
 	}
 	p := &parsedLine{cmds: []command{}}
 	p.ok = split(line, &p.cmds, 0)
-	if p.ok {
-		p.flat = flatten(line)
-	}
 	splitCache.line, splitCache.parsed = line, p
 	return p
-}
-
-// flatten blanks the command separators inside quoted text, so `echo "a; npm install x"` holds no second command.
-func flatten(line string) string {
-	f, err := syntax.NewParser(syntax.Variant(syntax.LangBash)).Parse(strings.NewReader(line), "")
-	if err != nil {
-		return line
-	}
-	b := []byte(line)
-	syntax.Walk(f, func(n syntax.Node) bool {
-		switch n.(type) {
-		case *syntax.SglQuoted, *syntax.DblQuoted:
-			for i := n.Pos().Offset(); i < n.End().Offset() && int(i) < len(b); i++ {
-				if c := b[i]; c == ';' || c == '&' || c == '|' || c == '\n' {
-					b[i] = ' '
-				}
-			}
-		}
-		return true
-	})
-	return string(b)
 }
 
 func split(line string, out *[]command, depth int) bool {
@@ -88,28 +59,36 @@ func split(line string, out *[]command, depth int) bool {
 	if err != nil {
 		return false
 	}
-	s := splitter{out: out, funcs: map[string]*syntax.Stmt{}, walked: map[*syntax.Stmt]bool{}, ok: true}
+	s := splitter{out: out, funcs: map[string]*syntax.Stmt{}, walked: map[walkKey]bool{}, ok: true}
 	s.walk(f, depth)
 	return s.ok
 }
 
 // splitter collects the commands of one parsed line. funcs are the functions defined so far, in the order the shell
-// runs the line: defining one runs nothing, so a body counts where a call runs it, and each body is read once.
+// runs the line: defining one runs nothing, so a body counts where a call runs it. A body is read once per set of
+// definitions (defs counts them), so a later redefinition of a function it calls is read again, and a chain of calls
+// can't blow up.
 type splitter struct {
 	out    *[]command
 	funcs  map[string]*syntax.Stmt
-	walked map[*syntax.Stmt]bool
+	defs   int
+	walked map[walkKey]bool
 	ok     bool // false once a nested script didn't parse: the whole line is then read the old way
 }
 
-// nested splits a script the line runs (bash -c, a heredoc, eval, a pipe into a shell). The script whole, with
-// quoted separators blanked, is one more text: a rule spanning commands (`curl x | sh`) still sees it inside bash -c.
+type walkKey struct {
+	body *syntax.Stmt
+	defs int
+}
+
+// nested splits a script the line runs (bash -c, a heredoc, a here-string, eval, a pipe into a shell). Its whole
+// text is one more text to match, so a rule spanning commands (`curl x | sh`) sees it too.
 func (s *splitter) nested(script string, depth int) {
 	if !split(script, s.out, depth+1) {
 		s.ok = false
 		return
 	}
-	*s.out = append(*s.out, command{texts: []string{flatten(script)}})
+	*s.out = append(*s.out, command{texts: []string{script}})
 }
 
 func (s *splitter) walk(node syntax.Node, depth int) {
@@ -117,6 +96,7 @@ func (s *splitter) walk(node syntax.Node, depth int) {
 		switch n := n.(type) {
 		case *syntax.FuncDecl:
 			s.funcs[n.Name.Value] = n.Body
+			s.defs++
 			return false
 		case *syntax.BinaryCmd:
 			if n.Op == syntax.Pipe || n.Op == syntax.PipeAll {
@@ -167,16 +147,19 @@ func (s *splitter) stmt(stmt *syntax.Stmt, depth int) {
 					s.nested(script, depth)
 				} else if readsStdin(bare[1:]) {
 					for _, r := range stmt.Redirs {
-						if (r.Op == syntax.Hdoc || r.Op == syntax.DashHdoc) && r.Hdoc != nil {
+						switch {
+						case (r.Op == syntax.Hdoc || r.Op == syntax.DashHdoc) && r.Hdoc != nil:
 							s.nested(wordString(r.Hdoc), depth)
+						case r.Op == syntax.WordHdoc && r.Word != nil: // bash <<< 'git push'
+							s.nested(wordString(r.Word), depth)
 						}
 					}
 				}
 			case head == "eval":
 				s.nested(strings.Join(bare[1:], " "), depth)
-			case s.funcs[bare[0]] != nil && !s.walked[s.funcs[bare[0]]] && depth < maxNesting:
+			case s.funcs[bare[0]] != nil && !s.walked[walkKey{s.funcs[bare[0]], s.defs}] && depth < maxNesting:
 				body := s.funcs[bare[0]]
-				s.walked[body] = true
+				s.walked[walkKey{body, s.defs}] = true
 				s.walk(body, depth+1)
 			}
 		}
@@ -284,47 +267,56 @@ func commandText(words, redirs []string) string {
 	return strings.Join(append(parts, redirs...), " ")
 }
 
-// shellScript finds the script of `bash [flags] -c script`: -c may be combined (-ce, -euxc); -o takes a value.
-func shellScript(args []string) (string, bool) {
+// shellArgs reads a shell's arguments the way bash does: short flags combine (-euo pipefail -c), o and O take the
+// next word, -c runs its first operand as the script, and otherwise the first operand is a script file. stdin is
+// whether the shell runs what it reads on stdin: no -c and no script file, or -s.
+func shellArgs(args []string) (script string, isC, stdin bool) {
+	readStdin := false
 	for i := 0; i < len(args); i++ {
 		a := args[i]
 		switch {
-		case a == "-o" || a == "+o" || a == "--rcfile" || a == "--init-file":
+		case a == "--rcfile" || a == "--init-file":
 			i++
-		case strings.HasPrefix(a, "--"):
-		case strings.HasPrefix(a, "-") && strings.Contains(a, "c"):
+		case a == "--":
 			if i+1 < len(args) {
-				return args[i+1], true
+				if isC {
+					return args[i+1], true, false
+				}
+				return "", false, readStdin
 			}
-			return "", false
-		case !strings.HasPrefix(a, "-") && !strings.HasPrefix(a, "+"):
-			return "", false // a script file, not -c
-		}
-	}
-	return "", false
-}
-
-// readsStdin reports whether a shell with these arguments runs the script it reads on stdin: not with -c (the
-// script is an argument) or a script file (stdin is that script's input), unless -s says to read stdin anyway.
-func readsStdin(args []string) bool {
-	for i := 0; i < len(args); i++ {
-		a := args[i]
-		switch {
-		case a == "-o" || a == "+o" || a == "--rcfile" || a == "--init-file":
-			i++
+			return "", isC, !isC
 		case strings.HasPrefix(a, "--"):
-		case strings.HasPrefix(a, "-") || strings.HasPrefix(a, "+"):
-			if strings.Contains(a, "s") {
-				return true
-			}
-			if strings.Contains(a, "c") {
-				return false
+		case len(a) > 1 && (a[0] == '-' || a[0] == '+'):
+			for _, ch := range a[1:] {
+				switch ch {
+				case 'c':
+					isC = true
+				case 's':
+					readStdin = true
+				case 'o', 'O':
+					i++ // -o pipefail, -euo pipefail
+				}
 			}
 		default:
-			return false
+			if isC {
+				return a, true, false
+			}
+			return "", false, readStdin // a script file; stdin is its input unless -s
 		}
 	}
-	return true
+	return "", isC, !isC
+}
+
+// shellScript is the script of `bash [flags] -c script`.
+func shellScript(args []string) (string, bool) {
+	script, isC, _ := shellArgs(args)
+	return script, isC && script != ""
+}
+
+// readsStdin reports whether a shell with these arguments runs the script it reads on stdin.
+func readsStdin(args []string) bool {
+	_, _, stdin := shellArgs(args)
+	return stdin
 }
 
 // stripWrappers drops the commands that run the rest of their words as a command: sudo, env, command, exec, nohup,
@@ -358,12 +350,19 @@ func stripWrappers(w []string) []string {
 	return w
 }
 
-// skipFlags drops leading flags; a flag in withValue also drops the word after it.
+// skipFlags drops leading flags. A flag in withValue also drops the word after it, and so does a cluster of short
+// flags that ends in a letter that takes a value (sudo -iu deploy).
 func skipFlags(w []string, withValue ...string) []string {
-	for len(w) > 0 && strings.HasPrefix(w[0], "-") {
+	for len(w) > 0 && strings.HasPrefix(w[0], "-") && w[0] != "-" {
+		if w[0] == "--" {
+			return w[1:]
+		}
 		takes := false
 		for _, f := range withValue {
 			takes = takes || w[0] == f
+			if len(f) == 2 && !strings.HasPrefix(w[0], "--") && len(w[0]) > 2 && strings.HasSuffix(w[0], f[1:]) {
+				takes = true
+			}
 		}
 		w = w[1:]
 		if takes && len(w) > 0 {
@@ -400,19 +399,37 @@ func wordString(w *syntax.Word) string {
 	return b.String()
 }
 
-func writePart(b *strings.Builder, p syntax.WordPart) {
+func writePart(b *strings.Builder, p syntax.WordPart) { writePartIn(b, p, false) }
+
+// writePartIn writes one part; inDouble is whether it sits inside double quotes, where a backslash escapes only
+// $ ` " \ and a newline. Outside quotes a backslash escapes any character (\git is git).
+func writePartIn(b *strings.Builder, p syntax.WordPart, inDouble bool) {
 	switch p := p.(type) {
 	case *syntax.Lit:
-		b.WriteString(p.Value)
+		b.WriteString(unbackslash(p.Value, inDouble))
 	case *syntax.SglQuoted:
 		b.WriteString(p.Value)
 	case *syntax.DblQuoted:
 		for _, q := range p.Parts {
-			writePart(b, q)
+			writePartIn(b, q, true)
 		}
 	default:
 		b.WriteString(source(p))
 	}
+}
+
+func unbackslash(s string, inDouble bool) string {
+	if !strings.Contains(s, `\`) {
+		return s
+	}
+	var b strings.Builder
+	for i := 0; i < len(s); i++ {
+		if s[i] == '\\' && i+1 < len(s) && (!inDouble || strings.IndexByte("$`\"\\\n", s[i+1]) >= 0) {
+			i++
+		}
+		b.WriteByte(s[i])
+	}
+	return b.String()
 }
 
 // source is a node's text as written.

@@ -5,8 +5,7 @@ import (
 	"strings"
 )
 
-// The regexes below read a Bash line whole. They decide only when a line isn't valid Bash; otherwise the line is
-// split into its commands (shell.go) and git is found by its words.
+// The regexes below read a Bash line whole. The shell parser (shell.go) adds the git it finds by its words.
 //
 // gitAnchor requires git to start a command: at the start, after ;/&/|/newline, or inside $( ) (which runs even
 // within double quotes), then through any mix of ( subshells and shells that run a script (bash -c "...",
@@ -41,21 +40,10 @@ func (r *Rule) Matches(tool, target string) bool {
 	if tool != "Bash" {
 		return (r.re == nil || r.re.MatchString(target)) && r.Event != "pre-commit" && r.Event != "pre-push"
 	}
+	// The shell parser only adds matches: a call matches whenever the whole-line regexes match, as before, and also
+	// when one of the commands the parser finds (inside bash -c, behind sudo, ...) matches.
 	line := parseLine(target)
-	if !line.ok { // not valid Bash: read the line whole
-		if r.re != nil && !r.re.MatchString(target) {
-			return false
-		}
-		switch r.Event {
-		case "pre-commit":
-			return gitCommitRe.MatchString(target)
-		case "pre-push":
-			return gitPushRe.MatchString(target)
-		}
-		return true
-	}
-	cmds := line.cmds
-	if r.re != nil && !r.re.MatchString(line.flat) && !anyCommand(cmds, func(c command) bool {
+	if r.re != nil && !r.re.MatchString(target) && !anyCommand(line.cmds, func(c command) bool {
 		for _, t := range c.texts {
 			if r.re.MatchString(t) {
 				return true
@@ -67,9 +55,12 @@ func (r *Rule) Matches(tool, target string) bool {
 	}
 	switch r.Event {
 	case "pre-commit":
-		return anyCommand(cmds, func(c command) bool { sub := gitSubcommand(c.words); return sub == "commit" || sub == "commit-tree" })
+		return gitCommitRe.MatchString(target) || anyCommand(line.cmds, func(c command) bool {
+			sub := gitSubcommand(c.words)
+			return sub == "commit" || sub == "commit-tree"
+		})
 	case "pre-push":
-		return anyCommand(cmds, func(c command) bool { return gitSubcommand(c.words) == "push" })
+		return gitPushRe.MatchString(target) || anyCommand(line.cmds, func(c command) bool { return gitSubcommand(c.words) == "push" })
 	}
 	return true
 }

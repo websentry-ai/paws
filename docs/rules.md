@@ -52,22 +52,21 @@ Per tool, `pre-tool` matches against:
 
 ### Bash: one command at a time
 
-paws splits a Bash call into the commands the shell will run. A
-`command_regex` matches when it matches one of those commands, or the whole
-call with every `;`, `&`, `|` and newline inside quotes turned into a space.
+A `command_regex` is matched against the whole Bash call, and also against
+each command the shell will run, which paws finds with a shell parser. A rule
+fires if either matches, so the parser only adds matches:
 
 - `cd web && npm install x` holds the command `npm install x`.
-- Commands run by `bash -c "..."`, `sh <<EOF`, `cat <<EOF | bash`, `eval`,
+- Commands run by `bash -c "..."` (any flags, as in `bash -euo pipefail -c`),
+  `sh <<EOF`, `bash <<< '...'`, `cat <<EOF | bash`, `printf ... | sh`, `eval`,
   `( )`, `$( )`, `if` and loops count. So does a function's body where the
-  call runs the function, but not where it only defines it.
+  line calls the function, but not where it only defines it.
 - A command behind `sudo`, `env`, `xargs`, `time`, `nohup`, `command` or
   `exec` is tested with and without that prefix.
-- A command's quotes are removed, as the program sees them. `$VAR`, `$(...)`
-  and assignments (`HUSKY=0 git commit`, `export X=1`) stay as written.
-- `echo "a; npm install x"` holds no `npm install` command.
-- A rule that spans commands (`curl ... | sh`) or names a heredoc's text
-  matches the whole call, as before.
-- A call that isn't valid Bash is matched whole.
+- A command's quotes and backslashes are removed, as the program sees them
+  (`\git push` is `git push`). `$VAR`, `$(...)` and assignments
+  (`HUSKY=0 git commit`, `export X=1`) stay as written.
+- A call that isn't valid Bash is matched whole only.
 
 `pre-commit` and `pre-push` find git the same way.
 

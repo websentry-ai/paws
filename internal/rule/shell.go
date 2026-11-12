@@ -75,7 +75,8 @@ func split(line string, out *[]command, depth int, lim *limits, sc *scope) bool 
 	if sc == nil {
 		sc = &scope{funcs: map[string]*syntax.Stmt{}}
 	}
-	s := splitter{out: out, sc: sc, walked: map[walkKey]bool{}, lim: lim, piped: map[*syntax.BinaryCmd]bool{}}
+	s := splitter{out: out, sc: sc, walked: map[walkKey]bool{}, lim: lim, piped: map[*syntax.BinaryCmd]bool{},
+		bg: map[*syntax.Stmt]bool{}}
 	s.walk(f, depth)
 	return true
 }
@@ -90,6 +91,7 @@ type splitter struct {
 	walked map[walkKey]bool
 	lim    *limits                    // what the whole line may still cost
 	piped  map[*syntax.BinaryCmd]bool // pipes already read as one pipeline
+	bg     map[*syntax.Stmt]bool      // background statements already entered
 }
 
 // scope is one shell's functions, and how many definitions it has seen (a walked body is keyed on it).
@@ -142,6 +144,15 @@ func subshellStmts(n syntax.Node) []*syntax.Stmt {
 
 func (s *splitter) walk(node syntax.Node, depth int) {
 	syntax.Walk(node, func(n syntax.Node) bool {
+		if st, ok := n.(*syntax.Stmt); ok && st.Background && !s.bg[st] {
+			// cmd & runs in a subshell: functions it defines don't reach the line.
+			s.bg[st] = true
+			outer := s.sc
+			s.sc = outer.child()
+			s.walk(st, depth)
+			s.sc = outer
+			return false
+		}
 		switch n := n.(type) {
 		case *syntax.FuncDecl:
 			// `f() { ...; } | cat` parses as a function whose body is the pipe; bash runs a pipeline whose first
@@ -316,7 +327,7 @@ func (s *splitter) printed(st *syntax.Stmt, depth int) {
 		for len(args) > 0 && (args[0] == "-e" || args[0] == "-n" || args[0] == "-E" || args[0] == "-en" || args[0] == "-ne") {
 			args = args[1:]
 		}
-		s.nested(unescape(strings.Join(args, " ")), depth)
+		s.nested(echoEscapes(strings.Join(args, " ")), depth)
 	case "printf": // printf '%s %s\n' git push: what it prints
 		s.nested(printf(args[0], args[1:]), depth)
 	}
@@ -327,7 +338,7 @@ var printfVerb = regexp.MustCompile(`%[-+ #0-9.]*[a-zA-Z%]`)
 // printf is what `printf format args...` prints: each verb takes the next argument, %% is a %, and the format repeats
 // while arguments are left, as in the shell.
 func printf(format string, args []string) string {
-	format = unescape(format)
+	format = ansiC(format) // printf's format takes the same escapes as $'...'.
 	var b strings.Builder
 	for {
 		used := false
@@ -342,7 +353,7 @@ func printf(format string, args []string) string {
 			a := args[0]
 			args = args[1:]
 			if strings.HasSuffix(v, "b") { // %b decodes its argument's escapes, as echo -e does
-				return ansiC(a)
+				return echoEscapes(a)
 			}
 			return a
 		}))
@@ -350,11 +361,6 @@ func printf(format string, args []string) string {
 			return b.String()
 		}
 	}
-}
-
-// unescape turns the \n and \t that echo -e and printf print into the characters.
-func unescape(s string) string {
-	return strings.NewReplacer(`\n`, "\n", `\t`, "\t").Replace(s)
 }
 
 func commandText(words, redirs []string) string {
@@ -604,9 +610,16 @@ func writePartIn(b *strings.Builder, p syntax.WordPart, inDouble bool) {
 	}
 }
 
-// ansiC decodes the escapes of a $'...' string that can change what a command reads: \n \t \\ \' \" \e and
-// \xHH / octal bytes.
-func ansiC(s string) string {
+// echoEscapes decodes the escapes echo -e and printf %b print: as in $'...', except octal is \0 and up to three
+// digits, and \c ends the output.
+func echoEscapes(s string) string { return decodeEscapes(s, true) }
+
+// ansiC decodes the escapes of a $'...' string (and of a printf format) that can change what a command reads:
+// \n \t \r \e, \\ \' \", \xHH and octal \NNN.
+func ansiC(s string) string { return decodeEscapes(s, false) }
+
+// decodeEscapes decodes backslash escapes; echo picks echo -e's octal form and its \c.
+func decodeEscapes(s string, echo bool) string {
 	var b strings.Builder
 	for i := 0; i < len(s); i++ {
 		if s[i] != '\\' || i+1 == len(s) {
@@ -634,9 +647,23 @@ func ansiC(s string) string {
 			}
 			b.WriteByte(byte(n))
 			i = j - 1
+		case 'c':
+			if echo {
+				return b.String()
+			}
+			b.WriteByte(c)
 		case '0', '1', '2', '3', '4', '5', '6', '7':
-			n, j := 0, i
-			for ; j < len(s) && j < i+3 && s[j] >= '0' && s[j] <= '7'; j++ {
+			if echo && c != '0' {
+				b.WriteByte('\\')
+				b.WriteByte(c)
+				continue
+			}
+			start := i
+			if echo {
+				start = i + 1 // \0 then up to three digits
+			}
+			n, j := 0, start
+			for ; j < len(s) && j < start+3 && s[j] >= '0' && s[j] <= '7'; j++ {
 				n = n*8 + int(s[j]-'0')
 			}
 			b.WriteByte(byte(n))

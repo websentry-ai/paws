@@ -137,10 +137,11 @@ func (s *splitter) stmt(stmt *syntax.Stmt, depth int, calling map[string]bool) {
 			case shells[head]: // bash -c "script", bash <<EOF script EOF
 				if script, ok := shellScript(bare[1:]); ok {
 					s.nested(script, depth)
-				}
-				for _, r := range stmt.Redirs {
-					if (r.Op == syntax.Hdoc || r.Op == syntax.DashHdoc) && r.Hdoc != nil {
-						s.nested(wordString(r.Hdoc), depth)
+				} else if readsStdin(bare[1:]) {
+					for _, r := range stmt.Redirs {
+						if (r.Op == syntax.Hdoc || r.Op == syntax.DashHdoc) && r.Hdoc != nil {
+							s.nested(wordString(r.Hdoc), depth)
+						}
 					}
 				}
 			case head == "eval":
@@ -174,16 +175,8 @@ func (s *splitter) pipedScript(pipe *syntax.BinaryCmd, depth int) {
 		words[i] = wordString(w)
 	}
 	bare := stripWrappers(words)
-	if len(bare) == 0 || !shells[path.Base(bare[0])] {
+	if len(bare) == 0 || !shells[path.Base(bare[0])] || !readsStdin(bare[1:]) {
 		return
-	}
-	for _, a := range bare[1:] {
-		if !strings.HasPrefix(a, "-") && !strings.HasPrefix(a, "+") {
-			return // the shell runs a script file; stdin is that script's input
-		}
-	}
-	if _, ok := shellScript(bare[1:]); ok {
-		return // bash -c: the script is its argument, not stdin
 	}
 	left := pipe.X
 	for {
@@ -257,6 +250,29 @@ func shellScript(args []string) (string, bool) {
 		}
 	}
 	return "", false
+}
+
+// readsStdin reports whether a shell with these arguments runs the script it reads on stdin: not with -c (the
+// script is an argument) or a script file (stdin is that script's input), unless -s says to read stdin anyway.
+func readsStdin(args []string) bool {
+	for i := 0; i < len(args); i++ {
+		a := args[i]
+		switch {
+		case a == "-o" || a == "+o" || a == "--rcfile" || a == "--init-file":
+			i++
+		case strings.HasPrefix(a, "--"):
+		case strings.HasPrefix(a, "-") || strings.HasPrefix(a, "+"):
+			if strings.Contains(a, "s") {
+				return true
+			}
+			if strings.Contains(a, "c") {
+				return false
+			}
+		default:
+			return false
+		}
+	}
+	return true
 }
 
 // stripWrappers drops the commands that run the rest of their words as a command: sudo, env, command, exec, nohup,

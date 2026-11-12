@@ -34,6 +34,7 @@ func TestGitFoundByTheShellParser(t *testing.T) {
 		{`sh -c "git commit -m \"$(date)\""`, true, false},
 		{"cat <<'EOF' | bash\ngit push\nEOF", false, true},
 		{"cat <<'EOF' | sudo sh -s\ngit commit -m x\nEOF", true, false},
+		{"bash -s -- arg <<'EOF'\ngit push\nEOF", false, true},
 		{`echo "git push" | bash`, false, true},
 		{`echo -e "cd app\ngit push" | bash`, false, true},
 		{`printf '%s\n' 'git push' | bash`, false, true},
@@ -52,6 +53,9 @@ func TestGitFoundByTheShellParser(t *testing.T) {
 		{`grep -r "bash -c git push" .`, false, false},
 		{`gitk`, false, false},
 		{`publish() { git push; }; echo ready`, false, false},
+		{"bash -c 'cat' <<'EOF'\ngit push\nEOF", false, false},
+		{"bash deploy.sh <<'EOF'\ngit push\nEOF", false, false},
+		{"cat <<'EOF' | bash -c 'wc -l'\ngit push\nEOF", false, false},
 		{`echo "git push" | bash script.sh`, false, false},
 		{`echo "git push" | tee log`, false, false},
 		// Not valid Bash: the regex reads the line whole, as before.

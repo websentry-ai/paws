@@ -120,6 +120,9 @@ func TestGitFoundByTheShellParser(t *testing.T) {
 		{`printf '%b' 'git\tpush' | bash`, false, true},
 		{`printf '%b' 'git\0040push' | bash`, false, true},
 		{`echo -e 'git\0040push\c ignored' | bash`, false, true},
+		{`echo 'echo \c;\git push' | bash`, false, true},    // bash's echo keeps \c: the script runs git push
+		{`echo 'git\tpush' | sh`, false, true},              // sh's echo decodes \t
+		{`echo -E 'echo \c;\git push' | bash`, false, true}, // -E: never decoded
 		{`publish() { \git push; }; publish() { :; } & publish`, false, true},
 		{`publish() { \git push; }; publish() { :; } | cat; publish`, false, true},
 		{`env -u HOME git push`, false, true},

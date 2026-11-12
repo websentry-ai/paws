@@ -417,9 +417,22 @@ func readsShellStdin(st *syntax.Stmt) bool {
 
 // printed splits what st prints, when that can be read off the line.
 func (s *splitter) printed(st *syntax.Stmt, depth int) {
-	if out, ok := printedBy(st); ok {
+	for _, out := range echoModes(func(decode bool) (string, bool) { return printedBy(st, decode) }) {
 		s.nested(out, depth)
 	}
+}
+
+// echoModes is what printed returns with echo decoding escapes by default (zsh, sh) and without (bash): the shell
+// that runs echo isn't known, so both are read when they differ.
+func echoModes(printed func(decode bool) (string, bool)) []string {
+	decoded, ok := printed(true)
+	if !ok {
+		return nil
+	}
+	if literal, _ := printed(false); literal != decoded {
+		return []string{decoded, literal}
+	}
+	return []string{decoded}
 }
 
 // printedAll splits what a process substitution prints, when that can be read off the line.
@@ -430,7 +443,7 @@ func (s *splitter) printedAllIn(ps *syntax.ProcSubst, depth int, sc *scope) {
 	if ps == nil {
 		return
 	}
-	if out, ok := printedByAll(ps.Stmts); ok {
+	for _, out := range echoModes(func(decode bool) (string, bool) { return printedByAll(ps.Stmts, decode) }) {
 		s.nestedIn(out, depth, sc)
 	}
 }
@@ -459,18 +472,19 @@ func readsShellStdinAll(ps *syntax.ProcSubst) bool {
 
 // printedBy is what st prints, when the line shows it: echo or printf (behind any wrapper), a heredoc or here-string
 // it reads (cat <<EOF), or the output of the commands in a { } or ( ) group.
-func printedBy(st *syntax.Stmt) (string, bool) {
+// echoDecodes is whether a bare echo (no -e or -E) decodes escapes.
+func printedBy(st *syntax.Stmt, echoDecodes bool) (string, bool) {
 	switch cmd := st.Cmd.(type) {
 	case *syntax.CallExpr:
-		if out, ok := echoed(cmd); ok {
+		if out, ok := echoed(cmd, echoDecodes); ok {
 			return out, true
 		}
 	case *syntax.Block:
-		if out, ok := printedByAll(cmd.Stmts); ok {
+		if out, ok := printedByAll(cmd.Stmts, echoDecodes); ok {
 			return out, true
 		}
 	case *syntax.Subshell:
-		if out, ok := printedByAll(cmd.Stmts); ok {
+		if out, ok := printedByAll(cmd.Stmts, echoDecodes); ok {
 			return out, true
 		}
 	}
@@ -490,11 +504,11 @@ func printedBy(st *syntax.Stmt) (string, bool) {
 }
 
 // printedByAll is what a list of commands prints, joined, when the line shows what at least one of them prints.
-func printedByAll(stmts []*syntax.Stmt) (string, bool) {
+func printedByAll(stmts []*syntax.Stmt, echoDecodes bool) (string, bool) {
 	var b strings.Builder
 	ok := false
 	for _, st := range stmts {
-		if out, k := printedBy(st); k {
+		if out, k := printedBy(st, echoDecodes); k {
 			b.WriteString(out)
 			ok = true
 		}
@@ -508,7 +522,7 @@ func printedByAll(stmts []*syntax.Stmt) (string, bool) {
 var echoFlags = regexp.MustCompile(`^-[neE]+$`)
 
 // echoed is what an echo or printf command prints.
-func echoed(call *syntax.CallExpr) (string, bool) {
+func echoed(call *syntax.CallExpr, echoDecodes bool) (string, bool) {
 	words := make([]string, len(call.Args))
 	for i, w := range call.Args {
 		words[i] = wordString(w)
@@ -520,9 +534,9 @@ func echoed(call *syntax.CallExpr) (string, bool) {
 	args := bare[1:]
 	switch path.Base(bare[0]) {
 	case "echo":
-		// bash's echo decodes escapes with -e, zsh's and sh's by default; reading them errs on the safe side. The
-		// last of -e and -E wins.
-		decode, newline := true, true
+		// bash's echo decodes escapes only with -e, zsh's and sh's by default (echoDecodes). The last of -e and -E
+		// wins.
+		decode, newline := echoDecodes, true
 		for len(args) > 0 && echoFlags.MatchString(args[0]) {
 			if i := strings.LastIndexAny(args[0], "eE"); i >= 0 {
 				decode = args[0][i] == 'e'

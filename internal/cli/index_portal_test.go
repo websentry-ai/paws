@@ -95,7 +95,7 @@ func TestIndexPortalMatchesCatalogContract(t *testing.T) {
 	if g["upstream"] != nil || g["content_hash"] != want || g["license"] != "Apache-2.0" {
 		t.Errorf("git entry: upstream %v hash %v (want %s)", g["upstream"], g["content_hash"], want)
 	}
-	if g["source_url"] != "https://github.com/websentry-ai/paws/tree/main/catalog/source-control/skills/git" {
+	if g["source_url"] != "" { // the folder isn't in this repo; push sets a link with --bundled-source
 		t.Errorf("git source_url %v", g["source_url"])
 	}
 }

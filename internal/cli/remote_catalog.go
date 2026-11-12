@@ -118,8 +118,9 @@ type catalogSlice struct {
 	Bindings []catalogText `json:"bindings"`
 	Digests  []catalogText `json:"digests"`
 	Bundled  []struct {
-		Dir   string       `json:"dir"`
-		Files []remoteFile `json:"files"`
+		Dir         string       `json:"dir"`
+		ContentHash string       `json:"content_hash"`
+		Files       []remoteFile `json:"files"`
 	} `json:"bundled"`
 }
 
@@ -147,6 +148,14 @@ func remoteCatalog(api string, names []string) (*catalog.Catalog, error) {
 		for _, b := range s.Bundled {
 			if dir := path.Clean(b.Dir); dir != b.Dir || path.IsAbs(dir) || strings.HasPrefix(dir, "..") || dir == "." {
 				return nil, fmt.Errorf("the paws catalog sent a bad skill directory %q", printable(b.Dir))
+			}
+			// A skill Unbound wrote installs from these files: they must hash to its pin, like any other skill.
+			files := fstest.MapFS{}
+			if err := addFiles(files, ".", b.Files); err != nil {
+				return nil, err
+			}
+			if got, err := pack.HashSkill(files); err != nil || got != b.ContentHash {
+				return nil, fmt.Errorf("the files of %s don't hash to the catalog's %q; refusing to install", printable(b.Dir), printable(b.ContentHash))
 			}
 			if err := addFiles(m, path.Join("catalog", b.Dir), b.Files); err != nil {
 				return nil, err

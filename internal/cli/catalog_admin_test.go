@@ -138,7 +138,7 @@ func (b *fakeCatalogBackend) source(name string) map[string]any {
 	var outBundled []any
 	for _, bu := range bundled {
 		if skills[bu.Skill] {
-			outBundled = append(outBundled, map[string]any{"dir": bu.Dir, "files": b.files[bu.ContentHash]})
+			outBundled = append(outBundled, map[string]any{"dir": bu.Dir, "content_hash": bu.ContentHash, "files": b.files[bu.ContentHash]})
 		}
 	}
 	out["bindings"], out["digests"], out["bundled"] = outB, outD, outBundled
@@ -331,6 +331,25 @@ func TestAddInstallsFromTheBackend(t *testing.T) {
 	}
 	if code, _ := capture(t, &os.Stderr, func() int { return Add([]string{"nope"}) }); code != 1 {
 		t.Errorf("add of an unknown name exit %d", code)
+	}
+}
+
+// Files for a skill Unbound wrote are checked against its pin too: the backend can't hand out other files.
+func TestAddRefusesBundledFilesThatDontMatchTheirHash(t *testing.T) {
+	b, _ := catalogEnv(t)
+	captureStdout(t, func() int { return CatalogAdmin([]string{"push", writeTestCatalog(t)}) })
+	var bundled []pushBundled
+	json.Unmarshal(b.catalog["bundled"], &bundled)
+	b.files[bundled[0].ContentHash] = []pushFile{{Path: "SKILL.md", Data: "ZXZpbAo="}} // "evil"
+	code, errOut := capture(t, &os.Stderr, func() int {
+		c, _ := captureStdout(t, func() int { return Add([]string{"source-control/git"}) })
+		return c
+	})
+	if code != 1 || !strings.Contains(errOut, "refusing to install") {
+		t.Errorf("exit %d, stderr %q", code, errOut)
+	}
+	if _, err := os.Stat(filepath.Join(os.Getenv("HOME"), ".claude", "skills", "git")); !os.IsNotExist(err) {
+		t.Error("nothing may be installed from files that fail their hash")
 	}
 }
 

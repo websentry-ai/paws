@@ -53,7 +53,6 @@ jobs:
           go-version-file: go.mod
       - run: go vet ./...
       - run: go test ./...
-      - run: go run ./cmd/paws validate .
       - uses: goreleaser/goreleaser-action@v6
         with:
           distribution: goreleaser

@@ -1,6 +1,10 @@
 package rule
 
-import "testing"
+import (
+	"strings"
+	"testing"
+	"time"
+)
 
 func gitRule(t *testing.T, event string) *Rule {
 	t.Helper()
@@ -64,6 +68,8 @@ func TestGitFoundByTheShellParser(t *testing.T) {
 		{`bash -c $'git push\x20origin'`, false, true},
 		{`publish() { \git push; }; (publish() { :; }); publish`, false, true},
 		{`(publish() { \git push; }); publish`, false, false},
+		{`publish() { \git push; }; eval publish`, false, true},
+		{`eval 'publish() { \git push; }'; publish`, false, true},
 		{`sudo -u root -- git push`, false, true},
 		{`env -S 'git push'`, false, true},
 		{`env -iS'git commit -m x'`, true, false},
@@ -168,5 +174,22 @@ func TestFunctionsThatDefineFunctionsStayBounded(t *testing.T) {
 	line += "f8() { git status; }; f0"
 	if p := parseLine(line); len(p.cmds) > 2000 {
 		t.Fatalf("%d commands: function expansion must stay bounded", len(p.cmds))
+	}
+}
+
+// printf output fed back into a shell can't grow the work without end.
+func TestNestedScriptsStayBounded(t *testing.T) {
+	line := "git status"
+	for i := 0; i < 6; i++ {
+		args := ""
+		for j := 0; j < 40; j++ {
+			args += " a"
+		}
+		line = "printf '%s " + strings.ReplaceAll(line, "'", `'\''`) + "\\n'" + args + " | bash"
+	}
+	start := time.Now()
+	parseLine(line)
+	if d := time.Since(start); d > 2*time.Second {
+		t.Fatalf("took %v", d)
 	}
 }

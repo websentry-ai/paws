@@ -26,9 +26,16 @@ var shells = map[string]bool{"bash": true, "sh": true, "zsh": true, "dash": true
 
 const maxNesting = 8 // bash -c inside eval inside bash -c ...
 
-// maxFuncWalks caps how many function bodies one line may expand, however its functions define and call each other,
-// so no line can make the hook slow.
-const maxFuncWalks = 64
+// limits bound the work one line can cause, however it nests, so no line can make the hook slow: how many function
+// bodies it may expand, and how many bytes of nested script (bash -c, heredocs, what printf prints...) it may parse.
+type limits struct {
+	funcWalks, scriptBytes int
+}
+
+const (
+	maxFuncWalks   = 64
+	maxScriptBytes = 256 << 10
+)
 
 // parsedLine is a Bash line's commands; ok is false when the line, or a script it runs, isn't valid Bash.
 type parsedLine struct {
@@ -50,13 +57,14 @@ func parseLine(line string) *parsedLine {
 		return splitCache.parsed
 	}
 	p := &parsedLine{cmds: []command{}}
-	budget := maxFuncWalks
-	p.ok = split(line, &p.cmds, 0, &budget)
+	p.ok = split(line, &p.cmds, 0, &limits{funcWalks: maxFuncWalks, scriptBytes: maxScriptBytes}, nil)
 	splitCache.line, splitCache.parsed = line, p
 	return p
 }
 
-func split(line string, out *[]command, depth int, budget *int) bool {
+// split adds line's commands to out. funcs are the functions already defined in the shell that runs it: eval runs
+// in the same shell and shares them; a new shell (bash -c) starts with none (nil).
+func split(line string, out *[]command, depth int, lim *limits, funcs map[string]*syntax.Stmt) bool {
 	if depth > maxNesting {
 		return true
 	}
@@ -64,8 +72,11 @@ func split(line string, out *[]command, depth int, budget *int) bool {
 	if err != nil {
 		return false
 	}
-	s := splitter{out: out, funcs: map[string]*syntax.Stmt{}, walked: map[walkKey]bool{}, budget: budget,
-		piped: map[*syntax.BinaryCmd]bool{}, ok: true}
+	if funcs == nil {
+		funcs = map[string]*syntax.Stmt{}
+	}
+	s := splitter{out: out, funcs: funcs, walked: map[walkKey]bool{}, lim: lim, piped: map[*syntax.BinaryCmd]bool{},
+		ok: true}
 	s.walk(f, depth)
 	return s.ok
 }
@@ -79,7 +90,7 @@ type splitter struct {
 	funcs  map[string]*syntax.Stmt
 	defs   int
 	walked map[walkKey]bool
-	budget *int                       // function-body walks left for the whole line
+	lim    *limits                    // what the whole line may still cost
 	piped  map[*syntax.BinaryCmd]bool // pipes already read as one pipeline
 	ok     bool                       // false once a nested script didn't parse: the whole line is then read the old way
 }
@@ -89,10 +100,17 @@ type walkKey struct {
 	defs int
 }
 
-// nested splits a script the line runs (bash -c, a heredoc, a here-string, eval, a pipe into a shell). Its whole
-// text is one more text to match, so a rule spanning commands (`curl x | sh`) sees it too.
-func (s *splitter) nested(script string, depth int) {
-	if !split(script, s.out, depth+1, s.budget) {
+// nested splits a script a new shell runs (bash -c, a heredoc, a here-string, a pipe into a shell). Its whole text
+// is one more text to match, so a rule spanning commands (`curl x | sh`) sees it too.
+func (s *splitter) nested(script string, depth int) { s.nestedIn(script, depth, nil) }
+
+// nestedIn splits a script run with these functions defined; eval passes its own shell's.
+func (s *splitter) nestedIn(script string, depth int, funcs map[string]*syntax.Stmt) {
+	if len(script) > s.lim.scriptBytes {
+		return // past the line's budget: the whole-line regexes still apply
+	}
+	s.lim.scriptBytes -= len(script)
+	if !split(script, s.out, depth+1, s.lim, funcs) {
 		s.ok = false
 		return
 	}
@@ -175,12 +193,12 @@ func (s *splitter) stmt(stmt *syntax.Stmt, depth int) {
 					}
 				}
 			case head == "eval":
-				s.nested(strings.Join(bare[1:], " "), depth)
+				s.nestedIn(strings.Join(bare[1:], " "), depth, s.funcs) // eval runs in this shell
 			case s.funcs[bare[0]] != nil && !s.walked[walkKey{s.funcs[bare[0]], s.defs}] && depth < maxNesting &&
-				*s.budget > 0:
+				s.lim.funcWalks > 0:
 				body := s.funcs[bare[0]]
 				s.walked[walkKey{body, s.defs}] = true
-				*s.budget--
+				s.lim.funcWalks--
 				s.walk(body, depth+1)
 			}
 		}
@@ -287,7 +305,7 @@ func printf(format string, args []string) string {
 			args = args[1:]
 			return a
 		}))
-		if !used || len(args) == 0 {
+		if !used || len(args) == 0 || b.Len() > maxScriptBytes {
 			return b.String()
 		}
 	}

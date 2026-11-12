@@ -37,10 +37,10 @@ const (
 	maxScriptBytes = 256 << 10
 )
 
-// parsedLine is a Bash line's commands; ok is false when the line, or a script it runs, isn't valid Bash.
+// parsedLine is the commands the parser found in a Bash line. A line, or a script it runs, that isn't valid Bash
+// adds none: the whole-line regexes still decide it.
 type parsedLine struct {
 	cmds []command
-	ok   bool
 }
 
 // splitCache holds the last line read: the gate checks every rule against the same line.
@@ -57,7 +57,7 @@ func parseLine(line string) *parsedLine {
 		return splitCache.parsed
 	}
 	p := &parsedLine{cmds: []command{}}
-	p.ok = split(line, &p.cmds, 0, &limits{funcWalks: maxFuncWalks, scriptBytes: maxScriptBytes}, nil)
+	split(line, &p.cmds, 0, &limits{funcWalks: maxFuncWalks, scriptBytes: maxScriptBytes}, nil)
 	splitCache.line, splitCache.parsed = line, p
 	return p
 }
@@ -75,10 +75,9 @@ func split(line string, out *[]command, depth int, lim *limits, sc *scope) bool 
 	if sc == nil {
 		sc = &scope{funcs: map[string]*syntax.Stmt{}}
 	}
-	s := splitter{out: out, sc: sc, walked: map[walkKey]bool{}, lim: lim, piped: map[*syntax.BinaryCmd]bool{},
-		ok: true}
+	s := splitter{out: out, sc: sc, walked: map[walkKey]bool{}, lim: lim, piped: map[*syntax.BinaryCmd]bool{}}
 	s.walk(f, depth)
-	return s.ok
+	return true
 }
 
 // splitter collects the commands of one parsed line. sc holds the functions defined so far, in the order the shell
@@ -91,7 +90,6 @@ type splitter struct {
 	walked map[walkKey]bool
 	lim    *limits                    // what the whole line may still cost
 	piped  map[*syntax.BinaryCmd]bool // pipes already read as one pipeline
-	ok     bool                       // false once a nested script didn't parse: the whole line is then read the old way
 }
 
 // scope is one shell's functions, and how many definitions it has seen (a walked body is keyed on it).
@@ -125,11 +123,9 @@ func (s *splitter) nestedIn(script string, depth int, sc *scope) {
 		return // past the line's budget: the whole-line regexes still apply
 	}
 	s.lim.scriptBytes -= len(script)
-	if !split(script, s.out, depth+1, s.lim, sc) {
-		s.ok = false
-		return
+	if split(script, s.out, depth+1, s.lim, sc) {
+		*s.out = append(*s.out, command{texts: []string{script}})
 	}
-	*s.out = append(*s.out, command{texts: []string{script}})
 }
 
 func subshellStmts(n syntax.Node) []*syntax.Stmt {
@@ -367,7 +363,7 @@ func shellArgs(args []string) (script string, isC, stdin bool) {
 		switch {
 		case a == "--rcfile" || a == "--init-file":
 			i++
-		case a == "--":
+		case a == "--" || a == "-": // bash - and sh -: the options end and the script comes on stdin
 			if i+1 < len(args) {
 				if isC {
 					return args[i+1], true, false
@@ -443,9 +439,9 @@ func envCommand(w []string) []string {
 			if len(w) < 2 {
 				return nil
 			}
-			w = append(strings.Fields(w[1]), w[2:]...)
+			w = append(shellWords(w[1]), w[2:]...)
 		case strings.HasPrefix(a, "--split-string="):
-			w = append(strings.Fields(strings.TrimPrefix(a, "--split-string=")), w[1:]...)
+			w = append(shellWords(strings.TrimPrefix(a, "--split-string=")), w[1:]...)
 		case a == "--unset" || a == "--chdir":
 			w = w[min(2, len(w)):]
 		case a == "--":
@@ -461,6 +457,27 @@ func envCommand(w []string) []string {
 	return w
 }
 
+// shellWords splits s into words as the shell would, quotes removed (env -S "'git' push" runs git push); text that
+// isn't valid shell falls back to splitting on spaces.
+func shellWords(s string) []string {
+	f, err := syntax.NewParser(syntax.Variant(syntax.LangBash)).Parse(strings.NewReader(s), "")
+	if err != nil || len(f.Stmts) != 1 {
+		return strings.Fields(s)
+	}
+	call, ok := f.Stmts[0].Cmd.(*syntax.CallExpr)
+	if !ok {
+		return strings.Fields(s)
+	}
+	words := make([]string, 0, len(call.Assigns)+len(call.Args))
+	for _, a := range call.Assigns {
+		words = append(words, source(a))
+	}
+	for _, w := range call.Args {
+		words = append(words, wordString(w))
+	}
+	return words
+}
+
 // envShortFlags reads one cluster of env's short flags (-iS'cmd', -u NAME) and returns the words after it.
 func envShortFlags(a string, rest []string) []string {
 	for i := 1; i < len(a); i++ {
@@ -468,12 +485,12 @@ func envShortFlags(a string, rest []string) []string {
 		switch a[i] {
 		case 'S':
 			if attached != "" {
-				return append(strings.Fields(attached), rest...)
+				return append(shellWords(attached), rest...)
 			}
 			if len(rest) == 0 {
 				return nil
 			}
-			return append(strings.Fields(rest[0]), rest[1:]...)
+			return append(shellWords(rest[0]), rest[1:]...)
 		case 'u', 'C':
 			if attached != "" || len(rest) == 0 {
 				return rest

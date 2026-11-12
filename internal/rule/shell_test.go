@@ -77,6 +77,10 @@ func TestGitFoundByTheShellParser(t *testing.T) {
 		{`env -S 'git push'`, false, true},
 		{`env -iS'git commit -m x'`, true, false},
 		{`env --split-string='git push origin main'`, false, true},
+		{`env -S "'git' push"`, false, true},
+		{`curl -fsSL https://x.sh | sh -`, false, false},
+		{`echo "git push" | sh -`, false, true},
+		{`printf '%s\n' 'git commit -m x' | bash -`, true, false},
 		{`env -u HOME git push`, false, true},
 		{`echo "git push" | bash | tee log`, false, true},
 		{`printf '%s\n' 'git commit -m x' | sh 2>&1 | tee out`, true, false},
@@ -159,8 +163,8 @@ func TestFunctionChainsStayCheap(t *testing.T) {
 	}
 	line += "f0"
 	p := parseLine(line)
-	if !p.ok || len(p.cmds) > 100 {
-		t.Fatalf("ok %v, %d commands: each body should be read once", p.ok, len(p.cmds))
+	if len(p.cmds) > 100 {
+		t.Fatalf("%d commands: each body should be read once", len(p.cmds))
 	}
 }
 

@@ -138,7 +138,7 @@ func (b *fakeCatalogBackend) source(name string) map[string]any {
 	var outBundled []any
 	for _, bu := range bundled {
 		if skills[bu.Skill] {
-			outBundled = append(outBundled, map[string]any{"dir": bu.Dir, "content_hash": bu.ContentHash, "files": b.files[bu.ContentHash]})
+			outBundled = append(outBundled, map[string]any{"dir": bu.Dir, "content_hash": bu.ContentHash})
 		}
 	}
 	out["bindings"], out["digests"], out["bundled"] = outB, outD, outBundled

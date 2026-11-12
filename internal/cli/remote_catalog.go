@@ -118,9 +118,8 @@ type catalogSlice struct {
 	Bindings []catalogText `json:"bindings"`
 	Digests  []catalogText `json:"digests"`
 	Bundled  []struct {
-		Dir         string       `json:"dir"`
-		ContentHash string       `json:"content_hash"`
-		Files       []remoteFile `json:"files"`
+		Dir         string `json:"dir"`
+		ContentHash string `json:"content_hash"`
 	} `json:"bundled"`
 }
 
@@ -149,15 +148,15 @@ func remoteCatalog(api string, names []string) (*catalog.Catalog, error) {
 			if dir := path.Clean(b.Dir); dir != b.Dir || path.IsAbs(dir) || strings.HasPrefix(dir, "..") || dir == "." {
 				return nil, fmt.Errorf("the paws catalog sent a bad skill directory %q", printable(b.Dir))
 			}
-			// A skill Unbound wrote installs from these files: they must hash to its pin, like any other skill.
-			files := fstest.MapFS{}
-			if err := addFiles(files, ".", b.Files); err != nil {
-				return nil, err
+			// A skill Unbound wrote comes by its hash, like any other skill, and must hash to it.
+			files, err := skillFilesFor(api)(portalCtx, b.ContentHash)
+			if err != nil {
+				return nil, fmt.Errorf("%s: %w", printable(b.Dir), err)
 			}
 			if got, err := pack.HashSkill(files); err != nil || got != b.ContentHash {
 				return nil, fmt.Errorf("the files of %s don't hash to the catalog's %q; refusing to install", printable(b.Dir), printable(b.ContentHash))
 			}
-			if err := addFiles(m, path.Join("catalog", b.Dir), b.Files); err != nil {
+			if err := copyInto(m, path.Join("catalog", b.Dir), files); err != nil {
 				return nil, err
 			}
 		}
@@ -167,6 +166,25 @@ func remoteCatalog(api string, names []string) (*catalog.Catalog, error) {
 		return nil, fmt.Errorf("the paws catalog sent a catalog with problems: %v", probs[0])
 	}
 	return c, nil
+}
+
+// copyInto puts every file of fsys into m under dir, keeping its mode.
+func copyInto(m fstest.MapFS, dir string, fsys fs.FS) error {
+	return fs.WalkDir(fsys, ".", func(p string, d fs.DirEntry, err error) error {
+		if err != nil || d.IsDir() {
+			return err
+		}
+		data, err := fs.ReadFile(fsys, p)
+		if err != nil {
+			return err
+		}
+		info, err := d.Info()
+		if err != nil {
+			return err
+		}
+		m[path.Join(dir, p)] = &fstest.MapFile{Data: data, Mode: info.Mode()}
+		return nil
+	})
 }
 
 // catalogRow is one search result from GET /catalog/skills.

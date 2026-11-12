@@ -138,6 +138,7 @@ func TestMatchesGitSyntheticEvents(t *testing.T) {
 		`ssh -c aes git commit`: false, `echo "sh-c git commit"`: false, `bash script.sh "git commit"`: false,
 		`echo "(git commit)"`: false, `echo "$(git commit -m x)"`: true, "ls; (git commit -m x)": true,
 		`sh -ce 'git commit -m x'`: true, `bash -euxc "git commit"`: true, `bash --rcfile x git commit`: false,
+		`echo "use bash -c git commit"`: false, `sudo bash -c "git commit"`: true, "cd x; sh -c 'git commit'": true,
 	} {
 		if got := commit.Matches("Bash", c); got != want {
 			t.Errorf("pre-commit on %q = %v, want %v", c, got, want)
@@ -151,6 +152,9 @@ func TestMatchesGitSyntheticEvents(t *testing.T) {
 	}
 	if push.Matches("Bash", `echo "we should git push soon"`) {
 		t.Error("pre-push should not fire on echoed text, only an actual git push")
+	}
+	if push.Matches("Bash", `git commit -m "docs: explain sh -c 'git push'"`) {
+		t.Error("pre-push should not fire on a shell -c inside a commit message")
 	}
 	if push.Matches("Bash", `git commit -m "revert (git push broke prod)"`) {
 		t.Error("pre-push should not fire on a ( inside a commit message")

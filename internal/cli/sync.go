@@ -153,7 +153,7 @@ func syncNow(creds *credentials, cwd string) (syncReport, error) {
 	}
 	rep.Uploads = true
 	now := time.Now().UTC()
-	st.LastUpload = now
+	st.LastUpload, st.LastCheck = now, now
 	rep.Config, err = pullConfig(creds, &st, res.configHash, cwd)
 	if forgetIfRevoked(err) {
 		return rep, err

@@ -33,7 +33,8 @@ import (
 type portalState struct {
 	AppliedHash string    `json:"applied_config_hash,omitempty"`
 	Skills      []string  `json:"skills,omitempty"`  // skills the applied config turns on
-	LastUpload  time.Time `json:"last_upload"`       // the last portal round: upload and config check together
+	LastUpload  time.Time `json:"last_upload"`       // the last upload, which also checks the config
+	LastCheck   time.Time `json:"last_check"`        // the last config check, with or without an upload
 	Revoked     bool      `json:"revoked,omitempty"` // the portal answered 401; login was forgotten
 }
 

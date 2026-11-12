@@ -256,6 +256,56 @@ func TestStopHookThrottlesOneRoundEveryFiveMinutes(t *testing.T) {
 	}
 }
 
+// Between uploads, the Stop hook asks for the config hash alone at most once a minute, and fetches the
+// config only when it changed. Records wait for the next upload.
+func TestStopHookChecksConfigEveryMinuteBetweenUploads(t *testing.T) {
+	home, srv := syncEnv(t)
+	srv.configHash = "h1"
+	stop := func() []string {
+		t.Helper()
+		before := srv.count("")
+		if out := runGate(t, map[string]any{"hook_event_name": "Stop", "cwd": t.TempDir(), "session_id": "s1"}); out != "{}" {
+			t.Fatalf("Stop must answer {}, got %q", out)
+		}
+		return srv.requests[before:]
+	}
+	checked := func(ago time.Duration) {
+		setState(t, func(st *portalState) { st.LastCheck = time.Now().Add(-ago) })
+	}
+	stop() // the first round uploads and applies h1
+
+	appendLines(t, filepath.Join(home, "audit.log"), actionLine("2026-10-01T10:00:01Z", `"tool":"Bash","action":"pwd"`))
+	checked(30 * time.Second)
+	if got := stop(); len(got) != 0 {
+		t.Fatalf("a Stop inside a minute of the last check made requests: %v", got)
+	}
+
+	// A minute on, unchanged: one GET for the hash, no upload.
+	checked(time.Minute)
+	if got := stop(); strings.Join(got, ",") != "GET /paws/v1/config/hash" {
+		t.Fatalf("check with the config unchanged: %v", got)
+	}
+
+	// Changed: the config is fetched, applied and reported; the new record still waits for the upload.
+	srv.configHash = "h2"
+	checked(time.Minute)
+	if got := stop(); strings.Join(got, ",") != "GET /paws/v1/config/hash,GET /paws/v1/config,POST /paws/v1/sync" {
+		t.Fatalf("check with a changed config: %v", got)
+	}
+	if st := loadPortalState(); st.AppliedHash != "h2" {
+		t.Errorf("applied hash %q, want h2", st.AppliedHash)
+	}
+	if recs := decodeSync(t, srv.bodies[len(srv.bodies)-1]); len(recs) != 0 {
+		t.Errorf("a config check uploaded records: %v", recs)
+	}
+
+	// PAWS_CHECK_INTERVAL overrides the check interval.
+	t.Setenv("PAWS_CHECK_INTERVAL", "0s")
+	if got := stop(); strings.Join(got, ",") != "GET /paws/v1/config/hash" {
+		t.Fatalf("Stop with PAWS_CHECK_INTERVAL=0s: %v", got)
+	}
+}
+
 // A new session starts a background round so portal changes reach it without waiting for a turn
 // to end; the gate never waits on the network itself.
 func TestSessionStartSpawnsABackgroundSync(t *testing.T) {

@@ -95,9 +95,12 @@ and credentials saved for any other http address are refused. From then on:
 - the async **Stop hook** (after each Claude turn), when the last round was
   more than `PAWS_SYNC_INTERVAL` ago (default `5m`), sends one upload: the new
   records, or none, with the inventory. Its reply carries the portal's config
-  hash, and the config is fetched only when that hash changed. Each request
-  times out after 5 seconds and the whole step, skill downloads included,
-  after 12; any failure is dropped silently and retried later;
+  hash, and the config is fetched only when that hash changed. Between
+  uploads, when the last check was more than `PAWS_CHECK_INTERVAL` ago
+  (default `1m`), it asks `GET /config/hash` alone, uploads nothing, and fetches
+  the config only when the hash changed. Each request times out after 5 seconds
+  and the whole step, skill downloads included, after 12; any failure is
+  dropped silently and retried later;
 - the **SessionStart hook** starts the same round in a separate background
   process (`unbound-paws sync --background`) when a session starts, resumes or
   is cleared, at most once a minute, without waiting for a turn to end. The

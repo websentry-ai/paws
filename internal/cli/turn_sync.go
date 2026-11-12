@@ -10,8 +10,12 @@ import (
 )
 
 const (
-	// defaultSyncInterval is how often the Stop hook talks to the portal (PAWS_SYNC_INTERVAL).
+	// defaultSyncInterval is how often the Stop hook uploads records (PAWS_SYNC_INTERVAL).
 	defaultSyncInterval = 5 * time.Minute
+	// defaultCheckInterval is how often, between uploads, the Stop hook asks the portal whether the
+	// config changed (PAWS_CHECK_INTERVAL): one small GET, so a skill turned on in the browser lands
+	// within a minute of a turn ending.
+	defaultCheckInterval = time.Minute
 	// sessionStartFloor spaces out the syncs new sessions start, so several sessions opened
 	// together (or a run of /clear) make one round, not one each.
 	sessionStartFloor = time.Minute
@@ -21,16 +25,18 @@ const (
 // stopHookDeadline bounds a background portal round, skill downloads included. Tests shorten it.
 var stopHookDeadline = 12 * time.Second
 
-// syncAfterTurn is the portal step of the async Stop hook: a round at most every PAWS_SYNC_INTERVAL.
+// syncAfterTurn is the portal step of the async Stop hook: an upload at most every PAWS_SYNC_INTERVAL,
+// and a config check at most every PAWS_CHECK_INTERVAL in between.
 func syncAfterTurn(cwd string) {
 	syncRound(cwd, syncInterval())
 }
 
-// syncRound is one best-effort portal round when logged in and `every` has passed since the last:
-// one POST /sync uploads new records (none is fine: it still reports the inventory) and returns the
-// portal's config hash, and the config itself is fetched only when that hash changed. Errors are
-// dropped and nothing is printed, since a hook's stdout carries its decision. A 401 logs this machine
-// out (forgetIfRevoked).
+// syncRound is one best-effort portal round when logged in. Once `every` has passed since the last
+// upload, one POST /sync uploads new records (none is fine: it still reports the inventory) and returns
+// the portal's config hash. Otherwise, once the check interval has passed since the last check, GET
+// /config/hash asks for the hash alone. Either way the config itself is fetched only when that hash
+// changed. Errors are dropped and nothing is printed, since a hook's stdout carries its decision. A 401
+// logs this machine out (forgetIfRevoked).
 func syncRound(cwd string, every time.Duration) {
 	creds, err := loadCredentials()
 	if err != nil || creds == nil {
@@ -43,10 +49,14 @@ func syncRound(cwd string, every time.Duration) {
 	defer unlock()
 	st := loadPortalState()
 	now := time.Now().UTC()
-	if now.Sub(st.LastUpload) < every {
+	upload := now.Sub(st.LastUpload) >= every
+	if !upload && now.Sub(st.LastCheck) < checkInterval() {
 		return
 	}
-	st.LastUpload = now
+	st.LastCheck = now
+	if upload {
+		st.LastUpload = now
+	}
 	savePortalState(st) // claim the slot before the network: a parallel session's round skips it
 
 	ctx, cancel := context.WithTimeout(context.Background(), stopHookDeadline)
@@ -55,12 +65,16 @@ func syncRound(cwd string, every time.Duration) {
 	portalClient, portalCtx = &http.Client{Timeout: stopHookTimeout}, ctx
 	defer func() { portalClient, portalCtx = oldClient, oldCtx }()
 
-	recs, _ := pendingRecords()
-	up, err := uploadRecords(creds, st.AppliedHash, cwd, recs, true)
-	if forgetIfRevoked(err) || err != nil {
-		return
+	known := "" // pullConfig asks GET /config/hash
+	if upload {
+		recs, _ := pendingRecords()
+		up, err := uploadRecords(creds, st.AppliedHash, cwd, recs, true)
+		if forgetIfRevoked(err) || err != nil {
+			return
+		}
+		known = up.configHash
 	}
-	res, err := pullConfig(creds, &st, up.configHash, cwd)
+	res, err := pullConfig(creds, &st, known, cwd)
 	if forgetIfRevoked(err) || res == nil {
 		return
 	}
@@ -99,9 +113,18 @@ func lockSyncRound() (unlock func(), ok bool) {
 
 // syncInterval is PAWS_SYNC_INTERVAL (a Go duration), else the default.
 func syncInterval() time.Duration {
-	d, err := time.ParseDuration(os.Getenv("PAWS_SYNC_INTERVAL"))
+	return envDuration("PAWS_SYNC_INTERVAL", defaultSyncInterval)
+}
+
+// checkInterval is PAWS_CHECK_INTERVAL (a Go duration), else the default.
+func checkInterval() time.Duration {
+	return envDuration("PAWS_CHECK_INTERVAL", defaultCheckInterval)
+}
+
+func envDuration(name string, fallback time.Duration) time.Duration {
+	d, err := time.ParseDuration(os.Getenv(name))
 	if err != nil || d < 0 {
-		return defaultSyncInterval
+		return fallback
 	}
 	return d
 }

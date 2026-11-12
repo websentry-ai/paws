@@ -153,8 +153,9 @@ When: after Claude finishes a turn, from the async Stop hook, at most every
 most once a minute; on `unbound-paws sync`; and once at `unbound-paws login`.
 
 Settings come down from the portal: the skills you turn on in the browser
-and the actions each one runs before. The same request that uploads checks
-for a change, and paws then writes them as rule files
+and the actions each one runs before. Each upload checks for a change, and
+between uploads the Stop hook asks for the settings' hash alone at most once a
+minute (`PAWS_CHECK_INTERVAL`). paws then writes them as rule files
 under `~/.paws/portal/`. Only skills in the catalog this unbound-paws version ships
 can install, into `~/.claude/skills` at their pinned commit, and are refused
 if their content hash differs; the portal can't name other code to download.

@@ -66,11 +66,13 @@ type remoteFile struct {
 	Exec bool   `json:"exec"`
 }
 
-// addFiles puts files into m under dir, refusing a path that leaves it.
+// addFiles puts files into m under dir, refusing a path that leaves it. A backslash, colon or NUL is refused too:
+// Windows reads \ as a separator and C: as a drive, so a\..\..\x would leave the skill folder there.
 func addFiles(m fstest.MapFS, dir string, files []remoteFile) error {
 	for _, f := range files {
 		clean := path.Clean(f.Path)
-		if f.Path == "" || clean != f.Path || path.IsAbs(clean) || clean == ".." || strings.HasPrefix(clean, "../") {
+		if f.Path == "" || clean != f.Path || path.IsAbs(clean) || clean == ".." || strings.HasPrefix(clean, "../") ||
+			strings.ContainsAny(f.Path, "\\:\x00") {
 			return fmt.Errorf("the paws catalog sent a bad file path %q", printable(f.Path))
 		}
 		data, err := base64.StdEncoding.DecodeString(f.Data)

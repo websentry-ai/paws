@@ -2,6 +2,7 @@ package cli
 
 import (
 	"testing"
+	"testing/fstest"
 
 	"github.com/websentry-ai/paws/internal/rule"
 )
@@ -15,5 +16,18 @@ func TestRegexDisplayReadsTheCatalogAnchor(t *testing.T) {
 		if got := regexDisplay(re); got != want {
 			t.Errorf("regexDisplay(%q) = %q, want %q", re, got, want)
 		}
+	}
+}
+
+// A file name the backend sends must stay inside the skill folder on every OS: on Windows \ is a separator and C: a
+// drive, so those are refused too.
+func TestAddFilesRefusesPathsThatLeaveTheSkill(t *testing.T) {
+	for _, p := range []string{`../x`, `/etc/x`, `a/../../x`, `a\..\..\x`, `C:x`, "a\x00b", ``} {
+		if err := addFiles(fstest.MapFS{}, "s", []remoteFile{{Path: p}}); err == nil {
+			t.Errorf("%q was accepted", p)
+		}
+	}
+	if err := addFiles(fstest.MapFS{}, "s", []remoteFile{{Path: "scripts/run.sh"}}); err != nil {
+		t.Errorf("a plain path was refused: %v", err)
 	}
 }

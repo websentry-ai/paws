@@ -194,7 +194,11 @@ func writeSkill(src fs.FS, skillsDir, name string, m marker) error {
 				data = []byte(strings.ReplaceAll(string(data), "{{"+k+"}}", v))
 			}
 		}
-		out := filepath.Join(stage, filepath.FromSlash(f))
+		rel := filepath.FromSlash(f)
+		if !filepath.IsLocal(rel) || strings.ContainsRune(f, '\\') {
+			return fmt.Errorf("refusing to write %q outside the skill folder", f) // on Windows a\..\x would leave it
+		}
+		out := filepath.Join(stage, rel)
 		if err := os.MkdirAll(filepath.Dir(out), 0o755); err != nil {
 			return err
 		}

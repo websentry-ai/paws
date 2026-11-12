@@ -41,8 +41,8 @@ func (r *Rule) Matches(tool, target string) bool {
 	if tool != "Bash" {
 		return (r.re == nil || r.re.MatchString(target)) && r.Event != "pre-commit" && r.Event != "pre-push"
 	}
-	cmds, ok := commands(target)
-	if !ok { // not valid Bash: read the line whole
+	line := parseLine(target)
+	if !line.ok { // not valid Bash: read the line whole
 		if r.re != nil && !r.re.MatchString(target) {
 			return false
 		}
@@ -54,7 +54,8 @@ func (r *Rule) Matches(tool, target string) bool {
 		}
 		return true
 	}
-	if r.re != nil && !anyCommand(cmds, func(c command) bool {
+	cmds := line.cmds
+	if r.re != nil && !r.re.MatchString(line.flat) && !anyCommand(cmds, func(c command) bool {
 		for _, t := range c.texts {
 			if r.re.MatchString(t) {
 				return true

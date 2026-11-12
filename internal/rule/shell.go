@@ -27,28 +27,57 @@ var shells = map[string]bool{"bash": true, "sh": true, "zsh": true, "dash": true
 
 const maxNesting = 8 // bash -c inside eval inside bash -c ...
 
-// splitCache holds the last line split: the gate checks every rule against the same line.
-var splitCache struct {
-	sync.Mutex
-	line string
+// parsedLine is a Bash line read for matching: its commands, and the line itself with every ; & | and newline that
+// sits inside quotes turned into a space (flat). A command_regex matches if it matches flat or any command: flat keeps
+// rules that span commands (`curl ... | sh`) or name a heredoc's text working as before, and the commands catch what
+// runs inside bash -c, eval, wrappers and piped scripts.
+type parsedLine struct {
 	cmds []command
-	ok   bool
+	flat string
+	ok   bool // false when the line, or a script it runs, isn't valid Bash
 }
 
-// commands splits line into its simple commands; ok is false when line isn't valid Bash.
-func commands(line string) ([]command, bool) {
+// splitCache holds the last line read: the gate checks every rule against the same line.
+var splitCache struct {
+	sync.Mutex
+	line   string
+	parsed *parsedLine
+}
+
+func parseLine(line string) *parsedLine {
 	splitCache.Lock()
 	defer splitCache.Unlock()
-	if splitCache.cmds != nil && splitCache.line == line {
-		return splitCache.cmds, splitCache.ok
+	if splitCache.parsed != nil && splitCache.line == line {
+		return splitCache.parsed
 	}
-	var out []command
-	ok := split(line, &out, 0)
-	if out == nil {
-		out = []command{}
+	p := &parsedLine{cmds: []command{}}
+	p.ok = split(line, &p.cmds, 0)
+	if p.ok {
+		p.flat = flatten(line)
 	}
-	splitCache.line, splitCache.cmds, splitCache.ok = line, out, ok
-	return out, ok
+	splitCache.line, splitCache.parsed = line, p
+	return p
+}
+
+// flatten blanks the command separators inside quoted text, so `echo "a; npm install x"` holds no second command.
+func flatten(line string) string {
+	f, err := syntax.NewParser(syntax.Variant(syntax.LangBash)).Parse(strings.NewReader(line), "")
+	if err != nil {
+		return line
+	}
+	b := []byte(line)
+	syntax.Walk(f, func(n syntax.Node) bool {
+		switch n.(type) {
+		case *syntax.SglQuoted, *syntax.DblQuoted:
+			for i := n.Pos().Offset(); i < n.End().Offset() && int(i) < len(b); i++ {
+				if c := b[i]; c == ';' || c == '&' || c == '|' || c == '\n' {
+					b[i] = ' '
+				}
+			}
+		}
+		return true
+	})
+	return string(b)
 }
 
 func split(line string, out *[]command, depth int) bool {
@@ -202,14 +231,38 @@ func (s *splitter) pipedScript(pipe *syntax.BinaryCmd, depth int) {
 				args = args[1:]
 			}
 			s.nested(unescape(strings.Join(args, " ")), depth)
-		case "printf": // printf '%s\n' 'git push': the format's text, then each argument on its own line
-			lines := append([]string{printfVerb.ReplaceAllString(unescape(args[0]), "")}, args[1:]...)
-			s.nested(strings.Join(lines, "\n"), depth)
+		case "printf": // printf '%s %s\n' git push: what it prints
+			s.nested(printf(args[0], args[1:]), depth)
 		}
 	}
 }
 
 var printfVerb = regexp.MustCompile(`%[-+ #0-9.]*[a-zA-Z%]`)
+
+// printf is what `printf format args...` prints: each verb takes the next argument, %% is a %, and the format repeats
+// while arguments are left, as in the shell.
+func printf(format string, args []string) string {
+	format = unescape(format)
+	var b strings.Builder
+	for {
+		used := false
+		b.WriteString(printfVerb.ReplaceAllStringFunc(format, func(v string) string {
+			if v == "%%" {
+				return "%"
+			}
+			if len(args) == 0 {
+				return ""
+			}
+			used = true
+			a := args[0]
+			args = args[1:]
+			return a
+		}))
+		if !used || len(args) == 0 {
+			return b.String()
+		}
+	}
+}
 
 // unescape turns the \n and \t that echo -e and printf print into the characters.
 func unescape(s string) string {

@@ -39,6 +39,8 @@ func TestGitFoundByTheShellParser(t *testing.T) {
 		{`echo -e "cd app\ngit push" | bash`, false, true},
 		{`printf '%s\n' 'git push' | bash`, false, true},
 		{`printf 'cd x\ngit commit -m y\n' | sh`, true, false},
+		{`printf '%s %s\n' git push | bash`, false, true},
+		{`printf '%s\n' 'cd x' 'git commit -m y' | sh`, true, false},
 		// A nested script that isn't valid Bash: the line is read whole, as before.
 		{`bash -c "git commit -m 'unclosed"`, true, false},
 		{`publish() { git push; }; publish`, false, true},
@@ -98,7 +100,11 @@ func TestCommandRegexMatchesEachCommand(t *testing.T) {
 	} {
 		r := mustRule(t, "---\nname: v\nevent: pre-tool\nmatcher:\n  tool: Bash\n  command_regex: '"+rx+"'\naction:\n  type: require-skill\n  skill: s\n---\n")
 		if !r.Matches("Bash", line) {
-			t.Errorf("%q should match %s: assignments and expansions stay visible", line, rx)
+			t.Errorf("%q should match %s: assignments, expansions, heredocs and pipes stay visible", line, rx)
 		}
+	}
+	curl := mustRule(t, "---\nname: c\nevent: pre-tool\nmatcher:\n  tool: Bash\n  command_regex: 'curl[^|]*\\|\\s*(ba)?sh\\b'\naction:\n  type: require-skill\n  skill: s\n---\n")
+	if curl.Matches("Bash", `echo "curl x | sh"`) {
+		t.Error("a pipe inside quotes is text, not a pipe")
 	}
 }

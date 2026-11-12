@@ -79,8 +79,11 @@ func split(line string, out *[]command, depth int, lim *limits, sc *scope) bool 
 	s := splitter{out: out, sc: sc, walked: map[walkKey]bool{}, lim: lim, piped: map[*syntax.BinaryCmd]bool{},
 		bg: map[*syntax.Stmt]bool{}}
 	s.walk(f, depth)
-	for _, action := range s.traps { // the shell runs EXIT and other handlers after the line's commands
-		s.nestedIn(action, depth, s.sc)
+	// The shell runs EXIT and other handlers after the line's commands, with every function defined by then. Each is
+	// read in its own copy of that scope: which handler runs, and in what order, depends on signals, so one handler's
+	// definitions must not hide a call in another.
+	for _, action := range s.traps {
+		s.nestedIn(action, depth, s.sc.child())
 	}
 	return true
 }

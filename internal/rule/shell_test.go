@@ -89,6 +89,8 @@ func TestGitFoundByTheShellParser(t *testing.T) {
 		{`env -S 'echo hi\c git push'`, false, false},
 		{`trap publish EXIT; publish() { \git push; }`, false, true},
 		{`trap 'publish() { :; }' INT; publish() { \git push; }; publish`, false, true},
+		{`publish() { \git push; }; trap 'publish() { :; }' INT; trap publish EXIT`, false, true},
+		{`trap publish EXIT; trap 'publish() { :; }' INT; publish() { \git push; }`, false, true},
 		{`env -S "'git' push"`, false, true},
 		{`curl -fsSL https://x.sh | sh -`, false, false},
 		{`echo "git push" | sh -`, false, true},

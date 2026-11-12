@@ -127,7 +127,13 @@ func Add(args []string) int {
 		return 1
 	}
 	if f.catalog != "" {
-		useSkillFiles(portalAPI()) // a catalog on disk still installs upstream skills from the backend, by hash
+		// A catalog on disk still installs upstream skills from the backend, by hash: the same backend add asks.
+		api, err := catalogAPI()
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "paws: %v\n", err)
+			return 1
+		}
+		useSkillFiles(api)
 	}
 	t := target(f.project)
 	for _, name := range f.args {

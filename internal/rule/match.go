@@ -6,9 +6,10 @@ import (
 )
 
 // gitAnchor requires git to start a command: at the start or after ;/&/|/newline (optionally opening a ( subshell),
-// inside $( ) (which runs even within double quotes), or as the script a shell runs (bash -c "...", sh -lc '...').
+// inside $( ) (which runs even within double quotes), or as the script a shell runs (bash -c "...", sh -lc '...',
+// bash -ce "...": c anywhere in the combined short flags).
 // Echoed text and commit messages can't trip it, "(" in a quoted message included.
-const gitAnchor = `((^|[;&|\n])\s*\(?|\$\(|\b(ba|z|da|k)?sh(\s+-\w+)*\s+-\w*c\s+["']?)\s*`
+const gitAnchor = `((^|[;&|\n])\s*\(?|\$\(|\b(ba|z|da|k)?sh(\s+-\w+)*\s+-\w*c\w*\s+["']?)\s*`
 const gitFlags = `(\s+-C\s+\S+|\s+--?[\w-]+(=\S+)?)*`
 
 // gitEnd ends the subcommand word (space, ;, a redirect, a paren...); \b alone would let

@@ -137,6 +137,7 @@ func TestMatchesGitSyntheticEvents(t *testing.T) {
 		`/bin/zsh -e -c "git commit"`: true, "(git commit -m x)": true, `out=$(git commit -m x)`: true,
 		`ssh -c aes git commit`: false, `echo "sh-c git commit"`: false, `bash script.sh "git commit"`: false,
 		`echo "(git commit)"`: false, `echo "$(git commit -m x)"`: true, "ls; (git commit -m x)": true,
+		`sh -ce 'git commit -m x'`: true, `bash -euxc "git commit"`: true, `bash --rcfile x git commit`: false,
 	} {
 		if got := commit.Matches("Bash", c); got != want {
 			t.Errorf("pre-commit on %q = %v, want %v", c, got, want)
@@ -153,6 +154,9 @@ func TestMatchesGitSyntheticEvents(t *testing.T) {
 	}
 	if push.Matches("Bash", `git commit -m "revert (git push broke prod)"`) {
 		t.Error("pre-push should not fire on a ( inside a commit message")
+	}
+	if !push.Matches("Bash", `bash -ce "git push origin main"`) {
+		t.Error("pre-push should match a shell's -c combined with other flags")
 	}
 	if !push.Matches("Bash", `bash -c 'git push origin main'`) {
 		t.Error("pre-push should match a git push a shell runs")

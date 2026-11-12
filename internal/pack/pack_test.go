@@ -2,6 +2,7 @@ package pack
 
 import (
 	"context"
+	"io/fs"
 	"os"
 	"path/filepath"
 	"strings"
@@ -50,9 +51,11 @@ func copyTree(src, dest string) error {
 	})
 }
 
+// fakeFetch stands in for the paws backend's skill files and for git: a hash gets the repo directory that hashes to
+// it, or, when none does, the only repo there is (so a wrong pin is caught by the hash check).
 func fakeFetch(t *testing.T, repos map[string]string) {
 	t.Helper()
-	orig := Fetch
+	orig, origFiles := Fetch, SkillFiles
 	Fetch = func(_ context.Context, repo, ref, dest string) error {
 		src, ok := repos[repo]
 		if !ok {
@@ -60,7 +63,20 @@ func fakeFetch(t *testing.T, repos map[string]string) {
 		}
 		return copyTree(src, dest)
 	}
-	t.Cleanup(func() { Fetch = orig })
+	SkillFiles = func(_ context.Context, hash string) (fs.FS, error) {
+		var last fs.FS
+		for _, src := range repos {
+			last = os.DirFS(src)
+			if h, err := HashSkill(last); err == nil && h == hash {
+				return last, nil
+			}
+		}
+		if last == nil || len(repos) > 1 {
+			return nil, os.ErrNotExist
+		}
+		return last, nil
+	}
+	t.Cleanup(func() { Fetch, SkillFiles = orig, origFiles })
 }
 
 // testCatalog builds a catalog with an upstream binding (pinned to hash), an org binding with a

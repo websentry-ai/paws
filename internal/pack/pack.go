@@ -274,8 +274,8 @@ func (s *State) needs(skill string) bool {
 	return false
 }
 
-// installBindingSkill installs the skill a require-skill binding names, from upstream at the
-// pinned ref (hash-checked) or from the catalog's own skills/ directory.
+// installBindingSkill installs the skill a require-skill binding names: an upstream skill from the paws backend by
+// its pinned content hash (checked here), or one from the catalog's own skills/ directory.
 func installBindingSkill(c *catalog.Catalog, b *catalog.Binding, skillsDir string) (bool, error) {
 	if !catalog.ValidSkillName(b.Action.Skill) {
 		return false, fmt.Errorf("invalid skill name %q", b.Action.Skill)
@@ -291,15 +291,14 @@ func installBindingSkill(c *catalog.Catalog, b *catalog.Binding, skillsDir strin
 		}
 		return installSkill(src, skillsDir, b.Action.Skill, marker{Skill: b.Action.Skill, Source: "catalog:" + catalog.LocalSkillDir(b)})
 	}
-	dir, tmp, hash, err := FetchUpstream(context.Background(), u.Repo, u.Ref, u.Path)
+	fsys, ok, err := fetchSkill(context.Background(), u.ContentHash)
 	if err != nil {
 		return false, err
 	}
-	defer os.RemoveAll(tmp)
-	if hash != u.ContentHash {
-		return false, fmt.Errorf("content hash mismatch for %s@%s: catalog pins %s, upstream has %s; refusing to install", u.Repo, u.Ref, u.ContentHash, hash)
+	if !ok {
+		return false, fmt.Errorf("content hash mismatch for %s@%s: the files don't hash to the catalog's %s; refusing to install", u.Repo, u.Ref, u.ContentHash)
 	}
-	return installSkill(os.DirFS(dir), skillsDir, b.Action.Skill, marker{Skill: b.Action.Skill, Source: u.Repo + "@" + u.Ref, Hash: hash})
+	return installSkill(fsys, skillsDir, b.Action.Skill, marker{Skill: b.Action.Skill, Source: u.Repo + "@" + u.Ref, Hash: u.ContentHash})
 }
 
 // Remove uninstalls a pack: its bindings, and skills paws installed for it that no other

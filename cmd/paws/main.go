@@ -46,6 +46,8 @@ func run(args []string) int {
 		return cli.Index(args[1:])
 	case "pin":
 		return cli.Pin(args[1:])
+	case "catalog": // maintainers: edit the published catalog (needs PAWS_ADMIN_KEY)
+		return cli.CatalogAdmin(args[1:])
 	case "ui":
 		return cli.UI(args[1:])
 	case "login":
@@ -78,12 +80,13 @@ Usage:
   unbound-paws explain [--tool T] [--event E] <command>  Dry-run: show matching rules and the decision.
   echo '<event json>' | unbound-paws explain -           Dry-run a full event JSON.
   unbound-paws add [--project] [--pick g=o] <pack|cat/binding>...
-                                                         Install packs: bindings plus the skills they require.
+                                                         Install from the catalog: bindings plus the skills they require.
   unbound-paws remove [--project] <pack>                 Uninstall a pack (and skills only it needed).
   unbound-paws list [--project]                          Installed packs with local fire counts.
-  unbound-paws ui [--port N] [--no-open]                 Local page: catalog, installed packs, what fired.
+  unbound-paws ui [--port N] [--no-open]                 Local page: installed packs, what fired.
   unbound-paws search <text>                             Search the catalog.
-  unbound-paws index [--portal] [-o file]                The catalog as JSON (website, local UI); --portal: the portal's /catalog.
+  unbound-paws index --catalog <dir> [--portal] [-o file]
+                                                         A catalog on disk as JSON; --portal: the portal's skill records.
   unbound-paws validate [root]                           Check root/catalog bindings and root/packs manifests.
   unbound-paws pin [root]                                Fetch upstream skills and pin their content hashes.
   unbound-paws login [--key <one-time-key>|-]            Link this machine to the paws portal (opt-in); --key for no browser (- reads stdin).
@@ -94,7 +97,9 @@ Usage:
 Rules are .paws/**/*.md files; paws reads every .paws/ from the working
 directory up to the repo root (or $HOME if no repo), plus ~/.paws.
 
-Nothing leaves the machine unless you run unbound-paws login. Once logged in, the
+The catalog is on the paws server: add and search ask it, and every skill is
+downloaded from it and checked against its content hash. Nothing about your
+work leaves the machine unless you run unbound-paws login. Once logged in, the
 async Stop hook uploads records and pulls portal settings after Claude's
 turns (throttled); the gate itself never uses the network. The portal
 address is $PAWS_PORTAL_API (default https://paws-api.getunbound.ai).

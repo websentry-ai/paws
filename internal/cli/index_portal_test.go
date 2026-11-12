@@ -9,7 +9,6 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/websentry-ai/paws"
 	"github.com/websentry-ai/paws/internal/pack"
 )
 
@@ -25,8 +24,9 @@ func keysOf(m map[string]any) string {
 // paws index --portal writes the contract's /catalog: one entry per skill with exactly the
 // contract's fields, its default actions taken from the bindings that require it.
 func TestIndexPortalMatchesCatalogContract(t *testing.T) {
+	dir := writeTestCatalog(t)
 	out := filepath.Join(t.TempDir(), "catalog.json")
-	if code := Index([]string{"--portal", "-o", out}); code != 0 {
+	if code := Index([]string{"--catalog", dir, "--portal", "-o", out}); code != 0 {
 		t.Fatalf("index --portal exit %d", code)
 	}
 	data, err := os.ReadFile(out)
@@ -55,7 +55,7 @@ func TestIndexPortalMatchesCatalogContract(t *testing.T) {
 				}
 			}
 			for k := range am {
-				if !strings.Contains(",id,label,event,tool,command_regex,file_glob,mcp_action,", ","+k+",") {
+				if !strings.Contains(",id,label,event,tool,command_regex,file_glob,mcp_action,example,", ","+k+",") {
 					t.Errorf("%v action has extra key %s", s["name"], k)
 				}
 			}
@@ -90,7 +90,7 @@ func TestIndexPortalMatchesCatalogContract(t *testing.T) {
 
 	// A skill this repo ships: no upstream; its hash is the one sync checks before installing it.
 	g := bySkill["git"]
-	sub, _ := fs.Sub(paws.Catalog, "catalog/source-control/skills/git")
+	sub, _ := fs.Sub(os.DirFS(dir), "catalog/source-control/skills/git")
 	want, _ := pack.HashSkill(sub)
 	if g["upstream"] != nil || g["content_hash"] != want || g["license"] != "Apache-2.0" {
 		t.Errorf("git entry: upstream %v hash %v (want %s)", g["upstream"], g["content_hash"], want)

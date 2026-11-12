@@ -1,20 +1,18 @@
 import { useEffect, useState } from "react";
 import { useJSON } from "./api";
-import type { Catalog, InstalledPack, Portal, StatsResponse } from "./types";
+import type { InstalledPack, Portal, StatsResponse } from "./types";
 import { Activity } from "./views/Activity";
-import { CatalogView } from "./views/Catalog";
 import { Installed } from "./views/Installed";
 
 const tabs = [
   { id: "installed", label: "Installed" },
-  { id: "catalog", label: "Catalog" },
   { id: "activity", label: "Activity" },
 ] as const;
 type Tab = (typeof tabs)[number]["id"];
 
 const isTab = (s: string | null): s is Tab => tabs.some((t) => t.id === s);
 
-// startTab honours a #catalog / #activity deep link, else reopens the last tab.
+// startTab honours an #activity deep link, else reopens the last tab.
 function startTab(): Tab {
   const hash = location.hash.slice(1);
   if (isTab(hash)) return hash;
@@ -30,7 +28,6 @@ function startTab(): Tab {
 export function App() {
   const [tab, setTab] = useState<Tab>(startTab);
   const installed = useJSON<InstalledPack[]>("/api/installed");
-  const catalog = useJSON<Catalog>("/api/catalog");
   const stats = useJSON<StatsResponse>("/api/stats");
   const portal = useJSON<Portal>("/api/portal");
 
@@ -56,7 +53,12 @@ export function App() {
     <>
       <header className="page">
         <h1>paws</h1>
-        <p>Skills that actually fire. Everything here is read from this machine.</p>
+        <p>
+          Skills that actually fire. Everything here is read from this machine.{" "}
+          <a href="https://paws.getunbound.ai/catalog" target="_blank" rel="noreferrer">
+            Browse the catalog
+          </a>
+        </p>
       </header>
       <nav className="page" role="tablist">
         {tabs.map((t) => (
@@ -67,7 +69,6 @@ export function App() {
       </nav>
       <main className="page">
         {tab === "installed" && <Installed load={installed} portal={portal} />}
-        {tab === "catalog" && <CatalogView load={catalog} />}
         {tab === "activity" && <Activity load={stats} />}
       </main>
       <footer className="page">

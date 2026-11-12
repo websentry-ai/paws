@@ -11,7 +11,6 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/websentry-ai/paws"
 	"github.com/websentry-ai/paws/internal/catalog"
 	"github.com/websentry-ai/paws/internal/gate"
 	"github.com/websentry-ai/paws/internal/pack"
@@ -76,17 +75,25 @@ func parsePackFlags(args []string, allowed ...string) (packFlags, error) {
 	return f, nil
 }
 
-// loadCatalog reads the embedded catalog, or a directory given with --catalog.
-func loadCatalog(dir string) (*catalog.Catalog, error) {
-	var c *catalog.Catalog
-	var probs []catalog.Problem
-	// Full validation either way: names become paths and refs reach git, so a catalog that
-	// fails any check installs nothing.
+// errNoCatalogDir: a command that reads a whole catalog needs one on disk; the published catalog is on the server.
+var errNoCatalogDir = fmt.Errorf("the catalog lives on the paws server now: browse it at %s/catalog, or pass --catalog <dir> for one on disk", defaultSiteURL)
+
+// loadCatalog reads the catalog in a directory given with --catalog or, with none, the slice of the published
+// catalog that names needs (from the paws backend, which then also serves the skill files).
+func loadCatalog(dir string, names ...string) (*catalog.Catalog, error) {
 	if dir == "" {
-		c, probs = catalog.ValidateFS(paws.Catalog, "embedded")
-	} else {
-		c, probs = catalog.Validate(dir)
+		if len(names) == 0 {
+			return nil, errNoCatalogDir
+		}
+		api, err := catalogAPI()
+		if err != nil {
+			return nil, err
+		}
+		useSkillFiles(api)
+		return remoteCatalog(api, names)
 	}
+	// Full validation: names become paths and refs reach git, so a catalog that fails any check installs nothing.
+	c, probs := catalog.Validate(dir)
 	if len(probs) > 0 {
 		for _, p := range probs {
 			fmt.Fprintln(os.Stderr, "paws: catalog:", p)
@@ -114,10 +121,13 @@ func Add(args []string) int {
 		fmt.Fprintf(os.Stderr, "paws: %v\nusage: unbound-paws add [--project] [--pick group=option] <pack|category/binding>...\n", err)
 		return 2
 	}
-	c, err := loadCatalog(f.catalog)
+	c, err := loadCatalog(f.catalog, f.args...)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "paws: %v\n", err)
 		return 1
+	}
+	if f.catalog != "" {
+		useSkillFiles(portalAPI()) // a catalog on disk still installs upstream skills from the backend, by hash
 	}
 	t := target(f.project)
 	for _, name := range f.args {
@@ -309,9 +319,9 @@ func fireCounts(path string) map[string]int {
 	return counts
 }
 
-// Search finds packs and bindings by name, tag, skill or description: `paws search TEXT`.
+// Search finds catalog skills by name, description or tag on the paws backend: `paws search TEXT`.
 func Search(args []string) int {
-	f, err := parsePackFlags(args, "--catalog")
+	f, err := parsePackFlags(args)
 	if err == nil && len(f.args) == 0 {
 		err = fmt.Errorf("give a search term")
 	}
@@ -319,34 +329,37 @@ func Search(args []string) int {
 		fmt.Fprintf(os.Stderr, "paws: %v\nusage: unbound-paws search <text>\n", err)
 		return 2
 	}
-	c, err := loadCatalog(f.catalog)
-	if err != nil {
-		fmt.Fprintf(os.Stderr, "paws: %v\n", err)
-		return 1
-	}
-	q := strings.ToLower(strings.Join(f.args, " "))
-	hit := func(fields ...string) bool {
-		return strings.Contains(strings.ToLower(strings.Join(fields, " ")), q)
-	}
-	found := 0
-	for _, n := range sortedKeys(c.Packs) {
-		p := c.Packs[n]
-		if hit(p.Name, p.Description, strings.Join(p.Tags, " ")) {
-			found++
-			fmt.Printf("pack %-20s %s\n     %s add %s\n", p.Name, p.Description, cliName, p.Name)
+	api, err := catalogAPI()
+	if err == nil {
+		var rows []catalogRow
+		var total int
+		if rows, total, err = searchCatalog(api, strings.Join(f.args, " ")); err == nil {
+			printSearch(rows, total, strings.Join(f.args, " "))
+			return 0
 		}
 	}
-	for _, rel := range sortedKeys(c.Bindings) {
-		b := c.Bindings[rel]
-		if hit(b.Name, rel, b.Action.Skill, strings.Join(b.Tags, " "), b.Body) {
-			found++
-			fmt.Printf("binding %-28s %s\n     %s add %s\n", b.Name, firstLine(b.Body), cliName, strings.TrimSuffix(rel, ".md"))
-		}
-	}
-	if found == 0 {
+	fmt.Fprintf(os.Stderr, "paws: %v\n", err)
+	return 1
+}
+
+func printSearch(rows []catalogRow, total int, q string) {
+	if total == 0 {
 		fmt.Printf("nothing matches %q\n", q)
+		return
 	}
-	return 0
+	for _, r := range rows {
+		desc := printable(r.Description)
+		if len(desc) > 100 {
+			desc = strings.TrimSpace(desc[:97]) + "..."
+		}
+		fmt.Printf("%-28s %s\n", printable(r.Name), desc)
+		if r.Add != "" {
+			fmt.Printf("     %s\n", printable(r.Add))
+		}
+	}
+	if total > len(rows) {
+		fmt.Printf("%d more; narrow the search, or browse %s/catalog\n", total-len(rows), defaultSiteURL)
+	}
 }
 
 // Index writes the catalog as JSON for the website and the local UI: `paws index [-o file]`.

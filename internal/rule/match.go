@@ -5,8 +5,9 @@ import (
 	"strings"
 )
 
-// gitAnchor requires git to start a command (or follow ;/&/|/newline) so echoed text or commit messages can't trip it.
-const gitAnchor = `(^|[;&|\n])\s*`
+// gitAnchor requires git to start a command: at the start, after ;/&/|/newline or an opening "(" or "$(", or as the
+// script a shell runs (bash -c "...", sh -lc '...'). Echoed text and commit messages can't trip it.
+const gitAnchor = `(^|[;&|\n(]|\b(ba|z|da|k)?sh(\s+-\w+)*\s+-\w*c\s+["']?)\s*`
 const gitFlags = `(\s+-C\s+\S+|\s+--?[\w-]+(=\S+)?)*`
 
 // gitEnd ends the subcommand word (space, ;, a redirect, a paren...); \b alone would let

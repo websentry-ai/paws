@@ -1,6 +1,0 @@
-name: database
-description: "Org guardrails for Postgres writes: count before UPDATE/DELETE, run them in a transaction, migrations for schema changes, backup before mass deletes."
-tags: [org, database]
-bindings:
-  - databases/postgres.md
-  - databases/postgres-mcp.md

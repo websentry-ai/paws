@@ -132,6 +132,10 @@ func TestMatchesGitSyntheticEvents(t *testing.T) {
 	for c, want := range map[string]bool{
 		"git commit-tree HEAD^{tree} -m x": true, "git commit-graph write": false, "git commit": true,
 		"git commit>/dev/null -m x": true, "git commit</dev/null": true,
+		// git run by a shell or in a subshell is still git
+		`bash -c "git commit -m x"`: true, `sh -c 'git commit -m x'`: true, `bash -lc "cd x && git commit"`: true,
+		`/bin/zsh -e -c "git commit"`: true, "(git commit -m x)": true, `out=$(git commit -m x)`: true,
+		`ssh -c aes git commit`: false, `echo "sh-c git commit"`: false, `bash script.sh "git commit"`: false,
 	} {
 		if got := commit.Matches("Bash", c); got != want {
 			t.Errorf("pre-commit on %q = %v, want %v", c, got, want)
@@ -145,6 +149,9 @@ func TestMatchesGitSyntheticEvents(t *testing.T) {
 	}
 	if push.Matches("Bash", `echo "we should git push soon"`) {
 		t.Error("pre-push should not fire on echoed text, only an actual git push")
+	}
+	if !push.Matches("Bash", `bash -c 'git push origin main'`) {
+		t.Error("pre-push should match a git push a shell runs")
 	}
 	if !push.Matches("Bash", "git -C sub push") {
 		t.Error("pre-push should match git with flags before the subcommand")

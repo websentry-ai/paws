@@ -322,17 +322,35 @@ func ReinstallBundledSkill(fsys fs.FS, skillsDir, name, source string) (string, 
 	return BundledInstalled, nil
 }
 
-// UpstreamMismatch: the upstream content at the pinned ref doesn't hash to the expected value.
+// UpstreamMismatch: the skill files paws got don't hash to the expected value.
 const UpstreamMismatch = "hash-mismatch"
 
-// InstallUpstreamSkill installs skill name from repo@ref (skillPath is its SKILL.md), refusing
-// content that doesn't hash to want. Same rules as `paws add`: a user's own or edited copy is
-// kept, and a paws copy already at this source and hash is not fetched again.
-func InstallUpstreamSkill(ctx context.Context, skillsDir, name, repo, skillPath, ref, want string) (string, error) {
+// SkillFiles returns a skill directory by its content hash. The CLI points it at the paws backend, which keeps every
+// catalog skill's files; nothing else is trusted, since the caller checks the hash. Tests replace it.
+var SkillFiles func(ctx context.Context, hash string) (fs.FS, error)
+
+// fetchSkill gets a skill directory by hash; ok is false when what came back doesn't hash to want.
+func fetchSkill(ctx context.Context, want string) (fsys fs.FS, ok bool, err error) {
+	if SkillFiles == nil {
+		return nil, false, fmt.Errorf("no source for skill files")
+	}
+	if fsys, err = SkillFiles(ctx, want); err != nil {
+		return nil, false, err
+	}
+	got, err := HashSkill(fsys)
+	if err != nil {
+		return nil, false, err
+	}
+	return fsys, got == want, nil
+}
+
+// InstallSkillByHash installs skill name with the files that hash to want, recording source (repo@ref, or
+// catalog:<name>) in its marker. Same rules as `paws add`: a user's own or edited copy is kept, and a paws copy
+// already at this source and hash is not fetched again.
+func InstallSkillByHash(ctx context.Context, skillsDir, name, source, want string) (string, error) {
 	if !catalog.ValidSkillName(name) {
 		return "", fmt.Errorf("invalid skill name %q", name)
 	}
-	source := repo + "@" + ref
 	if dest := filepath.Join(skillsDir, name); exists(dest) {
 		if !replaceable(dest) {
 			return BundledKept, nil
@@ -341,15 +359,14 @@ func InstallUpstreamSkill(ctx context.Context, skillsDir, name, repo, skillPath,
 			return BundledCurrent, nil
 		}
 	}
-	dir, tmp, hash, err := FetchUpstream(ctx, repo, ref, skillPath)
+	fsys, ok, err := fetchSkill(ctx, want)
 	if err != nil {
 		return "", err
 	}
-	defer os.RemoveAll(tmp)
-	if hash != want {
+	if !ok {
 		return UpstreamMismatch, nil
 	}
-	if _, err := installSkill(os.DirFS(dir), skillsDir, name, marker{Skill: name, Source: source, Hash: hash}); err != nil {
+	if _, err := installSkill(fsys, skillsDir, name, marker{Skill: name, Source: source, Hash: want}); err != nil {
 		return "", err
 	}
 	return BundledInstalled, nil

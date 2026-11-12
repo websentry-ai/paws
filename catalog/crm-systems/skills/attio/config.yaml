@@ -1,9 +1,0 @@
-# Filled into SKILL.md at install: each KEY placeholder gets its value. Angle-bracket values are
-# org settings with no safe default; SKILL.md "Defaults" says what applies until set.
-placeholders:
-  AGENT_ATTRIBUTION_CONVENTION: '[created-by: ai-agent]'
-  ARCHIVE_PATH: 'archiving: remove the record from active lists and mark it archived via the org''s status attribute'
-  BULK_THRESHOLD: '10'
-  DEDUP_MATCH_FIELDS: email (people), domain (companies)
-  DEFAULT_RECORD_OWNER: <record-owner>
-  REQUIRED_FIELDS_REGISTRY: <required-fields-registry>

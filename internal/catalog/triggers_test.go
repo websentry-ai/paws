@@ -1,81 +1,46 @@
 package catalog
 
 import (
-	"encoding/json"
-	"os"
 	"strings"
 	"testing"
 )
 
-// triggerCases is testdata/trigger_cases.json: for a catalog binding, calls its trigger must fire on and near
-// misses it must ignore, each a [tool, target] pair (target is the command, file path, URL, prompt, MCP input or
-// session source the hook matches against).
-type triggerCases map[string]struct {
-	Fires   [][2]string `json:"fires"`
-	Ignores [][2]string `json:"ignores"`
-}
-
-// A trigger that fires when its skill doesn't apply blocks the call until Claude loads a skill it doesn't need.
-// These cases pin each listed binding's trigger to the moments it was reviewed for, so a later edit can't widen it
-// unnoticed.
-func TestCatalogTriggersFireOnlyWhereReviewed(t *testing.T) {
-	c, probs := Load("../..")
+// CheckTriggerCases is what `paws catalog push` runs before anything reaches the published catalog.
+func TestCheckTriggerCases(t *testing.T) {
+	root := goodRoot(t)
+	c, probs := Load(root)
 	if len(probs) > 0 {
-		t.Fatalf("catalog problems: %v", probs)
+		t.Fatal(probs)
 	}
-	data, err := os.ReadFile("testdata/trigger_cases.json")
-	if err != nil {
-		t.Fatal(err)
+	ok := TriggerCases{
+		"humanizer-pr":  {Fires: [][2]string{{"Bash", "gh pr create --fill"}}, Ignores: [][2]string{{"Bash", "gh pr view"}}},
+		"stop-slop-pr":  {Fires: [][2]string{{"Bash", "gh pr create"}}, Ignores: [][2]string{{"Bash", "gh issue create"}}},
+		"aws-s3-create": {Fires: [][2]string{{"Bash", "aws s3 mb s3://b"}}, Ignores: [][2]string{{"Bash", "aws s3 ls"}}},
 	}
-	var cases triggerCases
-	if err := json.Unmarshal(data, &cases); err != nil {
-		t.Fatal(err)
+	if got := CheckTriggerCases(c, ok, nil); len(got) != 0 {
+		t.Fatalf("good cases reported %v", got)
 	}
-	byName := map[string]*Binding{}
-	for _, b := range c.Bindings {
-		byName[b.Name] = b
+
+	bad := TriggerCases{
+		"humanizer-pr": {Fires: [][2]string{{"Bash", "gh pr view"}}, Ignores: [][2]string{{"Bash", "gh pr create"}}},
+		"stop-slop-pr": {Fires: [][2]string{{"Bash", "gh pr create"}}},
+		"gone":         {Fires: [][2]string{{"Bash", "x"}}, Ignores: [][2]string{{"Bash", "y"}}},
 	}
-	// Every binding needs cases, except the ones from before this file, listed in without_trigger_cases.txt.
-	older := map[string]bool{}
-	list, err := os.ReadFile("testdata/without_trigger_cases.txt")
-	if err != nil {
-		t.Fatal(err)
-	}
-	for _, line := range strings.Split(string(list), "\n") {
-		if line = strings.TrimSpace(line); line != "" && !strings.HasPrefix(line, "#") {
-			older[line] = true
+	got := strings.Join(CheckTriggerCases(c, bad, map[string]bool{"old-rule": true}), "\n")
+	for _, want := range []string{
+		`humanizer-pr: should fire on Bash "gh pr view"`,
+		`humanizer-pr: should ignore Bash "gh pr create"`,
+		"stop-slop-pr: needs calls it fires on and near misses it ignores",
+		"gone: has cases but is not in the catalog",
+		"aws-s3-create: add its fire and ignore cases",
+		"old-rule: exempt from cases but no longer in the catalog",
+	} {
+		if !strings.Contains(got, want) {
+			t.Errorf("missing %q in:\n%s", want, got)
 		}
 	}
-	for name := range byName {
-		if _, ok := cases[name]; !ok && !older[name] {
-			t.Errorf("%s: add its fire and ignore cases to testdata/trigger_cases.json", name)
-		}
-	}
-	for name := range older {
-		if byName[name] == nil {
-			t.Errorf("%s: in without_trigger_cases.txt but no longer in the catalog; remove it from the list", name)
-		} else if _, ok := cases[name]; ok {
-			t.Errorf("%s: has cases now; remove it from without_trigger_cases.txt", name)
-		}
-	}
-	for name, tc := range cases {
-		b := byName[name]
-		if b == nil {
-			t.Errorf("%s: in trigger_cases.json but not in the catalog", name)
-			continue
-		}
-		if len(tc.Fires) == 0 || len(tc.Ignores) == 0 {
-			t.Errorf("%s: needs calls it fires on and near misses it ignores", name)
-		}
-		for _, call := range tc.Fires {
-			if !b.Matches(call[0], call[1]) {
-				t.Errorf("%s: should fire on %s %q", name, call[0], call[1])
-			}
-		}
-		for _, call := range tc.Ignores {
-			if b.Matches(call[0], call[1]) {
-				t.Errorf("%s: should ignore %s %q", name, call[0], call[1])
-			}
-		}
+	if got := CheckTriggerCases(c, ok, map[string]bool{"aws-s3-create": true}); len(got) != 1 ||
+		!strings.Contains(got[0], "aws-s3-create: has cases now") {
+		t.Errorf("an exempt binding with cases: %v", got)
 	}
 }

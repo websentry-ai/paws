@@ -18,8 +18,8 @@ import (
 	"github.com/websentry-ai/paws/internal/rule"
 )
 
-// UI serves the local picker: `paws ui [--port N] [--no-open]`. Read-only by design: it shows
-// the catalog, what is installed and what fired, with `paws add` commands to copy. It binds
+// UI serves the local page: `paws ui [--port N] [--no-open]`. Read-only by design: it shows
+// what is installed and what fired, and links to the catalog on the website. It binds
 // to 127.0.0.1 and answers only requests addressed to that host, so another site can't read
 // it through DNS rebinding.
 func UI(args []string) int {
@@ -84,14 +84,6 @@ func uiHandler(addr string) http.Handler {
 	page, _ := fs.Sub(paws.Web, "web/dist")
 	mux := http.NewServeMux()
 	mux.Handle("/", http.FileServer(http.FS(page)))
-	mux.HandleFunc("/api/catalog", func(w http.ResponseWriter, r *http.Request) {
-		c, err := loadCatalog("")
-		if err != nil {
-			http.Error(w, err.Error(), http.StatusInternalServerError)
-			return
-		}
-		writeJSON(w, buildIndex(c))
-	})
 	mux.HandleFunc("/api/installed", func(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, installedView())
 	})

@@ -79,6 +79,9 @@ func split(line string, out *[]command, depth int, lim *limits, sc *scope) bool 
 	s := splitter{out: out, sc: sc, walked: map[walkKey]bool{}, lim: lim, piped: map[*syntax.BinaryCmd]bool{},
 		bg: map[*syntax.Stmt]bool{}}
 	s.walk(f, depth)
+	for _, action := range s.traps { // the shell runs EXIT and other handlers after the line's commands
+		s.nestedIn(action, depth, s.sc)
+	}
 	return true
 }
 
@@ -93,6 +96,7 @@ type splitter struct {
 	lim    *limits                    // what the whole line may still cost
 	piped  map[*syntax.BinaryCmd]bool // pipes already read as one pipeline
 	bg     map[*syntax.Stmt]bool      // background statements already entered
+	traps  []string                   // trap handlers, read again once the line is done
 }
 
 // scope is one shell's functions, and how many definitions it has seen (a walked body is keyed on it).
@@ -264,9 +268,12 @@ func (s *splitter) stmt(stmt *syntax.Stmt, depth int) {
 					args = args[1:]
 				}
 				s.nestedIn(strings.Join(args, " "), depth, s.sc) // eval runs in this shell
-			case head == "trap": // trap 'git push' EXIT runs its action in this shell, as eval does
+			case head == "trap": // trap 'git push' EXIT runs its action later, in this shell
 				if action, ok := trapAction(bare[1:]); ok {
-					s.nestedIn(action, depth, s.sc)
+					// Read now in a copy of the scope (a signal may come at any time; what the handler defines
+					// stays out of the line), and again once the line is done, with every function defined by then.
+					s.nestedIn(action, depth, s.sc.child())
+					s.traps = append(s.traps, action)
 				}
 			case s.sc.funcs[bare[0]] != nil && !s.walked[walkKey{s.sc.funcs[bare[0]], s.sc, s.sc.defs}] &&
 				depth < maxNesting && s.lim.funcWalks > 0:
@@ -688,9 +695,9 @@ func envCommand(w []string) []string {
 			if len(w) < 2 {
 				return nil
 			}
-			w = append(shellWords(w[1]), w[2:]...)
+			w = append(envSplitString(w[1]), w[2:]...)
 		case strings.HasPrefix(a, "--split-string="):
-			w = append(shellWords(strings.TrimPrefix(a, "--split-string=")), w[1:]...)
+			w = append(envSplitString(strings.TrimPrefix(a, "--split-string=")), w[1:]...)
 		case a == "--unset" || a == "--chdir":
 			w = w[min(2, len(w)):]
 		case a == "--":
@@ -708,25 +715,90 @@ func envCommand(w []string) []string {
 	return w
 }
 
-// shellWords splits s into words as the shell would, quotes removed (env -S "'git' push" runs git push); text that
-// isn't valid shell falls back to splitting on spaces.
-func shellWords(s string) []string {
-	f, err := syntax.NewParser(syntax.Variant(syntax.LangBash)).Parse(strings.NewReader(s), "")
-	if err != nil || len(f.Stmts) != 1 {
-		return strings.Fields(s)
+// envSplitString splits an env -S operand the way GNU env does, which is not bash's grammar: whitespace separates
+// words; '...' is literal except \\ and \'; "..." and unquoted text take the escapes \" \' \\ \# \$ \t \n \r
+// \f \v; \_ is a word break outside quotes and a space inside "..."; \c ends the string; # starting a word starts a
+// comment. ${VAR} stays as written.
+func envSplitString(str string) []string {
+	var words []string
+	var cur strings.Builder
+	inWord := false
+	flush := func() {
+		if inWord {
+			words = append(words, cur.String())
+			cur.Reset()
+			inWord = false
+		}
 	}
-	call, ok := f.Stmts[0].Cmd.(*syntax.CallExpr)
-	if !ok {
-		return strings.Fields(s)
+	for i := 0; i < len(str); i++ {
+		c := str[i]
+		switch {
+		case c == ' ' || c == '\t' || c == '\n' || c == '\r' || c == '\f' || c == '\v':
+			flush()
+		case c == '#' && !inWord:
+			return words
+		case c == '\'':
+			inWord = true
+			for i++; i < len(str) && str[i] != '\''; i++ {
+				if str[i] == '\\' && i+1 < len(str) && (str[i+1] == '\\' || str[i+1] == '\'') {
+					i++
+				}
+				cur.WriteByte(str[i])
+			}
+		case c == '"':
+			inWord = true
+			for i++; i < len(str) && str[i] != '"'; i++ {
+				if str[i] == '\\' && i+1 < len(str) {
+					i++
+					if str[i] == 'c' {
+						flush()
+						return words
+					}
+					cur.WriteString(envEscape(str[i], true))
+					continue
+				}
+				cur.WriteByte(str[i])
+			}
+		case c == '\\' && i+1 < len(str):
+			i++
+			switch str[i] {
+			case '_':
+				flush()
+			case 'c':
+				flush()
+				return words
+			default:
+				inWord = true
+				cur.WriteString(envEscape(str[i], false))
+			}
+		default:
+			inWord = true
+			cur.WriteByte(c)
+		}
 	}
-	words := make([]string, 0, len(call.Assigns)+len(call.Args))
-	for _, a := range call.Assigns {
-		words = append(words, source(a))
-	}
-	for _, w := range call.Args {
-		words = append(words, wordString(w))
-	}
+	flush()
 	return words
+}
+
+// envEscape is what env -S makes of \c for one escape letter c.
+func envEscape(c byte, quoted bool) string {
+	switch c {
+	case 't':
+		return "\t"
+	case 'n':
+		return "\n"
+	case 'r':
+		return "\r"
+	case 'f':
+		return "\f"
+	case 'v':
+		return "\v"
+	case '_':
+		if quoted {
+			return " "
+		}
+	}
+	return string(c)
 }
 
 // envShortFlags reads one cluster of env's short flags (-iS'cmd', -u NAME) and returns the words after it.
@@ -736,12 +808,12 @@ func envShortFlags(a string, rest []string) []string {
 		switch a[i] {
 		case 'S':
 			if attached != "" {
-				return append(shellWords(attached), rest...)
+				return append(envSplitString(attached), rest...)
 			}
 			if len(rest) == 0 {
 				return nil
 			}
-			return append(shellWords(rest[0]), rest[1:]...)
+			return append(envSplitString(rest[0]), rest[1:]...)
 		case 'u', 'C', 'P':
 			if attached != "" || len(rest) == 0 {
 				return rest

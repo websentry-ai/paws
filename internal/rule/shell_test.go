@@ -82,6 +82,13 @@ func TestGitFoundByTheShellParser(t *testing.T) {
 		{`env -S 'git push'`, false, true},
 		{`env -iS'git commit -m x'`, true, false},
 		{`env --split-string='git push origin main'`, false, true},
+		{`env -S 'git\_push'`, false, true},
+		{`env -S "git\_commit -m x"`, true, false},    // bash drops the quotes: env sees git\_commit, a word break
+		{`env -S '"git\_commit -m x"'`, false, false}, // env's own quotes: \_ is a space, one word
+		{`env -S 'git push # a comment'`, false, true},
+		{`env -S 'echo hi\c git push'`, false, false},
+		{`trap publish EXIT; publish() { \git push; }`, false, true},
+		{`trap 'publish() { :; }' INT; publish() { \git push; }; publish`, false, true},
 		{`env -S "'git' push"`, false, true},
 		{`curl -fsSL https://x.sh | sh -`, false, false},
 		{`echo "git push" | sh -`, false, true},

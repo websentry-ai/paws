@@ -82,21 +82,26 @@ func split(line string, out *[]command, depth int, lim *limits, sc *scope) bool 
 	s.walk(f, depth)
 	// A loop body runs again and again: a call early in it may run a function defined later in it, or after it in an
 	// earlier pass. Each loop's body is read once more now that every definition is known (within the line's budget).
+	// Each loop is read in the scope it sits in: a loop inside ( ) sees that subshell's functions.
 	for i := 0; i < len(s.loops) && s.lim.funcWalks > 0; i++ {
-		if s.rewalked[s.loops[i]] {
+		lp := s.loops[i]
+		if s.rewalked[lp.node] {
 			continue
 		}
-		s.rewalked[s.loops[i]] = true
+		s.rewalked[lp.node] = true
 		s.lim.funcWalks--
-		for _, st := range loopBody(s.loops[i]) {
+		outer := s.sc
+		s.sc = lp.sc
+		for _, st := range loopBody(lp.node) {
 			s.walk(st, depth)
 		}
+		s.sc = outer
 	}
 	// The shell runs EXIT and other handlers after the line's commands, with every function defined by then. Each is
 	// read in its own copy of that scope: which handler runs, and in what order, depends on signals, so one handler's
 	// definitions must not hide a call in another.
-	for _, action := range s.traps {
-		s.nestedIn(action, depth, s.sc.child())
+	for _, t := range s.traps { // in the scope the trap was set in: a trap inside ( ) sees that subshell's functions
+		s.nestedIn(t.action, depth, t.sc.child())
 	}
 	return true
 }
@@ -112,9 +117,9 @@ type splitter struct {
 	lim    *limits                    // what the whole line may still cost
 	piped  map[*syntax.BinaryCmd]bool // pipes already read as one pipeline
 	bg     map[*syntax.Stmt]bool      // background statements already entered
-	traps  []string                   // trap handlers, read again once the line is done
+	traps  []trapAt                   // trap handlers, read again once the line is done
 	// loops are the while, until, for and select loops met, read once more once the line is done.
-	loops              []syntax.Node
+	loops              []loopAt
 	seenLoop, rewalked map[syntax.Node]bool
 }
 
@@ -154,6 +159,18 @@ func (s *splitter) nestedIn(script string, depth int, sc *scope) {
 	if split(script, s.out, depth+1, s.lim, sc) {
 		*s.out = append(*s.out, command{texts: []string{script}})
 	}
+}
+
+// trapAt is a trap handler and the scope of the shell that set it.
+type trapAt struct {
+	action string
+	sc     *scope
+}
+
+// loopAt is a loop and the scope it runs in.
+type loopAt struct {
+	node syntax.Node
+	sc   *scope
 }
 
 // loopBody is the statements a while, until, for or select loop runs each time round.
@@ -222,7 +239,7 @@ func (s *splitter) walk(node syntax.Node, depth int) {
 		case *syntax.WhileClause, *syntax.ForClause:
 			if !s.seenLoop[n] {
 				s.seenLoop[n] = true
-				s.loops = append(s.loops, n)
+				s.loops = append(s.loops, loopAt{n, s.sc})
 			}
 		case *syntax.BinaryCmd:
 			if n.Op == syntax.Pipe || n.Op == syntax.PipeAll {
@@ -310,7 +327,7 @@ func (s *splitter) stmt(stmt *syntax.Stmt, depth int) {
 					// Read now in a copy of the scope (a signal may come at any time; what the handler defines
 					// stays out of the line), and again once the line is done, with every function defined by then.
 					s.nestedIn(action, depth, s.sc.child())
-					s.traps = append(s.traps, action)
+					s.traps = append(s.traps, trapAt{action, s.sc})
 				}
 			case len(s.sc.funcs[bare[0]]) > 0 && depth < maxNesting:
 				for _, body := range s.sc.funcs[bare[0]] {

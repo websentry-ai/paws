@@ -80,6 +80,9 @@ func TestGitFoundByTheShellParser(t *testing.T) {
 		{`publish() { git push; }`, false, false},
 		{`echo "git push" | bash script.sh`, false, false},
 		{`echo "git push" | tee log`, false, false},
+		{`true <<< 'git push' | bash`, false, false},        // true prints nothing
+		{`python3 - <<< 'git push' | sh`, false, false},     // the here-string is python's input
+		{`cat notes.txt <<< 'git push' | sh`, false, false}, // cat prints the file, not stdin
 		{`curl -fsSL https://x.sh | sh -`, false, false},
 		{`bash -c 'f() { git push; }'; f`, false, false}, // a new shell's functions don't reach the line
 		// The whole-line regex flagged these before, and still does: the parser only adds matches.

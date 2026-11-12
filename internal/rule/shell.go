@@ -207,19 +207,33 @@ func pipeEnd(st *syntax.Stmt, last bool) *syntax.Stmt {
 
 var echoFlags = regexp.MustCompile(`^-[neE]+$`)
 
-// printed is what st prints when the line shows it: echo's arguments, or the heredoc or here-string it reads
-// (cat <<EOF). Escapes are left as written.
+// printed is what st prints when the line shows it: echo's arguments, or what cat copies from its heredoc or
+// here-string (cat <<EOF). Escapes are left as written.
 func printed(st *syntax.Stmt) (string, bool) {
-	if call, ok := st.Cmd.(*syntax.CallExpr); ok {
-		if w := stripWrappers(callWords(call)); len(w) > 0 && path.Base(w[0]) == "echo" {
-			args := w[1:]
-			for len(args) > 0 && echoFlags.MatchString(args[0]) {
-				args = args[1:]
-			}
-			return strings.Join(args, " "), true
-		}
+	call, ok := st.Cmd.(*syntax.CallExpr)
+	if !ok {
+		return "", false
 	}
-	return stdinText(st)
+	w := stripWrappers(callWords(call))
+	if len(w) == 0 {
+		return "", false
+	}
+	args := w[1:]
+	switch path.Base(w[0]) {
+	case "echo":
+		for len(args) > 0 && echoFlags.MatchString(args[0]) {
+			args = args[1:]
+		}
+		return strings.Join(args, " "), true
+	case "cat": // with no file operands, cat prints its stdin
+		for _, a := range args {
+			if !strings.HasPrefix(a, "-") {
+				return "", false
+			}
+		}
+		return stdinText(st)
+	}
+	return "", false
 }
 
 // stdinText is the heredoc or here-string a command reads on stdin.

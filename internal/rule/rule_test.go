@@ -139,6 +139,7 @@ func TestMatchesGitSyntheticEvents(t *testing.T) {
 		`echo "(git commit)"`: false, `echo "$(git commit -m x)"`: true, "ls; (git commit -m x)": true,
 		`sh -ce 'git commit -m x'`: true, `bash -euxc "git commit"`: true, `bash --rcfile x git commit`: false,
 		`echo "use bash -c git commit"`: false, `sudo bash -c "git commit"`: true, "cd x; sh -c 'git commit'": true,
+		`bash -c '(git commit -m x)'`: true, `(bash -c 'git commit -m x')`: true, `x=$(sh -c "git commit")`: true,
 	} {
 		if got := commit.Matches("Bash", c); got != want {
 			t.Errorf("pre-commit on %q = %v, want %v", c, got, want)

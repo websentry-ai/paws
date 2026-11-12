@@ -5,11 +5,11 @@ import (
 	"strings"
 )
 
-// gitAnchor requires git to start a command: at the start or after ;/&/|/newline, optionally as a ( subshell or as
-// the script a shell started there runs (bash -c "...", sh -lc '...', /bin/zsh -ec "...": c anywhere in the combined
-// short flags), or inside $( ), which runs even within double quotes. Echoed text and commit messages can't trip
-// it: a "(" or a "bash -c" inside a quoted argument doesn't start a command.
-const gitAnchor = `((^|[;&|\n])\s*(\(|(sudo\s+)?(\S*/)?(ba|z|da|k)?sh(\s+-\w+)*\s+-\w*c\w*\s+["']?)?|\$\()\s*`
+// gitAnchor requires git to start a command: at the start, after ;/&/|/newline, or inside $( ) (which runs even
+// within double quotes), then through any mix of ( subshells and shells that run a script (bash -c "...",
+// sh -lc '...', /bin/zsh -ec "...": c anywhere in the combined short flags), as in bash -c '(git push)'. Echoed
+// text and commit messages can't trip it: a "(" or a "bash -c" inside a quoted argument doesn't start a command.
+const gitAnchor = `((^|[;&|\n])\s*|\$\()(\(\s*|(sudo\s+)?(\S*/)?(ba|z|da|k)?sh(\s+-\w+)*\s+-\w*c\w*\s+["']?)*\s*`
 const gitFlags = `(\s+-C\s+\S+|\s+--?[\w-]+(=\S+)?)*`
 
 // gitEnd ends the subcommand word (space, ;, a redirect, a paren...); \b alone would let

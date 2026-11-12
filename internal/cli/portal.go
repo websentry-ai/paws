@@ -237,6 +237,10 @@ func Login(args []string) int {
 	} else {
 		tok, err = deviceLogin(api)
 	}
+	if errors.Is(err, errAccountDeleted) {
+		fmt.Fprintln(os.Stderr, accountDeletedMessage)
+		return 1
+	}
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "paws: %v\n", err)
 		return 1
@@ -248,7 +252,7 @@ func Login(args []string) int {
 		return 1
 	}
 	if st := loadPortalState(); st.Revoked {
-		st.Revoked = false
+		st.Revoked, st.AccountDeleted = false, false
 		savePortalState(st)
 	}
 	if c.AccountEmail != "" {
@@ -326,6 +330,11 @@ func redeemKey(api, key string) (deviceToken, error) {
 		return tok, errors.New("portal: malformed token response")
 	case http.StatusGone:
 		return tok, errors.New("this key was already used or has expired; make a new one in the portal")
+	case http.StatusForbidden:
+		if isAccountDeleted(resp) {
+			return tok, errAccountDeleted
+		}
+		return tok, portalError(status, resp)
 	default:
 		return tok, portalError(status, resp)
 	}
@@ -378,6 +387,9 @@ func pollDeviceToken(api string, dc deviceCode) (deviceToken, error) {
 		case http.StatusPreconditionRequired: // 428: not confirmed yet
 			continue
 		case http.StatusForbidden:
+			if isAccountDeleted(resp) {
+				return tok, errAccountDeleted
+			}
 			return tok, errors.New("the login was denied")
 		case http.StatusGone:
 			return tok, fmt.Errorf("the code expired; run `%s login` again", cliName)

@@ -88,49 +88,48 @@ func split(line string, out *[]command, depth int) bool {
 	if err != nil {
 		return false
 	}
-	s := splitter{out: out, funcs: map[string]*syntax.Stmt{}, ok: true}
-	syntax.Walk(f, func(n syntax.Node) bool {
-		if fd, ok := n.(*syntax.FuncDecl); ok {
-			s.funcs[fd.Name.Value] = fd.Body
-		}
-		return true
-	})
-	s.walk(f, depth, map[string]bool{})
+	s := splitter{out: out, funcs: map[string]*syntax.Stmt{}, walked: map[*syntax.Stmt]bool{}, ok: true}
+	s.walk(f, depth)
 	return s.ok
 }
 
-// splitter collects the commands of one parsed line. funcs are the functions it defines: defining one runs nothing,
-// so a body counts only where the line calls it.
+// splitter collects the commands of one parsed line. funcs are the functions defined so far, in the order the shell
+// runs the line: defining one runs nothing, so a body counts where a call runs it, and each body is read once.
 type splitter struct {
-	out   *[]command
-	funcs map[string]*syntax.Stmt
-	ok    bool // false once a nested script didn't parse: the whole line is then read the old way
+	out    *[]command
+	funcs  map[string]*syntax.Stmt
+	walked map[*syntax.Stmt]bool
+	ok     bool // false once a nested script didn't parse: the whole line is then read the old way
 }
 
-// nested splits a script the line runs (bash -c, a heredoc, eval, a pipe into a shell).
+// nested splits a script the line runs (bash -c, a heredoc, eval, a pipe into a shell). The script whole, with
+// quoted separators blanked, is one more text: a rule spanning commands (`curl x | sh`) still sees it inside bash -c.
 func (s *splitter) nested(script string, depth int) {
 	if !split(script, s.out, depth+1) {
 		s.ok = false
+		return
 	}
+	*s.out = append(*s.out, command{texts: []string{flatten(script)}})
 }
 
-func (s *splitter) walk(node syntax.Node, depth int, calling map[string]bool) {
+func (s *splitter) walk(node syntax.Node, depth int) {
 	syntax.Walk(node, func(n syntax.Node) bool {
 		switch n := n.(type) {
 		case *syntax.FuncDecl:
+			s.funcs[n.Name.Value] = n.Body
 			return false
 		case *syntax.BinaryCmd:
 			if n.Op == syntax.Pipe || n.Op == syntax.PipeAll {
 				s.pipedScript(n, depth)
 			}
 		case *syntax.Stmt:
-			s.stmt(n, depth, calling)
+			s.stmt(n, depth)
 		}
 		return true
 	})
 }
 
-func (s *splitter) stmt(stmt *syntax.Stmt, depth int, calling map[string]bool) {
+func (s *splitter) stmt(stmt *syntax.Stmt, depth int) {
 	// Redirections stay on the command's text ("python - <<'PY'", "cmd >log"): some triggers name them.
 	var redirs []string
 	for _, r := range stmt.Redirs {
@@ -175,10 +174,10 @@ func (s *splitter) stmt(stmt *syntax.Stmt, depth int, calling map[string]bool) {
 				}
 			case head == "eval":
 				s.nested(strings.Join(bare[1:], " "), depth)
-			case s.funcs[bare[0]] != nil && !calling[bare[0]] && depth < maxNesting:
-				calling[bare[0]] = true
-				s.walk(s.funcs[bare[0]], depth+1, calling)
-				delete(calling, bare[0])
+			case s.funcs[bare[0]] != nil && !s.walked[s.funcs[bare[0]]] && depth < maxNesting:
+				body := s.funcs[bare[0]]
+				s.walked[body] = true
+				s.walk(body, depth+1)
 			}
 		}
 		text := commandText(words, redirs)
@@ -334,11 +333,13 @@ func stripWrappers(w []string) []string {
 	for len(w) > 0 {
 		switch path.Base(w[0]) {
 		case "sudo":
-			w = skipFlags(w[1:], "-u", "-g", "-C", "-D", "-h", "-p", "-r", "-t", "-U")
+			w = skipFlags(w[1:], "-u", "-g", "-C", "-D", "-h", "-p", "-r", "-t", "-U", "--user", "--group", "--chdir",
+				"--chroot", "--host", "--prompt", "--role", "--type", "--other-user", "--close-from")
 		case "env":
 			w = w[1:]
 			for len(w) > 0 && (strings.HasPrefix(w[0], "-") || strings.Contains(w[0], "=")) {
-				if w[0] == "-u" || w[0] == "-C" || w[0] == "-S" {
+				if w[0] == "-u" || w[0] == "-C" || w[0] == "-S" || w[0] == "--unset" || w[0] == "--chdir" ||
+					w[0] == "--split-string" {
 					w = w[1:]
 				}
 				if len(w) > 0 {
@@ -348,7 +349,8 @@ func stripWrappers(w []string) []string {
 		case "command", "exec", "nohup", "time":
 			w = skipFlags(w[1:], "-a")
 		case "xargs":
-			w = skipFlags(w[1:], "-I", "-d", "-E", "-n", "-L", "-P", "-s", "-a")
+			w = skipFlags(w[1:], "-I", "-d", "-E", "-n", "-L", "-P", "-s", "-a", "--delimiter", "--eof", "--max-args",
+				"--max-lines", "--max-procs", "--max-chars", "--arg-file")
 		default:
 			return w
 		}

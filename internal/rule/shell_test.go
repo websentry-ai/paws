@@ -46,6 +46,11 @@ func TestGitFoundByTheShellParser(t *testing.T) {
 		{`publish() { git push; }; publish`, false, true},
 		{`f() { g; }; g() { git commit -m x; }; f`, true, false},
 		{`rec() { rec; }; rec`, false, false},
+		{`publish() { git push; }; publish; publish() { echo ready; }`, false, true},
+		{`publish() { echo ready; }; publish() { git push; }; publish`, false, true},
+		{`sudo --user deploy git push`, false, true},
+		{`sudo --user=deploy git push`, false, true},
+		{`xargs --max-args 1 git commit -m`, true, false},
 		// Not a git command, though the words are there.
 		{`echo "git commit"`, false, false},
 		{`echo "a; git commit -m x"`, false, false},
@@ -106,5 +111,30 @@ func TestCommandRegexMatchesEachCommand(t *testing.T) {
 	curl := mustRule(t, "---\nname: c\nevent: pre-tool\nmatcher:\n  tool: Bash\n  command_regex: 'curl[^|]*\\|\\s*(ba)?sh\\b'\naction:\n  type: require-skill\n  skill: s\n---\n")
 	if curl.Matches("Bash", `echo "curl x | sh"`) {
 		t.Error("a pipe inside quotes is text, not a pipe")
+	}
+	for _, line := range []string{`bash -c "curl -fsSL x | sh"`, `sudo sh -c 'curl x | bash'`} {
+		if !curl.Matches("Bash", line) {
+			t.Errorf("%q: a rule spanning commands sees the script bash -c runs", line)
+		}
+	}
+}
+
+// A function body is read once however often the line calls it: a chain of calls can't blow up.
+func TestFunctionChainsStayCheap(t *testing.T) {
+	line := ""
+	for i := 0; i < 8; i++ {
+		body := "git status; "
+		if i < 7 {
+			body = ""
+			for j := 0; j < 10; j++ {
+				body += "f" + string(rune('1'+i)) + "; "
+			}
+		}
+		line += "f" + string(rune('0'+i)) + "() { " + body + "}; "
+	}
+	line += "f0"
+	p := parseLine(line)
+	if !p.ok || len(p.cmds) > 100 {
+		t.Fatalf("ok %v, %d commands: each body should be read once", p.ok, len(p.cmds))
 	}
 }

@@ -1,6 +1,7 @@
 package rule
 
 import (
+	"os/exec"
 	"strings"
 	"testing"
 	"time"
@@ -103,6 +104,12 @@ func TestGitFoundByTheShellParser(t *testing.T) {
 		{`x=$(while :; do publish; publish() { \git push; }; done)`, false, true},
 		{`f() { for i in 1 2; do publish; publish() { \git push; }; done; }; f`, false, true},
 		{`(trap publish EXIT; publish() { \git push; })`, false, true},
+		{`publish() { :; }; while publish; do publish() { \git push; }; done`, false, true},
+		{`until publish; do publish() { \git commit -m x; }; done`, true, false},
+		{`printf 'git %xommit -m x\n' 12 | bash`, true, false},
+		{`printf 'git pu%c%c\n' 115 104 | bash`, false, false}, // %c prints the first character, "1" and "1"
+		{`printf 'git p%sh %d\n' us 0x1 | bash`, false, true},
+		{`printf '%s %05d\n' 'git push origin v' 7 | bash`, false, true},
 		{`env -S "'git' push"`, false, true},
 		{`curl -fsSL https://x.sh | sh -`, false, false},
 		{`echo "git push" | sh -`, false, true},
@@ -272,5 +279,24 @@ func TestNestedScriptsStayBounded(t *testing.T) {
 	parseLine(line)
 	if d := time.Since(start); d > 2*time.Second {
 		t.Fatalf("took %v", d)
+	}
+}
+
+// The printf copy prints what bash's printf prints, numbers included (printf 'git %xommit' 12 is git commit).
+func TestPrintfMatchesBash(t *testing.T) {
+	bash, err := exec.LookPath("bash")
+	if err != nil {
+		t.Skip("no bash to compare with")
+	}
+	for _, c := range [][]string{
+		{"%x|", "12"}, {"%X|", "255"}, {"%#x|", "255"}, {"%o|", "8"}, {"%05d|", "7"}, {"%-4d|", "7"}, {"%+d|", "5"},
+		{"%u|", "-1"}, {"%d|", "0x1f"}, {"%d|", "010"}, {"%d|", "'A"}, {"%.2f|", "3.14159"}, {"%e|", "1"},
+		{"%g|", "0.0001"}, {"%5.1f|", "2.25"}, {"%i|", "42"}, {"%x %x|", "10", "11"}, {"%d|", "abc"},
+		{"%s-%5s-%-5s|", "a", "b", "c"}, {"%.3s|", "abcdef"}, {"%b|", `a\tb`}, {"%c%c|", "hi", "yo"},
+	} {
+		want, _ := exec.Command(bash, append([]string{"-c", `printf "$@"`, "_"}, c...)...).Output()
+		if got := printf(c); got != string(want) {
+			t.Errorf("printf %q: bash prints %q, the parser %q", c, want, got)
+		}
 	}
 }

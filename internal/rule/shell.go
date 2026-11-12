@@ -1,6 +1,7 @@
 package rule
 
 import (
+	"fmt"
 	"path"
 	"regexp"
 	"slices"
@@ -173,11 +174,12 @@ type loopAt struct {
 	sc   *scope
 }
 
-// loopBody is the statements a while, until, for or select loop runs each time round.
+// loopBody is the statements a while, until, for or select loop runs each time round, a while or until condition
+// included.
 func loopBody(n syntax.Node) []*syntax.Stmt {
 	switch n := n.(type) {
-	case *syntax.WhileClause:
-		return n.Do
+	case *syntax.WhileClause: // the condition runs again before every pass, too
+		return append(append([]*syntax.Stmt{}, n.Cond...), n.Do...)
 	case *syntax.ForClause:
 		return n.Do
 	}
@@ -591,6 +593,11 @@ func printf(args []string) string {
 				a, stop = decodeEscapes(a, escB)
 			case 'c':
 				a = a[:min(1, len(a))]
+			case 'd', 'i', 'o', 'u', 'x', 'X', 'e', 'E', 'f', 'F', 'g', 'G', 'a', 'A':
+				// Numbers print as numbers: printf 'git %xommit' 12 prints "git commit". The width is applied here
+				// with the flags (0-padding, +, #), so it isn't applied again below.
+				a = printfNumber(format[m[0]+1:m[2]], width, leftAlign, prec, conv, a)
+				width = 0
 			}
 			if (conv == 's' || conv == 'b') && prec >= 0 && prec < len(a) {
 				a = a[:prec]
@@ -612,6 +619,55 @@ func printf(args []string) string {
 			return b.String()
 		}
 	}
+}
+
+// printfNumber formats arg the way printf's numeric conversions do. Like bash it reads 0x, 0 (octal) and 'c (the
+// character's code); an argument that isn't a number prints as 0.
+func printfNumber(flags string, width int, leftAlign bool, prec int, conv byte, arg string) string {
+	arg = strings.TrimSpace(arg)
+	spec := "%" + strings.ReplaceAll(flags, "-", "")
+	if leftAlign {
+		spec += "-"
+	}
+	if width > 0 {
+		spec += strconv.Itoa(width)
+	}
+	if prec >= 0 {
+		spec += "." + strconv.Itoa(min(prec, maxPrintfWidth))
+	}
+	switch conv {
+	case 'e', 'E', 'f', 'F', 'g', 'G', 'a', 'A':
+		f, err := strconv.ParseFloat(arg, 64)
+		if err != nil {
+			f = float64(printfInt(arg))
+		}
+		verb := map[byte]string{'a': "e", 'A': "E", 'F': "f"}[conv]
+		if verb == "" {
+			verb = string(conv)
+		}
+		return fmt.Sprintf(spec+verb, f)
+	}
+	n := printfInt(arg)
+	switch conv {
+	case 'o', 'x', 'X':
+		return fmt.Sprintf(spec+string(conv), uint64(n))
+	case 'u':
+		return fmt.Sprintf(spec+"d", uint64(n))
+	}
+	return fmt.Sprintf(spec+"d", n)
+}
+
+// printfInt reads a printf integer argument: decimal, 0x hex, 0 octal, or 'c / "c for c's character code.
+func printfInt(arg string) int64 {
+	if len(arg) >= 2 && (arg[0] == '\'' || arg[0] == '"') {
+		r := []rune(arg[1:])
+		return int64(r[0])
+	}
+	n, err := strconv.ParseInt(arg, 0, 64)
+	if err != nil {
+		return 0
+	}
+	return n
 }
 
 // trapAction is the command `trap [-lpP] [--] action signal...` sets; trap - and a single operand reset instead.

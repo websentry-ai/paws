@@ -12,6 +12,14 @@ import (
 	"github.com/websentry-ai/paws/internal/pack"
 )
 
+func keysOfDoc(m map[string][]map[string]any) string {
+	k := map[string]any{}
+	for key := range m {
+		k[key] = 0
+	}
+	return keysOf(k)
+}
+
 func keysOf(m map[string]any) string {
 	var k []string
 	for key := range m {
@@ -21,8 +29,8 @@ func keysOf(m map[string]any) string {
 	return strings.Join(k, ",")
 }
 
-// paws index --portal writes the contract's /catalog: one entry per skill with exactly the
-// contract's fields, its default actions taken from the bindings that require it.
+// paws index --portal writes the document the backend loads: one record per skill with exactly these fields, its
+// default actions taken from the bindings that require it, beside the rule files, packs, digests and bundled skills.
 func TestIndexPortalMatchesCatalogContract(t *testing.T) {
 	dir := writeTestCatalog(t)
 	out := filepath.Join(t.TempDir(), "catalog.json")
@@ -34,18 +42,14 @@ func TestIndexPortalMatchesCatalogContract(t *testing.T) {
 		t.Fatal(err)
 	}
 	var doc map[string][]map[string]any
-	if err := json.Unmarshal(data, &doc); err != nil || len(doc) != 1 || len(doc["skills"]) == 0 {
-		t.Fatalf("want {skills:[...]}, got %s", data)
+	if err := json.Unmarshal(data, &doc); err != nil || len(doc["skills"]) == 0 ||
+		keysOf(map[string]any{"skills": 0, "bindings": 0, "packs": 0, "digests": 0, "bundled": 0}) != keysOfDoc(doc) {
+		t.Fatalf("want {skills, bindings, packs, digests, bundled}, got %s", data)
 	}
 	bySkill := map[string]map[string]any{}
 	for _, s := range doc["skills"] {
-		if got := keysOf(s); got != "content_hash,default_actions,description,kind,license,name,source_url,summary,tags,upstream,version" {
+		if got := keysOf(s); got != "add,content_hash,default_actions,kind,license,name,source_url,tags,upstream,version" {
 			t.Errorf("%v: keys %s", s["name"], got)
-		}
-		// The add-skill page shows every skill's summary; it comes from the skill's first binding. It says
-		// what the skill is about, not who acts on it: paws is not tied to one agent.
-		if sum, _ := s["summary"].(string); sum == "" || len(sum) > 140 || strings.Contains(sum, "Claude") {
-			t.Errorf("%v: summary must be set on its first binding, at most 140 characters, without \"Claude\", got %q", s["name"], sum)
 		}
 		for _, a := range s["default_actions"].([]any) {
 			am := a.(map[string]any)
@@ -95,7 +99,7 @@ func TestIndexPortalMatchesCatalogContract(t *testing.T) {
 	if g["upstream"] != nil || g["content_hash"] != want || g["license"] != "Apache-2.0" {
 		t.Errorf("git entry: upstream %v hash %v (want %s)", g["upstream"], g["content_hash"], want)
 	}
-	if g["source_url"] != "" { // the folder isn't in this repo; push sets a link with --bundled-source
+	if g["source_url"] != "" { // its files are published with the catalog, not on GitHub
 		t.Errorf("git source_url %v", g["source_url"])
 	}
 }

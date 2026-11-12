@@ -6,12 +6,11 @@ is what a user installs (`unbound-paws add writing`).
 The published catalog lives in the paws backend's database, not in this repo or
 the binary. The website pages through it, `unbound-paws search` and `add` ask for
 just what they need, and every skill is downloaded from the backend by content
-hash. To change it, pull a copy, edit it, and push it back (see
-[Edit the published catalog](#edit-the-published-catalog)).
+hash.
 
 ## Layout
 
-A catalog on disk (what `unbound-paws catalog pull` writes):
+A catalog on disk (what `--catalog <dir>` reads):
 
 ```
 catalog/<category>/<binding>.md              one binding
@@ -140,24 +139,11 @@ rejects an upstream binding without one.
 unbound-paws validate <dir>
 ```
 
+With a `trigger_cases.json` in `<dir>`, `validate` also runs every trigger against its cases.
+
 A trigger that fires when its skill doesn't apply blocks Claude until it loads a skill it doesn't need, so each
 binding's trigger is tested against real calls. `trigger_cases.json` lists, per binding name, calls the trigger must
 fire on and near misses it must ignore, as `[tool, target]` pairs; the target is what the hook matches (the command,
 file path, URL, subagent prompt, MCP input as JSON, or session source). Add a few of each with a new binding: a key
 word inside another word, the tool named in `echo` or a commit message, `--help`, a read-only subcommand when the
 skill is about writes. The first fire case of each binding is also the example the website shows under its trigger.
-
-## Edit the published catalog
-
-```
-export PAWS_ADMIN_KEY=...                 # the backend's admin key; never put it on the command line
-unbound-paws catalog pull ./catalog-copy  # an editable copy of what is published
-# edit rule files, packs, trigger_cases.json; unbound-paws pin ./catalog-copy after a ref changes
-unbound-paws catalog push ./catalog-copy
-```
-
-`push` publishes nothing unless the whole copy validates, every trigger passes its cases, and every upstream skill's
-repo grants a licence. It then uploads the files of each skill the backend doesn't have yet (fetched from GitHub at
-the pinned commit and checked against the pin) and replaces the published catalog in one step. Changing a skill's
-pinned version here changes what new installs get; people who already have the skill still approve updates in the
-portal. `PAWS_PORTAL_API` picks the backend.

@@ -34,7 +34,7 @@ func writeFile(t *testing.T, path, data string) {
 	}
 }
 
-// writeTestCatalog lays out a small catalog the way `paws catalog pull` writes one: two upstream skills, one skill
+// writeTestCatalog lays out a small catalog folder: two upstream skills, one skill
 // Unbound wrote with a digest, a pack, and the trigger cases for every rule file.
 func writeTestCatalog(t *testing.T) string {
 	t.Helper()

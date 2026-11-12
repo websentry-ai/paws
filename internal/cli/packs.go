@@ -147,20 +147,19 @@ func Add(args []string) int {
 			fmt.Fprintf(os.Stderr, "paws: add %s: %v\n", name, err)
 			return 1
 		}
-		n := fmt.Sprintf("%d bindings", len(res.Bindings))
-		if len(res.Bindings) == 1 {
-			n = "1 binding"
-		}
-		fmt.Printf("Added %s (%s) to %s\n", res.Pack, n, pack.InstallDir(t, res.Pack))
+		fmt.Printf("Added %s: %s\n", bold(res.Pack), count(len(res.Bindings), "rule"))
+		fmt.Printf("  %-12s %s\n", "rules", tilde(pack.InstallDir(t, res.Pack)))
 		for _, s := range res.Installed {
-			fmt.Printf("  skill %s installed in %s\n", s, t.SkillsDir)
+			fmt.Printf("  %-12s installed in %s\n", s, tilde(filepath.Join(t.SkillsDir, s)))
 		}
 		for _, s := range res.Kept {
-			fmt.Printf("  skill %s already in %s (not installed by paws); using it as is\n", s, t.SkillsDir)
+			fmt.Printf("  %-12s already in %s, not from paws; left as is\n", s, tilde(filepath.Join(t.SkillsDir, s)))
 		}
 	}
 	if !hookRegistered() {
-		fmt.Printf("paws is not registered as a hook here yet: run `%[1]s init` (this repo) or `%[1]s init --global`.\n", cliName)
+		fmt.Printf("\nClaude Code doesn't run paws here yet. Turn it on with one of:\n")
+		fmt.Printf("  %-28s %s\n", cyan(cliName+" init --global"), dim("every repo"))
+		fmt.Printf("  %-28s %s\n", cyan(cliName+" init"), dim("this repo only"))
 	}
 	return 0
 }
@@ -218,9 +217,9 @@ func Remove(args []string) int {
 		fmt.Fprintf(os.Stderr, "paws: %v\n", err)
 		return 1
 	}
-	fmt.Printf("Removed %s\n", f.args[0])
+	fmt.Printf("Removed %s\n", bold(f.args[0]))
 	for _, s := range skills {
-		fmt.Printf("  skill %s removed\n", s)
+		fmt.Printf("  %-12s removed\n", s)
 	}
 	return 0
 }
@@ -353,37 +352,45 @@ func printSearch(rows []catalogRow, total int, q string) {
 		fmt.Printf("nothing matches %q\n", q)
 		return
 	}
+	noun := "skills match"
+	if total == 1 {
+		noun = "skill matches"
+	}
+	fmt.Printf("%d %s %q\n", total, noun, q)
 	for _, r := range rows {
-		desc := printable(r.Description)
-		if len(desc) > 100 {
-			desc = strings.TrimSpace(desc[:97]) + "..."
+		fmt.Printf("\n  %s\n", bold(printable(r.Name)))
+		for _, line := range wrap(printable(r.Description), 76, 2) {
+			fmt.Printf("  %s\n", line)
 		}
-		fmt.Printf("%-28s %s\n", printable(r.Name), desc)
 		if r.Add != "" {
-			fmt.Printf("     %s\n", printable(r.Add))
+			fmt.Printf("  %s %s\n", dim("install:"), cyan(printable(r.Add)))
 		}
 	}
 	if total > len(rows) {
-		fmt.Printf("%d more; narrow the search, or browse %s/catalog\n", total-len(rows), defaultSiteURL)
+		fmt.Printf("\n%d more. Narrow the search, or browse %s/catalog\n", total-len(rows), defaultSiteURL)
 	}
 }
 
-// Index writes the catalog as JSON for the website and the local UI: `paws index [-o file]`.
-// With --portal it writes the portal's /catalog shape: one entry per skill.
+// Index writes a catalog on disk as JSON: `paws index --catalog <dir> [-o file]`. With --portal it writes the
+// document the paws backend loads: one record per skill plus every rule file, pack, digest and bundled skill.
 func Index(args []string) int {
 	f, err := parsePackFlags(args, "--catalog", "-o", "--portal")
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "paws: %v\n", err)
 		return 2
 	}
-	c, err := loadCatalog(f.catalog)
+	var index any
+	if f.portal && f.catalog != "" {
+		index, err = portalDocument(f.catalog)
+	} else {
+		var c *catalog.Catalog
+		if c, err = loadCatalog(f.catalog); err == nil {
+			index = buildIndex(c)
+		}
+	}
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "paws: %v\n", err)
 		return 1
-	}
-	var index any = buildIndex(c)
-	if f.portal {
-		index = buildPortalCatalog(c)
 	}
 	b, _ := json.MarshalIndent(index, "", "  ")
 	b = append(b, '\n')

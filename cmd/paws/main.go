@@ -46,8 +46,6 @@ func run(args []string) int {
 		return cli.Index(args[1:])
 	case "pin":
 		return cli.Pin(args[1:])
-	case "catalog": // maintainers: edit the published catalog (needs PAWS_ADMIN_KEY)
-		return cli.CatalogAdmin(args[1:])
 	case "ui":
 		return cli.UI(args[1:])
 	case "login":
@@ -86,7 +84,7 @@ Usage:
   unbound-paws ui [--port N] [--no-open]                 Local page: installed packs, what fired.
   unbound-paws search <text>                             Search the catalog.
   unbound-paws index --catalog <dir> [--portal] [-o file]
-                                                         A catalog on disk as JSON; --portal: the portal's skill records.
+                                                         A catalog on disk as JSON; --portal: the portal's catalog document.
   unbound-paws validate [root]                           Check root/catalog bindings and root/packs manifests.
   unbound-paws pin [root]                                Fetch upstream skills and pin their content hashes.
   unbound-paws login [--key <one-time-key>|-]            Link this machine to the paws portal (opt-in); --key for no browser (- reads stdin).

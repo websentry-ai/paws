@@ -1,27 +1,19 @@
 package cli
 
 import (
-	"compress/gzip"
-	"context"
+	"encoding/base64"
 	"encoding/json"
-	"io"
 	"net/http"
 	"os"
 	"path/filepath"
-	"sort"
 	"strings"
 	"sync"
 	"testing"
 	"testing/fstest"
-
-	"github.com/websentry-ai/paws/internal/catalog"
-	"github.com/websentry-ai/paws/internal/pack"
 )
 
-const adminKey = "test-admin-key"
-
-// fakeCatalogBackend keeps what `paws catalog push` sends and answers what `add`, `search` and `pull` ask, the way
-// paws-backend does.
+// fakeCatalogBackend holds a published catalog (what `paws index --portal` gives the backend) and answers what `add`
+// and `search` ask, the way paws-backend does.
 type fakeCatalogBackend struct {
 	mu      sync.Mutex
 	files   map[string][]pushFile // content hash -> files
@@ -31,47 +23,9 @@ type fakeCatalogBackend struct {
 func (b *fakeCatalogBackend) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	b.mu.Lock()
 	defer b.mu.Unlock()
-	body := func(v any) {
-		var rd io.Reader = r.Body
-		if r.Header.Get("Content-Encoding") == "gzip" {
-			zr, err := gzip.NewReader(r.Body)
-			if err != nil {
-				http.Error(w, "bad gzip", 400)
-				return
-			}
-			rd = zr
-		}
-		json.NewDecoder(rd).Decode(v)
-	}
 	reply := func(v any) { json.NewEncoder(w).Encode(v) }
 	p := r.URL.Path
-	if strings.HasPrefix(p, "/paws/v1/admin/") && r.Header.Get("Authorization") != "Bearer "+adminKey {
-		http.NotFound(w, r)
-		return
-	}
 	switch {
-	case p == "/paws/v1/admin/skill-files/missing":
-		var req struct{ Hashes []string }
-		body(&req)
-		missing := []string{}
-		for _, h := range req.Hashes {
-			if b.files[h] == nil {
-				missing = append(missing, h)
-			}
-		}
-		reply(map[string]any{"missing": missing})
-	case strings.HasPrefix(p, "/paws/v1/admin/skill-files/"):
-		var req struct{ Files []pushFile }
-		body(&req)
-		b.files[strings.TrimPrefix(p, "/paws/v1/admin/skill-files/")] = req.Files
-		w.WriteHeader(201)
-		reply(map[string]any{})
-	case p == "/paws/v1/admin/catalog" && r.Method == http.MethodPut:
-		b.catalog = map[string]json.RawMessage{}
-		body(&b.catalog)
-		reply(map[string]any{"skills": 3})
-	case p == "/paws/v1/admin/catalog":
-		reply(b.catalog)
 	case strings.HasPrefix(p, "/paws/v1/skill-files/"):
 		files := b.files[strings.TrimPrefix(p, "/paws/v1/skill-files/")]
 		if files == nil {
@@ -145,41 +99,64 @@ func (b *fakeCatalogBackend) source(name string) map[string]any {
 	return out
 }
 
-// catalogEnv starts a fake backend for the CLI, and makes git fetches of the test catalog's upstream repos check
-// out their skill files.
+// catalogEnv starts a fake backend for the CLI.
 func catalogEnv(t *testing.T) (*fakeCatalogBackend, string) {
 	t.Helper()
 	b := &fakeCatalogBackend{files: map[string][]pushFile{}}
-	home := portalEnv(t, b)
-	t.Setenv("PAWS_ADMIN_KEY", adminKey)
-	orig := pack.Fetch
-	pack.Fetch = func(_ context.Context, repo, ref, dest string) error {
-		files := map[string]fstest.MapFS{"github.com/blader/humanizer": humanizerFiles, "github.com/mattpocock/skills": tddFiles}[repo]
-		sub := map[string]string{"github.com/blader/humanizer": "", "github.com/mattpocock/skills": "skills/engineering/tdd"}[repo]
-		for name, f := range files {
-			writeFile(t, filepath.Join(dest, sub, name), string(f.Data))
-		}
-		return nil
-	}
-	t.Cleanup(func() { pack.Fetch = orig })
-	return b, home
+	return b, portalEnv(t, b)
 }
 
-func TestCatalogPushSendsTheWholeCheckedCatalog(t *testing.T) {
-	b, _ := catalogEnv(t)
-	dir := writeTestCatalog(t)
-	if code, out := captureStdout(t, func() int {
-		return CatalogAdmin([]string{"push", "--bundled-source", "https://example.com/tree/abc", dir})
-	}); code != 0 {
-		t.Fatalf("push exit %d: %s", code, out)
+// portalIndex runs `paws index --portal --catalog dir` and decodes the document.
+func portalIndex(t *testing.T, dir string) (int, map[string]json.RawMessage) {
+	t.Helper()
+	out := filepath.Join(t.TempDir(), "portal.json")
+	code, _ := capture(t, &os.Stderr, func() int { return Index([]string{"--portal", "--catalog", dir, "-o", out}) })
+	var doc map[string]json.RawMessage
+	if data, err := os.ReadFile(out); err == nil {
+		json.Unmarshal(data, &doc)
+	}
+	return code, doc
+}
+
+// publish loads the document for dir into the fake backend the way paws-backend's catalog_push does: bundled
+// skills' files from the document, upstream skills' files from their repos.
+func (b *fakeCatalogBackend) publish(t *testing.T, dir string) {
+	t.Helper()
+	code, doc := portalIndex(t, dir)
+	if code != 0 {
+		t.Fatalf("index --portal exit %d", code)
+	}
+	var bundled []pushBundled
+	json.Unmarshal(doc["bundled"], &bundled)
+	for i, bu := range bundled {
+		b.files[bu.ContentHash] = bu.Files
+		bundled[i].Files = nil
+	}
+	doc["bundled"] = must(json.Marshal(bundled))
+	for _, f := range []fstest.MapFS{humanizerFiles, tddFiles} {
+		files, err := dirFiles(f)
+		if err != nil {
+			t.Fatal(err)
+		}
+		b.files[hashOf(t, f)] = files
+	}
+	b.mu.Lock()
+	b.catalog = doc
+	b.mu.Unlock()
+}
+
+func TestPortalIndexIsTheWholeCheckedCatalog(t *testing.T) {
+	code, doc := portalIndex(t, writeTestCatalog(t))
+	if code != 0 {
+		t.Fatalf("index --portal exit %d", code)
 	}
 	var skills []map[string]any
-	json.Unmarshal(b.catalog["skills"], &skills)
+	json.Unmarshal(doc["skills"], &skills)
 	by := map[string]map[string]any{}
 	for _, s := range skills {
 		by[s["name"].(string)] = s
 		if _, ok := s["description"]; ok {
-			t.Errorf("%v: the backend reads the description from SKILL.md; push must not send one", s["name"])
+			t.Errorf("%v: the backend reads the description from SKILL.md; the document must not carry one", s["name"])
 		}
 		if _, ok := s["summary"]; ok {
 			t.Errorf("%v: summary is not part of the record", s["name"])
@@ -198,42 +175,38 @@ func TestCatalogPushSendsTheWholeCheckedCatalog(t *testing.T) {
 	if examples["humanizer-pr"] != "gh pr create --fill" || examples["humanizer-commit"] != "git commit -m x" {
 		t.Errorf("each action carries its first reviewed fire case as an example: %v", examples)
 	}
-	if by["git"]["source_url"] != "https://example.com/tree/abc/source-control/skills/git" {
-		t.Errorf("git source_url %v", by["git"]["source_url"])
+	if by["git"]["source_url"] != "" {
+		t.Errorf("git, a skill Unbound wrote, links nowhere: %v", by["git"]["source_url"])
 	}
 	var bindings []pushBinding
-	json.Unmarshal(b.catalog["bindings"], &bindings)
+	json.Unmarshal(doc["bindings"], &bindings)
 	if len(bindings) != 4 || bindings[0].Path != "source-control/git.md" || bindings[0].Digest != "source-control/digests/git.md" ||
 		bindings[0].Cases == nil || !strings.HasPrefix(bindings[0].Text, "---\nname: git\n") {
 		t.Errorf("bindings %+v", bindings)
 	}
 	var packs []pushPack
-	json.Unmarshal(b.catalog["packs"], &packs)
+	json.Unmarshal(doc["packs"], &packs)
 	if len(packs) != 1 || strings.Join(packs[0].Paths, ",") != "writing/humanizer-pr.md,writing/humanizer-commit.md" {
 		t.Errorf("packs %+v", packs)
 	}
-	var hashes []string
-	for h := range b.files {
-		hashes = append(hashes, h)
+	// Only the skill Unbound wrote travels with its files; upstream ones the backend fetches at their pin.
+	var bundled []pushBundled
+	json.Unmarshal(doc["bundled"], &bundled)
+	if len(bundled) != 1 || bundled[0].Skill != "git" || bundled[0].Dir != "source-control/skills/git" ||
+		bundled[0].ContentHash != by["git"]["content_hash"] || len(bundled[0].Files) == 0 {
+		t.Fatalf("bundled %+v", bundled)
 	}
-	sort.Strings(hashes)
-	want := []string{hashOf(t, humanizerFiles), hashOf(t, tddFiles), by["git"]["content_hash"].(string)}
-	sort.Strings(want)
-	if strings.Join(hashes, ",") != strings.Join(want, ",") {
-		t.Errorf("uploaded %v, want every skill's files %v", hashes, want)
+	fsys := fstest.MapFS{}
+	for _, f := range bundled[0].Files {
+		data, _ := base64.StdEncoding.DecodeString(f.Data)
+		fsys[f.Path] = &fstest.MapFile{Data: data, Mode: 0o644}
 	}
-
-	// A second push uploads nothing new: the backend already has every hash.
-	fetched := 0
-	orig := pack.Fetch
-	pack.Fetch = func(context.Context, string, string, string) error { fetched++; return nil }
-	defer func() { pack.Fetch = orig }()
-	if code, _ := captureStdout(t, func() int { return CatalogAdmin([]string{"push", dir}) }); code != 0 || fetched != 0 {
-		t.Errorf("second push exit %d, fetched %d repos", code, fetched)
+	if got := hashOf(t, fsys); got != bundled[0].ContentHash {
+		t.Errorf("bundled files hash to %s, not %s", got, bundled[0].ContentHash)
 	}
 }
 
-func TestCatalogPushRefusesWhatItCannotStandBehind(t *testing.T) {
+func TestPortalIndexRefusesWhatWeCannotStandBehind(t *testing.T) {
 	cases := map[string]func(dir string){
 		"a trigger that fires on a near miss": func(dir string) {
 			writeFile(t, filepath.Join(dir, "trigger_cases.json"), `{"humanizer-pr": {"fires": [["Bash", "gh pr create"]], "ignores": [["Bash", "gh pr create --draft"]]},
@@ -251,62 +224,35 @@ func TestCatalogPushRefusesWhatItCannotStandBehind(t *testing.T) {
 	}
 	for label, breakIt := range cases {
 		t.Run(label, func(t *testing.T) {
-			b, _ := catalogEnv(t)
 			dir := writeTestCatalog(t)
 			breakIt(dir)
-			code, _ := capture(t, &os.Stderr, func() int {
-				c, _ := captureStdout(t, func() int { return CatalogAdmin([]string{"push", dir}) })
-				return c
-			})
-			if code != 1 || b.catalog != nil || len(b.files) != 0 {
-				t.Errorf("exit %d; pushed %v, uploaded %d", code, b.catalog != nil, len(b.files))
+			if code, doc := portalIndex(t, dir); code != 1 || doc != nil {
+				t.Errorf("exit %d; wrote a document: %v", code, doc != nil)
 			}
 		})
 	}
-	t.Run("no admin key", func(t *testing.T) {
-		catalogEnv(t)
-		t.Setenv("PAWS_ADMIN_KEY", "")
-		if code, _ := capture(t, &os.Stderr, func() int { return CatalogAdmin([]string{"push", writeTestCatalog(t)}) }); code != 2 {
-			t.Errorf("exit %d", code)
-		}
-	})
 }
 
-func TestCatalogPullGivesBackAnEditableCatalog(t *testing.T) {
-	b, _ := catalogEnv(t)
+func TestValidateChecksTriggerCases(t *testing.T) {
 	dir := writeTestCatalog(t)
-	captureStdout(t, func() int { return CatalogAdmin([]string{"push", dir}) })
-	first := b.catalog
-	out := filepath.Join(t.TempDir(), "pulled")
-	if code, msg := captureStdout(t, func() int { return CatalogAdmin([]string{"pull", out}) }); code != 0 {
-		t.Fatalf("pull exit %d: %s", code, msg)
+	if code, out := captureStdout(t, func() int { return Validate([]string{dir}) }); code != 0 {
+		t.Fatalf("validate exit %d: %s", code, out)
 	}
-	c, probs := catalog.Validate(out)
-	if len(probs) > 0 {
-		t.Fatalf("pulled catalog: %v", probs)
-	}
-	tc, exempt, err := readCases(out)
-	if err != nil || len(catalog.CheckTriggerCases(c, tc, exempt)) != 0 {
-		t.Fatalf("pulled cases: %v %v", err, catalog.CheckTriggerCases(c, tc, exempt))
-	}
-	if code, _ := captureStdout(t, func() int { return CatalogAdmin([]string{"push", out}) }); code != 0 {
-		t.Fatal("pushing the pulled copy back failed")
-	}
-	for _, k := range []string{"bindings", "packs", "digests", "bundled"} {
-		var a, b2 any
-		json.Unmarshal(first[k], &a)
-		json.Unmarshal(b.catalog[k], &b2)
-		if ja, _ := json.Marshal(a); string(ja) != string(must(json.Marshal(b2))) {
-			t.Errorf("%s changed in a pull and push round trip", k)
-		}
+	writeFile(t, filepath.Join(dir, "trigger_cases.json"), `{"humanizer-pr": {"fires": [["Bash", "gh pr create"]], "ignores": [["Bash", "gh pr create --draft"]]},
+  "humanizer-commit": {"fires": [["Bash", "git commit"]], "ignores": [["Bash", "git status"]]},
+  "tdd": {"fires": [["Write", "a.test.ts"]], "ignores": [["Write", "a.ts"]]}, "git": {"fires": [["Bash", "git push"]], "ignores": [["Bash", "ls"]]}}`)
+	code, out := 0, ""
+	capture(t, &os.Stderr, func() int { code, out = captureStdout(t, func() int { return Validate([]string{dir}) }); return code })
+	if code != 1 || !strings.Contains(out, "should ignore") {
+		t.Errorf("validate exit %d: %s", code, out)
 	}
 }
 
 func must(b []byte, _ error) []byte { return b }
 
 func TestAddInstallsFromTheBackend(t *testing.T) {
-	_, home := catalogEnv(t)
-	captureStdout(t, func() int { return CatalogAdmin([]string{"push", writeTestCatalog(t)}) })
+	b, home := catalogEnv(t)
+	b.publish(t, writeTestCatalog(t))
 	if code, out := captureStdout(t, func() int { return Add([]string{"writing", "source-control/git"}) }); code != 0 {
 		t.Fatalf("add exit %d: %s", code, out)
 	}
@@ -337,7 +283,7 @@ func TestAddInstallsFromTheBackend(t *testing.T) {
 // Files for a skill Unbound wrote are checked against its pin too: the backend can't hand out other files.
 func TestAddRefusesBundledFilesThatDontMatchTheirHash(t *testing.T) {
 	b, _ := catalogEnv(t)
-	captureStdout(t, func() int { return CatalogAdmin([]string{"push", writeTestCatalog(t)}) })
+	b.publish(t, writeTestCatalog(t))
 	var bundled []pushBundled
 	json.Unmarshal(b.catalog["bundled"], &bundled)
 	b.files[bundled[0].ContentHash] = []pushFile{{Path: "SKILL.md", Data: "ZXZpbAo="}} // "evil"
@@ -354,8 +300,8 @@ func TestAddRefusesBundledFilesThatDontMatchTheirHash(t *testing.T) {
 }
 
 func TestSearchAsksTheBackend(t *testing.T) {
-	catalogEnv(t)
-	captureStdout(t, func() int { return CatalogAdmin([]string{"push", writeTestCatalog(t)}) })
+	b, _ := catalogEnv(t)
+	b.publish(t, writeTestCatalog(t))
 	code, out := captureStdout(t, func() int { return Search([]string{"human"}) })
 	if code != 0 || !strings.Contains(out, "humanizer") || !strings.Contains(out, "unbound-paws add writing") || strings.Contains(out, "tdd") {
 		t.Errorf("search exit %d: %s", code, out)

@@ -5,7 +5,7 @@ import (
 	"testing"
 )
 
-// CheckTriggerCases is what `paws catalog push` runs before anything reaches the published catalog.
+// CheckTriggerCases is what `paws validate` and `paws index --portal` run on a catalog with trigger cases.
 func TestCheckTriggerCases(t *testing.T) {
 	root := goodRoot(t)
 	c, probs := Load(root)

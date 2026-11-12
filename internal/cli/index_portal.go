@@ -74,7 +74,7 @@ func newCatalogSkill(c *catalog.Catalog, b *catalog.Binding) *portalCatalogSkill
 		s.Version, s.ContentHash, s.License = u.Ref[:7], u.ContentHash, b.Provenance.License
 		return s
 	}
-	s.License = repoLicense // no source link here: `catalog push --bundled-source` sets one
+	s.License = repoLicense // no source link: these files are published with the catalog, not on GitHub
 	if sub, err := fs.Sub(c.FS, catalog.LocalSkillDir(b)); err == nil {
 		if h, err := pack.HashSkill(sub); err == nil {
 			s.ContentHash, s.Version = h, strings.TrimPrefix(h, "sha256:")[:7]

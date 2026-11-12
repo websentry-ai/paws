@@ -254,10 +254,10 @@ func (s *splitter) stmt(stmt *syntax.Stmt, depth int) {
 						}
 					}
 				} else {
-					s.procScripts(cmd.Args[1:], depth) // bash <(echo 'git push')
+					s.procScripts(cmd.Args[1:], depth, nil) // bash <(echo 'git push'): a new shell
 				}
-			case head == "source" || head == ".": // . <(echo 'git push') runs in this shell
-				s.procScripts(cmd.Args[1:], depth)
+			case head == "source" || head == ".": // . <(echo 'git push') runs in this shell, with its functions
+				s.procScripts(cmd.Args[1:], depth, s.sc)
 			case head == "eval":
 				args := bare[1:]
 				if len(args) > 0 && args[0] == "--" {
@@ -337,19 +337,22 @@ func (s *splitter) printed(st *syntax.Stmt, depth int) {
 }
 
 // printedAll splits what a process substitution prints, when that can be read off the line.
-func (s *splitter) printedAll(ps *syntax.ProcSubst, depth int) {
+func (s *splitter) printedAll(ps *syntax.ProcSubst, depth int) { s.printedAllIn(ps, depth, nil) }
+
+// printedAllIn is printedAll for a script run with these functions defined: source runs in this shell (s.sc).
+func (s *splitter) printedAllIn(ps *syntax.ProcSubst, depth int, sc *scope) {
 	if ps == nil {
 		return
 	}
 	if out, ok := printedByAll(ps.Stmts); ok {
-		s.nested(out, depth)
+		s.nestedIn(out, depth, sc)
 	}
 }
 
 // procScripts splits the scripts a shell or source reads from <( ): bash <(echo 'git push').
-func (s *splitter) procScripts(args []*syntax.Word, depth int) {
+func (s *splitter) procScripts(args []*syntax.Word, depth int, sc *scope) {
 	for _, w := range args {
-		s.printedAll(procSubst(w, syntax.CmdIn), depth)
+		s.printedAllIn(procSubst(w, syntax.CmdIn), depth, sc)
 	}
 }
 
@@ -459,6 +462,9 @@ func echoed(call *syntax.CallExpr) (string, bool) {
 }
 
 // printfVerb is one conversion: flags, a width and a precision (either may be * to take an argument), and a letter.
+// maxPrintfWidth bounds a printf field width (%99999s), so a crafted width can't grow the output.
+const maxPrintfWidth = 1024
+
 var printfVerb = regexp.MustCompile(`%[-+ #0]*(\*|[0-9]*)(\.(\*|[0-9]*))?[a-zA-Z%]`)
 
 // printf is what `printf [--] format args...` prints: each verb takes the next argument, %% is a %, and the format
@@ -494,8 +500,16 @@ func printf(args []string) string {
 				b.WriteByte('%')
 				continue
 			}
-			if format[m[2]:m[3]] == "*" {
-				take() // the width
+			width := 0 // %5s pads to five characters: printf 'git%5s' push prints "git push"
+			if w := format[m[2]:m[3]]; w == "*" {
+				width, _ = strconv.Atoi(take())
+			} else if w != "" {
+				width, _ = strconv.Atoi(w)
+			}
+			width = min(max(width, -maxPrintfWidth), maxPrintfWidth)
+			leftAlign := strings.Contains(format[m[0]+1:m[2]], "-") || width < 0
+			if width < 0 {
+				width = -width
 			}
 			prec := -1
 			if m[4] >= 0 {
@@ -515,6 +529,13 @@ func printf(args []string) string {
 			}
 			if (conv == 's' || conv == 'b') && prec >= 0 && prec < len(a) {
 				a = a[:prec]
+			}
+			if pad := width - len(a); pad > 0 {
+				if leftAlign {
+					a += strings.Repeat(" ", pad)
+				} else {
+					a = strings.Repeat(" ", pad) + a
+				}
 			}
 			b.WriteString(a)
 			if stop {

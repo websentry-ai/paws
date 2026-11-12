@@ -66,6 +66,7 @@ type outcome struct {
 	fired       bool   // did the rule act — i.e. worth auditing
 	satisfiedBy string // non-empty when a gate that would have denied was cleared instead
 	digestErr   string // why an on_miss digest could not be used (fell back to load-required)
+	skill       string // set on a deny that uses the default message: resolve merges these into one
 }
 
 // Decide filters rules to those matching the event and resolves them.
@@ -82,7 +83,7 @@ func Decide(ev Event, rules []*rule.Rule) Decision {
 // resolve collapses matched rules into one decision: any deny wins, context concatenates, fired rules are audited.
 func resolve(ev Event, matched []*rule.Rule) Decision {
 	top := Decision{Verdict: Allow}
-	var contexts, reasons []string
+	var contexts, reasons, names, skills []string
 	for _, r := range matched {
 		oc := evaluate(r, ev)
 		if oc.fired {
@@ -91,10 +92,20 @@ func resolve(ev Event, matched []*rule.Rule) Decision {
 		if oc.context != "" {
 			contexts = append(contexts, oc.context)
 		}
-		if oc.verdict == Deny {
-			top.Verdict = Deny
-			reasons = append(reasons, oc.reason)
+		if oc.verdict != Deny {
+			continue
 		}
+		top.Verdict = Deny
+		if oc.skill == "" {
+			reasons = append(reasons, oc.reason)
+			continue
+		}
+		names = appendNew(names, r.Name)
+		skills = appendNew(skills, oc.skill)
+	}
+	if len(skills) > 0 {
+		// One sentence names every skill the default message would, instead of repeating it per rule.
+		reasons = append([]string{skillReason(names, skills, ev)}, reasons...)
 	}
 	// Every deny reaches the agent at once (each skill or digest it needs), so the
 	// next attempt clears them all instead of discovering them one deny at a time.
@@ -148,12 +159,15 @@ func evaluate(r *rule.Rule, ev Event) outcome {
 		if digest != "" {
 			return outcome{verdict: Allow, context: digestMarker(r) + " " + digest, fired: true}
 		}
-		return outcome{verdict: Allow, context: msgOr(a.Message, sessionSkillContext(a)), fired: true}
+		return outcome{verdict: Allow, context: msgOr(a.Message, sessionSkillContext(r)), fired: true}
 	}
 	if digest != "" {
 		return outcome{verdict: Deny, reason: digestReason(r, digest), fired: true}
 	}
-	return outcome{verdict: Deny, reason: msgOr(a.DenyMessage, skillReason(a)), fired: true, digestErr: digestErr}
+	if a.DenyMessage != "" {
+		return outcome{verdict: Deny, reason: a.DenyMessage, fired: true, digestErr: digestErr}
+	}
+	return outcome{verdict: Deny, skill: a.Skill, fired: true, digestErr: digestErr}
 }
 
 // portalSkillMissing reports whether r is a portal rule (under UserDir()/portal) whose skill
@@ -214,12 +228,49 @@ func digestReason(r *rule.Rule, digest string) string {
 		digestMarker(r), r.Action.Skill, digest)
 }
 
-func sessionSkillContext(a rule.Action) string {
-	return fmt.Sprintf("This project requires the %q skill. Invoke it with the Skill tool before you start work.", a.Skill)
+func sessionSkillContext(r *rule.Rule) string {
+	return fmt.Sprintf("paws (rule %s): this project needs the %q skill. Load it with the Skill tool before you start work.", r.Name, r.Action.Skill)
 }
 
-func skillReason(a rule.Action) string {
-	return fmt.Sprintf("This action requires the %q skill. Invoke it with the Skill tool, then retry this exact command.", a.Skill)
+// skillReason is the default require-skill deny: it says paws sent it and which rules, so a person
+// reading the chat knows where the block came from, and names every missing skill in one sentence.
+// e.g. paws (rule git--git): this command needs the "git" skill. Load it with the Skill tool, then retry this exact command.
+func skillReason(names, skills []string, ev Event) string {
+	label := "rule " + names[0]
+	if len(names) > 1 {
+		label = "rules " + strings.Join(names, ", ")
+	}
+	quoted := make([]string, len(skills))
+	for i, s := range skills {
+		quoted[i] = fmt.Sprintf("%q", s)
+	}
+	need, pronoun := fmt.Sprintf("the %s skill", quoted[0]), "it"
+	if len(quoted) > 1 {
+		need, pronoun = fmt.Sprintf("the %s and %s skills", strings.Join(quoted[:len(quoted)-1], ", "), quoted[len(quoted)-1]), "them"
+	}
+	noun := actionNoun(ev)
+	return fmt.Sprintf("paws (%s): this %s needs %s. Load %s with the Skill tool, then retry this exact %s.", label, noun, need, pronoun, noun)
+}
+
+// actionNoun names the call a deny blocks: Claude retries "this exact command" for Bash, and the
+// same wording for an edit or a tool call.
+func actionNoun(ev Event) string {
+	switch ev.Tool {
+	case "Bash":
+		return "command"
+	case "Write", "Edit", "MultiEdit", "NotebookEdit":
+		return "edit"
+	}
+	return "tool call"
+}
+
+func appendNew(list []string, v string) []string {
+	for _, x := range list {
+		if x == v {
+			return list
+		}
+	}
+	return append(list, v)
 }
 
 func msgOr(v, fallback string) string {

@@ -83,8 +83,31 @@ func TestRequireSkillReasonTellsAgentToRetry(t *testing.T) {
 	ev := Event{Kind: rule.KindTool, Tool: "Bash", Target: "x"}
 	rules := []*rule.Rule{mustRule(t, "---\nname: s\nevent: pre-tool\naction:\n  type: require-skill\n  skill: foo\n---\n")}
 
-	if got := Decide(ev, rules).Reason; !strings.Contains(got, "then retry this exact command") {
-		t.Errorf("require-skill should tell the agent to retry after invoking the skill: %q", got)
+	want := `paws (rule s): this command needs the "foo" skill. Load it with the Skill tool, then retry this exact command.`
+	if got := Decide(ev, rules).Reason; got != want {
+		t.Errorf("require-skill deny:\n got %q\nwant %q", got, want)
+	}
+}
+
+func TestRequireSkillReasonMergesMissingSkills(t *testing.T) {
+	DryRun = true
+	defer func() { DryRun = false }()
+
+	gate := func(name, skill string) *rule.Rule {
+		return mustRule(t, "---\nname: "+name+"\nevent: pre-tool\naction:\n  type: require-skill\n  skill: "+skill+"\n---\n")
+	}
+	custom := mustRule(t, "---\nname: c\nevent: pre-tool\naction:\n  type: require-skill\n  skill: house\n  deny_message: Load house first.\n---\n")
+	rules := []*rule.Rule{gate("git--git", "git"), gate("humanizer-commit", "humanizer"), gate("git--again", "git"), custom}
+
+	for _, tc := range []struct{ tool, want string }{
+		{"Bash", `paws (rules git--git, humanizer-commit, git--again): this command needs the "git" and "humanizer" skills. Load them with the Skill tool, then retry this exact command.` + "\n\nLoad house first."},
+		{"Edit", `paws (rules git--git, humanizer-commit, git--again): this edit needs the "git" and "humanizer" skills. Load them with the Skill tool, then retry this exact edit.` + "\n\nLoad house first."},
+		{"mcp__github__create_pull_request", `paws (rules git--git, humanizer-commit, git--again): this tool call needs the "git" and "humanizer" skills. Load them with the Skill tool, then retry this exact tool call.` + "\n\nLoad house first."},
+	} {
+		d := Decide(Event{Kind: rule.KindTool, Tool: tc.tool, Target: "x"}, rules)
+		if d.Verdict != Deny || d.Reason != tc.want {
+			t.Errorf("%s:\n got %q\nwant %q", tc.tool, d.Reason, tc.want)
+		}
 	}
 }
 
@@ -95,7 +118,7 @@ func TestRequireSkillOnSessionStartAddsContext(t *testing.T) {
 	rules := []*rule.Rule{mustRule(t, "---\nname: s\nevent: session-start\naction:\n  type: require-skill\n  skill: release-checklist\n---\n")}
 	ev := Event{Kind: rule.KindSession, Target: "startup"}
 	d := Decide(ev, rules)
-	if d.Verdict != Allow || !strings.Contains(d.Context, `"release-checklist" skill`) {
+	if d.Verdict != Allow || d.Context != `paws (rule s): this project needs the "release-checklist" skill. Load it with the Skill tool before you start work.` {
 		t.Fatalf("session-start require-skill should allow with context naming the skill, got %+v", d)
 	}
 
@@ -194,7 +217,7 @@ func TestDigestFallsBackToLoadRequired(t *testing.T) {
 		"oversize digest":     digestRule(t, strings.Repeat("x", rule.MaxDigest+1)),
 	} {
 		d := Decide(ev, []*rule.Rule{r})
-		if d.Verdict != Deny || strings.Contains(d.Reason, "paws digest") || !strings.Contains(d.Reason, "Invoke it with the Skill tool") {
+		if d.Verdict != Deny || strings.Contains(d.Reason, "paws digest") || !strings.Contains(d.Reason, "Load it with the Skill tool") {
 			t.Errorf("%s: want the load-required deny, got %+v", name, d)
 		}
 		if DigestProblem(r) == "" {

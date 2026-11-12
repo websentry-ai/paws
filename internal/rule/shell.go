@@ -26,6 +26,7 @@ var shells = map[string]bool{"bash": true, "sh": true, "zsh": true, "dash": true
 const (
 	maxNesting     = 8        // bash -c inside eval inside bash -c ...
 	maxScriptBytes = 64 << 10 // nested script text one line may parse
+	maxFuncWalks   = 64       // function bodies one line may read
 )
 
 // splitCache holds the last line read: the gate checks every rule against the same line.
@@ -41,7 +42,7 @@ func parseLine(line string) []command {
 	if splitCache.cmds != nil && splitCache.line == line {
 		return splitCache.cmds
 	}
-	sp := &splitter{cmds: []command{}, walked: map[*syntax.Stmt]bool{}, budget: maxScriptBytes}
+	sp := &splitter{cmds: []command{}, walked: map[funcWalk]bool{}, budget: maxScriptBytes, walks: maxFuncWalks}
 	sp.split(line, 0, map[string][]*syntax.Stmt{})
 	splitCache.line, splitCache.cmds = line, sp.cmds
 	return sp.cmds
@@ -50,8 +51,16 @@ func parseLine(line string) []command {
 // splitter collects the commands of one line and of the scripts it runs.
 type splitter struct {
 	cmds   []command
-	walked map[*syntax.Stmt]bool // function bodies already read: each is read once per line
-	budget int                   // nested script bytes still allowed
+	walked map[funcWalk]bool // function bodies already read, and with how many definitions known
+	defs   int               // function definitions seen so far on the line
+	budget int               // nested script bytes still allowed
+	walks  int               // function body reads still allowed
+}
+
+// funcWalk is a body read with defs definitions known: once a function it calls is redefined, a call reads it again.
+type funcWalk struct {
+	body *syntax.Stmt
+	defs int
 }
 
 // split adds a script's commands. funcs holds the functions of the shell it runs in: eval shares its caller's, a new
@@ -87,6 +96,7 @@ func (sp *splitter) walk(node syntax.Node, depth int, funcs map[string][]*syntax
 			// Defining a function runs nothing: its body counts where the line calls it. A name keeps every body
 			// given to it, since a definition inside if or case may not run.
 			funcs[n.Name.Value] = append(funcs[n.Name.Value], n.Body)
+			sp.defs++
 			return false
 		case *syntax.BinaryCmd:
 			if n.Op == syntax.Pipe || n.Op == syntax.PipeAll {
@@ -170,8 +180,9 @@ func (sp *splitter) runs(st *syntax.Stmt, words []string, depth int, funcs map[s
 		sp.nested(strings.Join(args, " "), depth, funcs)
 	case depth < maxNesting:
 		for _, body := range funcs[words[0]] {
-			if !sp.walked[body] {
-				sp.walked[body] = true
+			if k := (funcWalk{body, sp.defs}); !sp.walked[k] && sp.walks > 0 {
+				sp.walked[k] = true
+				sp.walks--
 				sp.walk(body, depth+1, funcs)
 			}
 		}

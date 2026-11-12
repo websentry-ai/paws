@@ -66,6 +66,8 @@ func TestGitFoundByTheShellParser(t *testing.T) {
 		{`publish() { echo ready; }; publish() { git push; }; publish`, false, true},
 		{`publish() { git push; }; if false; then publish() { :; }; fi; publish`, false, true},
 		{`rec() { rec; }; rec`, false, false},
+		{`g() { :; }; f() { g; }; f; g() { git push; }; f`, false, true},
+		{`g() { :; }; f() { g; }; f; eval 'g() { git push; }'; f`, false, true},
 		// A nested script that isn't valid Bash: the line is read whole, as before.
 		{`bash -c "git commit -m 'unclosed"`, true, false},
 		// Not a git command, though the words are there.
@@ -114,13 +116,15 @@ func TestCommandRegexMatchesEachCommand(t *testing.T) {
 	if !sudo.Matches("Bash", `sudo npm install x`) {
 		t.Error("a rule about sudo itself still sees it")
 	}
+	// Each line starts with cd, so only a command the parser found can match these anchored regexes.
 	for line, rx := range map[string]string{
-		`HUSKY=0 git commit -m x`:     `HUSKY=0`,
-		`export AWS_PROFILE=prod`:     `AWS_PROFILE=prod`,
-		`AWS_PROFILE=prod`:            `AWS_PROFILE=prod`,
-		`npm install "$PKG"`:          `npm install \$PKG`,
-		`terraform apply -var "a=$X"`: `terraform apply`,
-		`sudo git push origin`:        `^git push`, // the command without its wrapper
+		`cd x && HUSKY=0 git commit -m x`:       `^HUSKY=0 git commit`,
+		`cd x && export AWS_PROFILE=prod`:       `^export AWS_PROFILE=prod$`,
+		`cd x && AWS_PROFILE=prod`:              `^AWS_PROFILE=prod$`,
+		`cd x && npm install "$PKG"`:            `^npm install \$PKG$`,
+		`cd x && terraform apply -var "a=$X"`:   `^terraform apply -var a=\$X$`,
+		"cd x && python - <<'PY'\nprint(1)\nPY": `^python - <<PY$`,
+		`sudo git push origin`:                  `^git push`, // the command without its wrapper
 	} {
 		r := mustRule(t, "---\nname: v\nevent: pre-tool\nmatcher:\n  tool: Bash\n  command_regex: '"+rx+"'\naction:\n  type: require-skill\n  skill: s\n---\n")
 		if !r.Matches("Bash", line) {

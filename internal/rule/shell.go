@@ -62,9 +62,9 @@ func parseLine(line string) *parsedLine {
 	return p
 }
 
-// split adds line's commands to out. funcs are the functions already defined in the shell that runs it: eval runs
-// in the same shell and shares them; a new shell (bash -c) starts with none (nil).
-func split(line string, out *[]command, depth int, lim *limits, funcs map[string]*syntax.Stmt) bool {
+// split adds line's commands to out. sc is the shell's function scope: eval runs in the same shell and shares it; a
+// new shell (bash -c) starts with none (nil).
+func split(line string, out *[]command, depth int, lim *limits, sc *scope) bool {
 	if depth > maxNesting {
 		return true
 	}
@@ -72,31 +72,46 @@ func split(line string, out *[]command, depth int, lim *limits, funcs map[string
 	if err != nil {
 		return false
 	}
-	if funcs == nil {
-		funcs = map[string]*syntax.Stmt{}
+	if sc == nil {
+		sc = &scope{funcs: map[string]*syntax.Stmt{}}
 	}
-	s := splitter{out: out, funcs: funcs, walked: map[walkKey]bool{}, lim: lim, piped: map[*syntax.BinaryCmd]bool{},
+	s := splitter{out: out, sc: sc, walked: map[walkKey]bool{}, lim: lim, piped: map[*syntax.BinaryCmd]bool{},
 		ok: true}
 	s.walk(f, depth)
 	return s.ok
 }
 
-// splitter collects the commands of one parsed line. funcs are the functions defined so far, in the order the shell
-// runs the line: defining one runs nothing, so a body counts where a call runs it. A body is read once per set of
-// definitions (defs counts them), so a later redefinition of a function it calls is read again, and a chain of calls
-// can't blow up.
+// splitter collects the commands of one parsed line. sc holds the functions defined so far, in the order the shell
+// runs the line: defining one runs nothing, so a body counts where a call runs it. A body is read once per scope and
+// set of definitions, so a later redefinition of a function it calls is read again, and a chain of calls can't blow
+// up.
 type splitter struct {
 	out    *[]command
-	funcs  map[string]*syntax.Stmt
-	defs   int
+	sc     *scope
 	walked map[walkKey]bool
 	lim    *limits                    // what the whole line may still cost
 	piped  map[*syntax.BinaryCmd]bool // pipes already read as one pipeline
 	ok     bool                       // false once a nested script didn't parse: the whole line is then read the old way
 }
 
+// scope is one shell's functions, and how many definitions it has seen (a walked body is keyed on it).
+type scope struct {
+	funcs map[string]*syntax.Stmt
+	defs  int
+}
+
+// child is the scope of a subshell: ( ), $( ), <( ). It starts with the parent's functions; its own don't leak back.
+func (sc *scope) child() *scope {
+	c := &scope{funcs: make(map[string]*syntax.Stmt, len(sc.funcs)), defs: sc.defs}
+	for k, v := range sc.funcs {
+		c.funcs[k] = v
+	}
+	return c
+}
+
 type walkKey struct {
 	body *syntax.Stmt
+	sc   *scope
 	defs int
 }
 
@@ -105,35 +120,45 @@ type walkKey struct {
 func (s *splitter) nested(script string, depth int) { s.nestedIn(script, depth, nil) }
 
 // nestedIn splits a script run with these functions defined; eval passes its own shell's.
-func (s *splitter) nestedIn(script string, depth int, funcs map[string]*syntax.Stmt) {
+func (s *splitter) nestedIn(script string, depth int, sc *scope) {
 	if len(script) > s.lim.scriptBytes {
 		return // past the line's budget: the whole-line regexes still apply
 	}
 	s.lim.scriptBytes -= len(script)
-	if !split(script, s.out, depth+1, s.lim, funcs) {
+	if !split(script, s.out, depth+1, s.lim, sc) {
 		s.ok = false
 		return
 	}
 	*s.out = append(*s.out, command{texts: []string{script}})
 }
 
+func subshellStmts(n syntax.Node) []*syntax.Stmt {
+	switch n := n.(type) {
+	case *syntax.Subshell:
+		return n.Stmts
+	case *syntax.CmdSubst:
+		return n.Stmts
+	case *syntax.ProcSubst:
+		return n.Stmts
+	}
+	return nil
+}
+
 func (s *splitter) walk(node syntax.Node, depth int) {
 	syntax.Walk(node, func(n syntax.Node) bool {
 		switch n := n.(type) {
 		case *syntax.FuncDecl:
-			s.funcs[n.Name.Value] = n.Body
-			s.defs++
+			s.sc.funcs[n.Name.Value] = n.Body
+			s.sc.defs++
 			return false
-		case *syntax.Subshell: // ( ... ) runs in a copy of the shell: functions it defines don't reach the line
-			outer := s.funcs
-			s.funcs = make(map[string]*syntax.Stmt, len(outer))
-			for k, v := range outer {
-				s.funcs[k] = v
-			}
-			for _, st := range n.Stmts {
+		case *syntax.Subshell, *syntax.CmdSubst, *syntax.ProcSubst:
+			// ( ), $( ) and <( ) run in a copy of the shell: functions they define don't reach the line.
+			outer := s.sc
+			s.sc = outer.child()
+			for _, st := range subshellStmts(n) {
 				s.walk(st, depth)
 			}
-			s.funcs = outer
+			s.sc = outer
 			return false
 		case *syntax.BinaryCmd:
 			if n.Op == syntax.Pipe || n.Op == syntax.PipeAll {
@@ -193,11 +218,11 @@ func (s *splitter) stmt(stmt *syntax.Stmt, depth int) {
 					}
 				}
 			case head == "eval":
-				s.nestedIn(strings.Join(bare[1:], " "), depth, s.funcs) // eval runs in this shell
-			case s.funcs[bare[0]] != nil && !s.walked[walkKey{s.funcs[bare[0]], s.defs}] && depth < maxNesting &&
-				s.lim.funcWalks > 0:
-				body := s.funcs[bare[0]]
-				s.walked[walkKey{body, s.defs}] = true
+				s.nestedIn(strings.Join(bare[1:], " "), depth, s.sc) // eval runs in this shell
+			case s.sc.funcs[bare[0]] != nil && !s.walked[walkKey{s.sc.funcs[bare[0]], s.sc, s.sc.defs}] &&
+				depth < maxNesting && s.lim.funcWalks > 0:
+				body := s.sc.funcs[bare[0]]
+				s.walked[walkKey{body, s.sc, s.sc.defs}] = true
 				s.lim.funcWalks--
 				s.walk(body, depth+1)
 			}

@@ -24,6 +24,14 @@ func tilde(p string) string {
 	return p
 }
 
+func tildeAll(paths []string) []string {
+	out := make([]string, len(paths))
+	for i, p := range paths {
+		out[i] = tilde(p)
+	}
+	return out
+}
+
 // wrap breaks text into lines of at most width runes at spaces, keeping at most maxLines; a cut ends in "…".
 func wrap(text string, width, maxLines int) []string {
 	var lines []string

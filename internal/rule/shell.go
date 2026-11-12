@@ -3,6 +3,7 @@ package rule
 import (
 	"path"
 	"regexp"
+	"strconv"
 	"strings"
 	"sync"
 
@@ -22,7 +23,7 @@ type command struct {
 	texts []string
 }
 
-var shells = map[string]bool{"bash": true, "sh": true, "zsh": true, "dash": true, "ksh": true}
+var shells = map[string]bool{"bash": true, "sh": true, "zsh": true, "dash": true, "ksh": true, "ash": true, "mksh": true}
 
 const maxNesting = 8 // bash -c inside eval inside bash -c ...
 
@@ -176,6 +177,12 @@ func (s *splitter) walk(node syntax.Node, depth int) {
 			}
 			s.sc = outer
 			return false
+		case *syntax.CoprocClause: // coproc runs its command in a subshell too
+			outer := s.sc
+			s.sc = outer.child()
+			s.walk(n.Stmt, depth)
+			s.sc = outer
+			return false
 		case *syntax.BinaryCmd:
 			if n.Op == syntax.Pipe || n.Op == syntax.PipeAll {
 				// Each stage of a pipeline runs in a subshell: functions it defines don't reach the line.
@@ -201,6 +208,10 @@ func (s *splitter) stmt(stmt *syntax.Stmt, depth int) {
 	for _, r := range stmt.Redirs {
 		if r.Word != nil {
 			redirs = append(redirs, r.Op.String()+wordString(r.Word))
+			// echo 'git push' > >(bash): the shell in >( ) runs what the command prints
+			if (r.Op == syntax.RdrOut || r.Op == syntax.AppOut || r.Op == syntax.ClbOut) && readsShellStdinAll(procSubst(r.Word, syntax.CmdOut)) {
+				s.printed(stmt, depth)
+			}
 		}
 	}
 	switch cmd := stmt.Cmd.(type) {
@@ -235,14 +246,28 @@ func (s *splitter) stmt(stmt *syntax.Stmt, depth int) {
 					for _, r := range stmt.Redirs {
 						switch {
 						case (r.Op == syntax.Hdoc || r.Op == syntax.DashHdoc) && r.Hdoc != nil:
-							s.nested(wordString(r.Hdoc), depth)
+							s.nested(hdocString(r), depth)
 						case r.Op == syntax.WordHdoc && r.Word != nil: // bash <<< 'git push'
 							s.nested(wordString(r.Word), depth)
+						case r.Op == syntax.RdrIn && r.Word != nil: // bash < <(echo 'git push')
+							s.printedAll(procSubst(r.Word, syntax.CmdIn), depth)
 						}
 					}
+				} else {
+					s.procScripts(cmd.Args[1:], depth) // bash <(echo 'git push')
 				}
+			case head == "source" || head == ".": // . <(echo 'git push') runs in this shell
+				s.procScripts(cmd.Args[1:], depth)
 			case head == "eval":
-				s.nestedIn(strings.Join(bare[1:], " "), depth, s.sc) // eval runs in this shell
+				args := bare[1:]
+				if len(args) > 0 && args[0] == "--" {
+					args = args[1:]
+				}
+				s.nestedIn(strings.Join(args, " "), depth, s.sc) // eval runs in this shell
+			case head == "trap": // trap 'git push' EXIT runs its action in this shell, as eval does
+				if action, ok := trapAction(bare[1:]); ok {
+					s.nestedIn(action, depth, s.sc)
+				}
 			case s.sc.funcs[bare[0]] != nil && !s.walked[walkKey{s.sc.funcs[bare[0]], s.sc, s.sc.defs}] &&
 				depth < maxNesting && s.lim.funcWalks > 0:
 				body := s.sc.funcs[bare[0]]
@@ -304,63 +329,218 @@ func readsShellStdin(st *syntax.Stmt) bool {
 	return len(bare) > 0 && shells[path.Base(bare[0])] && readsStdin(bare[1:])
 }
 
-// printed splits what a pipeline stage prints, when that can be read off the line: a heredoc, echo or printf.
+// printed splits what st prints, when that can be read off the line.
 func (s *splitter) printed(st *syntax.Stmt, depth int) {
-	for _, r := range st.Redirs {
-		switch {
-		case (r.Op == syntax.Hdoc || r.Op == syntax.DashHdoc) && r.Hdoc != nil:
-			s.nested(wordString(r.Hdoc), depth)
-		case r.Op == syntax.WordHdoc && r.Word != nil:
-			s.nested(wordString(r.Word), depth)
-		}
-	}
-	call, ok := st.Cmd.(*syntax.CallExpr)
-	if !ok || len(call.Args) < 2 {
-		return
-	}
-	args := make([]string, 0, len(call.Args)-1)
-	for _, w := range call.Args[1:] {
-		args = append(args, wordString(w))
-	}
-	switch wordString(call.Args[0]) {
-	case "echo": // echo -e "a\nb" too
-		for len(args) > 0 && (args[0] == "-e" || args[0] == "-n" || args[0] == "-E" || args[0] == "-en" || args[0] == "-ne") {
-			args = args[1:]
-		}
-		s.nested(echoEscapes(strings.Join(args, " ")), depth)
-	case "printf": // printf '%s %s\n' git push: what it prints
-		s.nested(printf(args[0], args[1:]), depth)
+	if out, ok := printedBy(st); ok {
+		s.nested(out, depth)
 	}
 }
 
-var printfVerb = regexp.MustCompile(`%[-+ #0-9.]*[a-zA-Z%]`)
+// printedAll splits what a process substitution prints, when that can be read off the line.
+func (s *splitter) printedAll(ps *syntax.ProcSubst, depth int) {
+	if ps == nil {
+		return
+	}
+	if out, ok := printedByAll(ps.Stmts); ok {
+		s.nested(out, depth)
+	}
+}
 
-// printf is what `printf format args...` prints: each verb takes the next argument, %% is a %, and the format repeats
-// while arguments are left, as in the shell.
-func printf(format string, args []string) string {
-	format = ansiC(format) // printf's format takes the same escapes as $'...'.
+// procScripts splits the scripts a shell or source reads from <( ): bash <(echo 'git push').
+func (s *splitter) procScripts(args []*syntax.Word, depth int) {
+	for _, w := range args {
+		s.printedAll(procSubst(w, syntax.CmdIn), depth)
+	}
+}
+
+// procSubst is w when it is just a process substitution of this kind, else nil.
+func procSubst(w *syntax.Word, op syntax.ProcOperator) *syntax.ProcSubst {
+	if w != nil && len(w.Parts) == 1 {
+		if ps, ok := w.Parts[0].(*syntax.ProcSubst); ok && ps.Op == op {
+			return ps
+		}
+	}
+	return nil
+}
+
+// readsShellStdinAll reports whether >( ) runs a shell that reads its stdin as a script.
+func readsShellStdinAll(ps *syntax.ProcSubst) bool {
+	return ps != nil && len(ps.Stmts) == 1 && readsShellStdin(ps.Stmts[0])
+}
+
+// printedBy is what st prints, when the line shows it: echo or printf (behind any wrapper), a heredoc or here-string
+// it reads (cat <<EOF), or the output of the commands in a { } or ( ) group.
+func printedBy(st *syntax.Stmt) (string, bool) {
+	switch cmd := st.Cmd.(type) {
+	case *syntax.CallExpr:
+		if out, ok := echoed(cmd); ok {
+			return out, true
+		}
+	case *syntax.Block:
+		if out, ok := printedByAll(cmd.Stmts); ok {
+			return out, true
+		}
+	case *syntax.Subshell:
+		if out, ok := printedByAll(cmd.Stmts); ok {
+			return out, true
+		}
+	}
+	var b strings.Builder
+	ok := false
+	for _, r := range st.Redirs {
+		switch {
+		case (r.Op == syntax.Hdoc || r.Op == syntax.DashHdoc) && r.Hdoc != nil:
+			b.WriteString(hdocString(r))
+			ok = true
+		case r.Op == syntax.WordHdoc && r.Word != nil:
+			b.WriteString(wordString(r.Word) + "\n")
+			ok = true
+		}
+	}
+	return b.String(), ok
+}
+
+// printedByAll is what a list of commands prints, joined, when the line shows what at least one of them prints.
+func printedByAll(stmts []*syntax.Stmt) (string, bool) {
+	var b strings.Builder
+	ok := false
+	for _, st := range stmts {
+		if out, k := printedBy(st); k {
+			b.WriteString(out)
+			ok = true
+		}
+		if b.Len() > maxScriptBytes {
+			break
+		}
+	}
+	return b.String(), ok
+}
+
+var echoFlags = regexp.MustCompile(`^-[neE]+$`)
+
+// echoed is what an echo or printf command prints.
+func echoed(call *syntax.CallExpr) (string, bool) {
+	words := make([]string, len(call.Args))
+	for i, w := range call.Args {
+		words[i] = wordString(w)
+	}
+	bare := stripWrappers(words)
+	if len(bare) == 0 {
+		return "", false
+	}
+	args := bare[1:]
+	switch path.Base(bare[0]) {
+	case "echo":
+		// bash's echo decodes escapes with -e, zsh's and sh's by default; reading them errs on the safe side. The
+		// last of -e and -E wins.
+		decode, newline := true, true
+		for len(args) > 0 && echoFlags.MatchString(args[0]) {
+			if i := strings.LastIndexAny(args[0], "eE"); i >= 0 {
+				decode = args[0][i] == 'e'
+			}
+			newline = newline && !strings.Contains(args[0], "n")
+			args = args[1:]
+		}
+		out := strings.Join(args, " ")
+		if decode {
+			var stop bool
+			if out, stop = decodeEscapes(out, escEcho); stop {
+				return out, true // \c ends the output
+			}
+		}
+		if newline {
+			out += "\n"
+		}
+		return out, true
+	case "printf": // printf '%s %s\n' git push: what it prints
+		return printf(args), true
+	}
+	return "", false
+}
+
+// printfVerb is one conversion: flags, a width and a precision (either may be * to take an argument), and a letter.
+var printfVerb = regexp.MustCompile(`%[-+ #0]*(\*|[0-9]*)(\.(\*|[0-9]*))?[a-zA-Z%]`)
+
+// printf is what `printf [--] format args...` prints: each verb takes the next argument, %% is a %, and the format
+// repeats while arguments are left, as in the shell. %b decodes its argument's escapes and its \c ends the output;
+// a precision cuts %s and %b; -v sets a variable and prints nothing.
+func printf(args []string) string {
+	if len(args) > 0 && args[0] == "--" {
+		args = args[1:]
+	}
+	if len(args) == 0 || args[0] == "-v" {
+		return ""
+	}
+	format, _ := decodeEscapes(args[0], escFormat)
+	args = args[1:]
 	var b strings.Builder
 	for {
 		used := false
-		b.WriteString(printfVerb.ReplaceAllStringFunc(format, func(v string) string {
-			if v == "%%" {
-				return "%"
-			}
+		take := func() string {
 			if len(args) == 0 {
 				return ""
 			}
 			used = true
 			a := args[0]
 			args = args[1:]
-			if strings.HasSuffix(v, "b") { // %b decodes its argument's escapes, as echo -e does
-				return echoEscapes(a)
-			}
 			return a
-		}))
+		}
+		last := 0
+		for _, m := range printfVerb.FindAllStringSubmatchIndex(format, -1) {
+			b.WriteString(format[last:m[0]])
+			last = m[1]
+			conv := format[m[1]-1]
+			if conv == '%' {
+				b.WriteByte('%')
+				continue
+			}
+			if format[m[2]:m[3]] == "*" {
+				take() // the width
+			}
+			prec := -1
+			if m[4] >= 0 {
+				p := format[m[6]:m[7]]
+				if p == "*" {
+					p = take()
+				}
+				prec, _ = strconv.Atoi(p)
+			}
+			a := take()
+			stop := false
+			switch conv {
+			case 'b':
+				a, stop = decodeEscapes(a, escB)
+			case 'c':
+				a = a[:min(1, len(a))]
+			}
+			if (conv == 's' || conv == 'b') && prec >= 0 && prec < len(a) {
+				a = a[:prec]
+			}
+			b.WriteString(a)
+			if stop {
+				return b.String()
+			}
+		}
+		b.WriteString(format[last:])
 		if !used || len(args) == 0 || b.Len() > maxScriptBytes {
 			return b.String()
 		}
 	}
+}
+
+// trapAction is the command `trap [-lpP] [--] action signal...` sets; trap - and a single operand reset instead.
+func trapAction(args []string) (string, bool) {
+	for len(args) > 0 && strings.HasPrefix(args[0], "-") && args[0] != "-" {
+		dash := args[0] == "--"
+		args = args[1:]
+		if dash {
+			break
+		}
+	}
+	if len(args) < 2 || args[0] == "-" {
+		return "", false
+	}
+	return args[0], true
 }
 
 func commandText(words, redirs []string) string {
@@ -431,24 +611,46 @@ func readsStdin(args []string) bool {
 	return stdin
 }
 
-// stripWrappers drops the commands that run the rest of their words as a command: sudo, env, command, exec, nohup,
-// time and xargs, with their flags (and the flags' values).
+// stripWrappers drops the commands that run the rest of their words as a command: sudo, doas, env, command, builtin,
+// exec, nohup, setsid, nice, timeout, stdbuf, time and xargs, with their flags (and the flags' values).
 func stripWrappers(w []string) []string {
 	for len(w) > 0 {
 		switch path.Base(w[0]) {
-		case "sudo":
-			w = skipFlags(w[1:], "ugCDhprtUTR", "--user", "--group", "--chdir", "--chroot", "--host", "--prompt",
-				"--role", "--type", "--other-user", "--close-from")
+		case "sudo": // sudo [flags] [VAR=value...] command
+			w = skipAssigns(skipFlags(w[1:], "aCcDghpRrTtUu", "--user", "--group", "--chdir", "--chroot", "--host",
+				"--prompt", "--role", "--type", "--other-user", "--close-from", "--command-timeout", "--auth-type",
+				"--login-class"))
+		case "doas":
+			w = skipFlags(w[1:], "aCu")
 		case "env":
 			w = envCommand(w[1:])
-		case "command", "exec", "nohup", "time":
+		case "command", "builtin", "exec", "nohup", "setsid":
 			w = skipFlags(w[1:], "a")
-		case "xargs":
-			w = skipFlags(w[1:], "IdEnLPsa", "--delimiter", "--eof", "--max-args", "--max-lines", "--max-procs",
-				"--max-chars", "--arg-file")
+		case "nice":
+			w = skipFlags(w[1:], "n", "--adjustment")
+		case "timeout": // timeout [flags] duration command
+			w = skipFlags(w[1:], "ks", "--kill-after", "--signal")
+			w = w[min(1, len(w)):]
+		case "stdbuf":
+			w = skipFlags(w[1:], "eio", "--error", "--input", "--output")
+		case "time": // the time program; the time keyword is parsed as such
+			w = skipFlags(w[1:], "fo", "--format", "--output")
+		case "xargs": // -e, -i and -l take a value only when attached
+			w = skipFlags(w[1:], "adEIJLnPRsS", "--arg-file", "--delimiter", "--max-args", "--max-procs",
+				"--max-chars", "--process-slot-var")
 		default:
 			return w
 		}
+	}
+	return w
+}
+
+var assignWord = regexp.MustCompile(`^[A-Za-z_][A-Za-z0-9_]*=`)
+
+// skipAssigns drops leading VAR=value words.
+func skipAssigns(w []string) []string {
+	for len(w) > 0 && assignWord.MatchString(w[0]) {
+		w = w[1:]
 	}
 	return w
 }
@@ -472,6 +674,8 @@ func envCommand(w []string) []string {
 			w = w[min(2, len(w)):]
 		case a == "--":
 			return w[1:]
+		case a == "-": // env - is env -i
+			w = w[1:]
 		case strings.HasPrefix(a, "--"):
 			w = w[1:]
 		case strings.HasPrefix(a, "-") && a != "-":
@@ -517,7 +721,7 @@ func envShortFlags(a string, rest []string) []string {
 				return nil
 			}
 			return append(shellWords(rest[0]), rest[1:]...)
-		case 'u', 'C':
+		case 'u', 'C', 'P':
 			if attached != "" || len(rest) == 0 {
 				return rest
 			}
@@ -610,16 +814,29 @@ func writePartIn(b *strings.Builder, p syntax.WordPart, inDouble bool) {
 	}
 }
 
-// echoEscapes decodes the escapes echo -e and printf %b print: as in $'...', except octal is \0 and up to three
-// digits, and \c ends the output.
-func echoEscapes(s string) string { return decodeEscapes(s, true) }
+// ansiC decodes the escapes of a $'...' string.
+func ansiC(s string) string {
+	out, _ := decodeEscapes(s, escDollar)
+	return out
+}
 
-// ansiC decodes the escapes of a $'...' string (and of a printf format) that can change what a command reads:
-// \n \t \r \e, \\ \' \", \xHH and octal \NNN.
-func ansiC(s string) string { return decodeEscapes(s, false) }
+// escMode is where escapes are read; each place reads a few of them its own way.
+type escMode int
 
-// decodeEscapes decodes backslash escapes; echo picks echo -e's octal form and its \c.
-func decodeEscapes(s string, echo bool) string {
+const (
+	escDollar escMode = iota // $'...': \cX is a control character
+	escFormat                // a printf format: \c is just \c
+	escEcho                  // echo -e: octal is \0 and up to three digits; \c ends the output
+	escB                     // printf %b: octal is \0NNN or \NNN; \c ends the output
+)
+
+var simpleEscapes = map[byte]byte{'a': 7, 'b': 8, 'e': 0x1b, 'E': 0x1b, 'f': '\f', 'n': '\n', 'r': '\r', 't': '\t',
+	'v': '\v', '\\': '\\'}
+
+// decodeEscapes decodes s's backslash escapes as the shell does in mode: \a \b \e \f \n \r \t \v \\, \xHH, \uHHHH,
+// \UHHHHHHHH, octal, \c, and in $'...' and printf formats \' \" \?. Any other escape stays as written. stop is
+// whether \c ended the output.
+func decodeEscapes(s string, mode escMode) (out string, stop bool) {
 	var b strings.Builder
 	for i := 0; i < len(s); i++ {
 		if s[i] != '\\' || i+1 == len(s) {
@@ -627,39 +844,52 @@ func decodeEscapes(s string, echo bool) string {
 			continue
 		}
 		i++
-		switch c := s[i]; c {
-		case 'n':
-			b.WriteByte('\n')
-		case 't':
-			b.WriteByte('\t')
-		case 'r':
-			b.WriteByte('\r')
-		case 'e', 'E':
-			b.WriteByte(0x1b)
-		case 'x':
-			n, j := 0, i+1
-			for ; j < len(s) && j < i+3 && strings.IndexByte("0123456789abcdefABCDEF", s[j]) >= 0; j++ {
-				n = n*16 + strings.IndexByte("0123456789abcdef", s[j]|0x20)
-			}
-			if j == i+1 {
-				b.WriteString(`\x`)
-				continue
-			}
-			b.WriteByte(byte(n))
-			i = j - 1
-		case 'c':
-			if echo {
-				return b.String()
+		c := s[i]
+		if r, ok := simpleEscapes[c]; ok {
+			b.WriteByte(r)
+			continue
+		}
+		switch {
+		case c == '\'' || c == '"' || c == '?':
+			if mode == escEcho || mode == escB {
+				b.WriteByte('\\')
 			}
 			b.WriteByte(c)
-		case '0', '1', '2', '3', '4', '5', '6', '7':
-			if echo && c != '0' {
+		case c == 'x' || c == 'u' || c == 'U':
+			digits := map[byte]int{'x': 2, 'u': 4, 'U': 8}[c]
+			n, j := 0, i+1
+			for ; j < len(s) && j <= i+digits && strings.IndexByte("0123456789abcdefABCDEF", s[j]) >= 0; j++ {
+				n = n*16 + strings.IndexByte("0123456789abcdef", s[j]|0x20)
+			}
+			switch {
+			case j == i+1:
 				b.WriteByte('\\')
 				b.WriteByte(c)
 				continue
+			case c == 'x':
+				b.WriteByte(byte(n))
+			default:
+				b.WriteRune(rune(n))
 			}
+			i = j - 1
+		case c == 'c':
+			switch {
+			case mode == escEcho || mode == escB:
+				return b.String(), true
+			case mode == escDollar && i+1 < len(s): // \cJ is a newline
+				i++
+				b.WriteByte(s[i] & 0x1f)
+			default:
+				b.WriteString(`\c`)
+			}
+		case c >= '0' && c <= '7':
 			start := i
-			if echo {
+			switch {
+			case mode == escEcho && c != '0':
+				b.WriteByte('\\')
+				b.WriteByte(c)
+				continue
+			case (mode == escEcho || mode == escB) && c == '0':
 				start = i + 1 // \0 then up to three digits
 			}
 			n, j := 0, start
@@ -668,8 +898,40 @@ func decodeEscapes(s string, echo bool) string {
 			}
 			b.WriteByte(byte(n))
 			i = j - 1
-		default: // \\ \' \" and anything else: the character itself
+		default:
+			b.WriteByte('\\')
 			b.WriteByte(c)
+		}
+	}
+	return b.String(), false
+}
+
+// hdocString is a heredoc's body as the shell reads it: as written when the delimiter is quoted (<<'EOF'), else with
+// each backslash kept except before $ ` and \ (the parser already joins \-newline continuations).
+func hdocString(r *syntax.Redirect) string {
+	quoted := false
+	if r.Word != nil {
+		for _, p := range r.Word.Parts {
+			if l, ok := p.(*syntax.Lit); !ok || strings.Contains(l.Value, `\`) {
+				quoted = true
+			}
+		}
+	}
+	var b strings.Builder
+	for _, p := range r.Hdoc.Parts {
+		l, ok := p.(*syntax.Lit)
+		switch {
+		case ok && quoted:
+			b.WriteString(l.Value)
+		case ok:
+			for i := 0; i < len(l.Value); i++ {
+				if l.Value[i] == '\\' && i+1 < len(l.Value) && strings.IndexByte("$`\\", l.Value[i+1]) >= 0 {
+					i++
+				}
+				b.WriteByte(l.Value[i])
+			}
+		default:
+			b.WriteString(source(p))
 		}
 	}
 	return b.String()

@@ -4,7 +4,10 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
+
+	"github.com/websentry-ai/paws/internal/hook"
 )
 
 const pawsCmd = `"$HOME/.paws/bin/paws" gate`
@@ -77,25 +80,24 @@ func TestEnsureHooksRepointsMovedBinary(t *testing.T) {
 	}
 }
 
-// Earlier builds registered UserPromptSubmit; re-running init drops the paws entry there and keeps others.
-func TestEnsureHooksDropsRetiredEvents(t *testing.T) {
-	paws, _ := json.Marshal(map[string]any{"hooks": []any{map[string]any{"type": "command", "command": pawsCmd}}})
+// init registers UserPromptSubmit as an async hook, and repoints a blocking paws entry an earlier build
+// left there, keeping other hooks on the event.
+func TestEnsureHooksRegistersAsyncPromptHook(t *testing.T) {
+	old, _ := json.Marshal(map[string]any{"hooks": []any{map[string]any{"type": "command", "command": pawsCmd, "timeout": 15}}})
 	other := `{"hooks":[{"type":"command","command":"/x/other.sh"}]}`
-	doc := settingsDoc{"hooks": json.RawMessage(`{"UserPromptSubmit":[` + string(paws) + `,` + other + `]}`)}
+	doc := settingsDoc{"hooks": json.RawMessage(`{"UserPromptSubmit":[` + string(old) + `,` + other + `]}`)}
 	if changed, err := ensureHooks(doc, pawsCmd); err != nil || !changed {
 		t.Fatalf("ensureHooks: %v %v", changed, err)
 	}
 	hooks, _ := hooksBlock(doc)
 	var up []json.RawMessage
 	json.Unmarshal(hooks["UserPromptSubmit"], &up)
-	if len(up) != 1 || containsCommand(up, pawsCmd) || !containsCommand(up, "/x/other.sh") {
-		t.Fatalf("want only the other UserPromptSubmit hook left, got %s", hooks["UserPromptSubmit"])
+	if len(up) != 2 || !containsCommand(up, pawsCmd) || !containsCommand(up, "/x/other.sh") {
+		t.Fatalf("want the paws entry and the other hook, got %s", hooks["UserPromptSubmit"])
 	}
-
-	doc = settingsDoc{"hooks": json.RawMessage(`{"UserPromptSubmit":[` + string(paws) + `]}`)}
-	ensureHooks(doc, pawsCmd)
-	if hooks, _ := hooksBlock(doc); hooks["UserPromptSubmit"] != nil {
-		t.Errorf("an emptied retired event should be removed, got %s", hooks["UserPromptSubmit"])
+	if !jsonEqual(up[pawsEntryIndex(up)], hook.RawEntry("UserPromptSubmit", pawsCmd)) ||
+		!strings.Contains(string(up[pawsEntryIndex(up)]), `"async":true`) {
+		t.Errorf("the paws UserPromptSubmit entry should be the async one, got %s", up[pawsEntryIndex(up)])
 	}
 }
 

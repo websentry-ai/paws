@@ -153,7 +153,7 @@ func (f failingTransport) RoundTrip(r *http.Request) (*http.Response, error) {
 }
 
 // The gate decides tool calls offline. Even logged in, with uploads and config checks due,
-// PreToolUse, SessionStart and PostToolUse never touch the network; only Stop does.
+// PreToolUse, SessionStart and PostToolUse never touch the network; only UserPromptSubmit and Stop do.
 func TestGateNeverUsesNetworkBeforeTools(t *testing.T) {
 	home, srv := syncEnv(t)
 	t.Setenv("PAWS_SYNC_INTERVAL", "0s")
@@ -252,6 +252,98 @@ func TestStopHookThrottlesOneRoundEveryFiveMinutes(t *testing.T) {
 	t.Setenv("PAWS_SYNC_INTERVAL", "0s")
 	if got := stop(); strings.Join(got, ",") != "POST /paws/v1/sync" {
 		t.Fatalf("Stop with PAWS_SYNC_INTERVAL=0s: %v", got)
+	}
+}
+
+// Between uploads, the Stop hook asks for the config hash alone at most every 30 seconds, and fetches
+// the config only when it changed. Records wait for the next upload.
+func TestStopHookChecksConfigEvery30SecondsBetweenUploads(t *testing.T) {
+	home, srv := syncEnv(t)
+	srv.configHash = "h1"
+	stop := func() []string {
+		t.Helper()
+		before := srv.count("")
+		if out := runGate(t, map[string]any{"hook_event_name": "Stop", "cwd": t.TempDir(), "session_id": "s1"}); out != "{}" {
+			t.Fatalf("Stop must answer {}, got %q", out)
+		}
+		return srv.requests[before:]
+	}
+	checked := func(ago time.Duration) {
+		setState(t, func(st *portalState) { st.LastCheck = time.Now().Add(-ago) })
+	}
+	stop() // the first round uploads and applies h1
+
+	appendLines(t, filepath.Join(home, "audit.log"), actionLine("2026-10-01T10:00:01Z", `"tool":"Bash","action":"pwd"`))
+	checked(20 * time.Second)
+	if got := stop(); len(got) != 0 {
+		t.Fatalf("a Stop inside 30 seconds of the last check made requests: %v", got)
+	}
+
+	// 30 seconds on, unchanged: one GET for the hash, no upload.
+	checked(30 * time.Second)
+	if got := stop(); strings.Join(got, ",") != "GET /paws/v1/config/hash" {
+		t.Fatalf("check with the config unchanged: %v", got)
+	}
+
+	// Changed: the config is fetched, applied and reported; the new record still waits for the upload.
+	srv.configHash = "h2"
+	checked(30 * time.Second)
+	if got := stop(); strings.Join(got, ",") != "GET /paws/v1/config/hash,GET /paws/v1/config,POST /paws/v1/sync" {
+		t.Fatalf("check with a changed config: %v", got)
+	}
+	if st := loadPortalState(); st.AppliedHash != "h2" {
+		t.Errorf("applied hash %q, want h2", st.AppliedHash)
+	}
+	if recs := decodeSync(t, srv.bodies[len(srv.bodies)-1]); len(recs) != 0 {
+		t.Errorf("a config check uploaded records: %v", recs)
+	}
+
+	// PAWS_CHECK_INTERVAL overrides the check interval.
+	t.Setenv("PAWS_CHECK_INTERVAL", "0s")
+	if got := stop(); strings.Join(got, ",") != "GET /paws/v1/config/hash" {
+		t.Fatalf("Stop with PAWS_CHECK_INTERVAL=0s: %v", got)
+	}
+}
+
+// Sending Claude a message runs the same round from the async UserPromptSubmit hook, so a skill turned
+// on in the browser reaches the laptop with the next prompt, before any turn ends. The hook answers {}
+// (it never blocks or rewrites the prompt), and the prompt is never uploaded or logged.
+func TestPromptHookPullsConfigWithTheSameThrottle(t *testing.T) {
+	home, srv := syncEnv(t)
+	srv.configHash = "h1"
+	const secret = "prompt-text-that-must-stay-local"
+	prompt := func() []string {
+		t.Helper()
+		before := srv.count("")
+		ev := map[string]any{"hook_event_name": "UserPromptSubmit", "prompt": secret, "cwd": t.TempDir(), "session_id": "s1"}
+		if out := runGate(t, ev); out != "{}" {
+			t.Fatalf("UserPromptSubmit must answer {}, got %q", out)
+		}
+		return srv.requests[before:]
+	}
+	if got := prompt(); strings.Join(got, ",") != "POST /paws/v1/sync,GET /paws/v1/config,POST /paws/v1/sync" {
+		t.Fatalf("first prompt requests: %v", got)
+	}
+	if st := loadPortalState(); st.AppliedHash != "h1" {
+		t.Errorf("applied hash %q, want h1", st.AppliedHash)
+	}
+	// A second prompt inside 30 seconds: nothing.
+	if got := prompt(); len(got) != 0 {
+		t.Fatalf("a prompt inside 30 seconds made requests: %v", got)
+	}
+	// Past the check interval, with a change in the browser: hash, config, applied report.
+	srv.configHash = "h2"
+	setState(t, func(st *portalState) { st.LastCheck = time.Now().Add(-30 * time.Second) })
+	if got := prompt(); strings.Join(got, ",") != "GET /paws/v1/config/hash,GET /paws/v1/config,POST /paws/v1/sync" {
+		t.Fatalf("prompt after a change: %v", got)
+	}
+	for _, b := range srv.bodies {
+		if strings.Contains(string(b), secret) {
+			t.Fatal("the prompt reached the portal")
+		}
+	}
+	if data, _ := os.ReadFile(filepath.Join(home, "audit.log")); strings.Contains(string(data), secret) {
+		t.Fatal("the prompt was written to the audit log")
 	}
 }
 

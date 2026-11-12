@@ -25,14 +25,17 @@ import (
 
 // The portal config reaches the gate as plain rule files under $PAWS_HOME/portal/, which
 // paws already loads with the rest of ~/.paws. Only `paws sync`, `paws login`, the async
-// Stop hook and the background sync a new session starts fetch it.
+// UserPromptSubmit and Stop hooks and the background sync a new session starts fetch it.
 
 // portalState is $PAWS_HOME/portal/state.json.
 type portalState struct {
 	AppliedHash string    `json:"applied_config_hash,omitempty"`
 	Skills      []string  `json:"skills,omitempty"`  // skills the applied config turns on
-	LastUpload  time.Time `json:"last_upload"`       // the last portal round: upload and config check together
+	LastUpload  time.Time `json:"last_upload"`       // the last upload, which also checks the config
+	LastCheck   time.Time `json:"last_check"`        // the last config check, with or without an upload
 	Revoked     bool      `json:"revoked,omitempty"` // the portal answered 401; login was forgotten
+	// AccountDeleted: the portal said the account was deleted (403 account_deleted); Revoked is set too.
+	AccountDeleted bool `json:"account_deleted,omitempty"`
 }
 
 // portalConfig is GET /config: the account's skills that are on.
@@ -131,9 +134,9 @@ func clearPortal() error {
 	return nil
 }
 
-// forgetIfRevoked logs this machine out when err is a 401: the token is dead, so the portal's
-// rules, state and credentials go, as with `paws logout`, and state.json remembers why. It
-// reports whether it did.
+// forgetIfRevoked logs this machine out when err is a 401, or a 403 for a deleted account: the
+// token is dead, so the portal's rules, state and credentials go, as with `paws logout`, and
+// state.json remembers why. It reports whether it did.
 func forgetIfRevoked(err error) bool {
 	if !errors.Is(err, errRevoked) {
 		return false
@@ -142,7 +145,7 @@ func forgetIfRevoked(err error) bool {
 	if path := credentialsPath(); path != "" {
 		os.Remove(path)
 	}
-	savePortalState(portalState{Revoked: true})
+	savePortalState(portalState{Revoked: true, AccountDeleted: errors.Is(err, errAccountDeleted)})
 	return true
 }
 
@@ -235,8 +238,8 @@ func portalGet(creds *credentials, path string, v any) error {
 	switch {
 	case err != nil:
 		return err
-	case status == http.StatusUnauthorized:
-		return errRevoked
+	case loggedOutError(status, body) != nil:
+		return loggedOutError(status, body)
 	case status != http.StatusOK:
 		return portalError(status, body)
 	}

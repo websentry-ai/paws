@@ -98,8 +98,9 @@ directory up to the repo root (or $HOME if no repo), plus ~/.paws.
 The catalog is on the paws server: add and search ask it, and every skill is
 downloaded from it and checked against its content hash. Nothing about your
 work leaves the machine unless you run unbound-paws login. Once logged in, the
-async Stop hook uploads records and pulls portal settings after Claude's
-turns (throttled); the gate itself never uses the network. The portal
+async prompt and Stop hooks pull portal settings when you send Claude a
+message and upload records (throttled); the gate itself never uses the
+network. The portal
 address is $PAWS_PORTAL_API (default https://paws-api.getunbound.ai).
 `)
 }

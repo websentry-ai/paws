@@ -78,8 +78,20 @@ func split(line string, out *[]command, depth int, lim *limits, sc *scope) bool 
 		sc = &scope{funcs: map[string][]*syntax.Stmt{}}
 	}
 	s := splitter{out: out, sc: sc, walked: map[walkKey]bool{}, lim: lim, piped: map[*syntax.BinaryCmd]bool{},
-		bg: map[*syntax.Stmt]bool{}}
+		bg: map[*syntax.Stmt]bool{}, seenLoop: map[syntax.Node]bool{}, rewalked: map[syntax.Node]bool{}}
 	s.walk(f, depth)
+	// A loop body runs again and again: a call early in it may run a function defined later in it, or after it in an
+	// earlier pass. Each loop's body is read once more now that every definition is known (within the line's budget).
+	for i := 0; i < len(s.loops) && s.lim.funcWalks > 0; i++ {
+		if s.rewalked[s.loops[i]] {
+			continue
+		}
+		s.rewalked[s.loops[i]] = true
+		s.lim.funcWalks--
+		for _, st := range loopBody(s.loops[i]) {
+			s.walk(st, depth)
+		}
+	}
 	// The shell runs EXIT and other handlers after the line's commands, with every function defined by then. Each is
 	// read in its own copy of that scope: which handler runs, and in what order, depends on signals, so one handler's
 	// definitions must not hide a call in another.
@@ -101,6 +113,9 @@ type splitter struct {
 	piped  map[*syntax.BinaryCmd]bool // pipes already read as one pipeline
 	bg     map[*syntax.Stmt]bool      // background statements already entered
 	traps  []string                   // trap handlers, read again once the line is done
+	// loops are the while, until, for and select loops met, read once more once the line is done.
+	loops              []syntax.Node
+	seenLoop, rewalked map[syntax.Node]bool
 }
 
 // scope is one shell's functions, and how many definitions it has seen (a walked body is keyed on it). A name keeps
@@ -139,6 +154,17 @@ func (s *splitter) nestedIn(script string, depth int, sc *scope) {
 	if split(script, s.out, depth+1, s.lim, sc) {
 		*s.out = append(*s.out, command{texts: []string{script}})
 	}
+}
+
+// loopBody is the statements a while, until, for or select loop runs each time round.
+func loopBody(n syntax.Node) []*syntax.Stmt {
+	switch n := n.(type) {
+	case *syntax.WhileClause:
+		return n.Do
+	case *syntax.ForClause:
+		return n.Do
+	}
+	return nil
 }
 
 func subshellStmts(n syntax.Node) []*syntax.Stmt {
@@ -193,6 +219,11 @@ func (s *splitter) walk(node syntax.Node, depth int) {
 			s.walk(n.Stmt, depth)
 			s.sc = outer
 			return false
+		case *syntax.WhileClause, *syntax.ForClause:
+			if !s.seenLoop[n] {
+				s.seenLoop[n] = true
+				s.loops = append(s.loops, n)
+			}
 		case *syntax.BinaryCmd:
 			if n.Op == syntax.Pipe || n.Op == syntax.PipeAll {
 				// Each stage of a pipeline runs in a subshell: functions it defines don't reach the line.

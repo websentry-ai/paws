@@ -158,8 +158,9 @@ func Add(args []string) int {
 	}
 	if !hookRegistered() {
 		fmt.Printf("\nClaude Code doesn't run paws here yet. Turn it on with one of:\n")
-		fmt.Printf("  %-28s %s\n", cyan(cliName+" init --global"), dim("every repo"))
-		fmt.Printf("  %-28s %s\n", cyan(cliName+" init"), dim("this repo only"))
+		for _, l := range [][2]string{{cliName + " init --global", "every repo"}, {cliName + " init", "this repo only"}} {
+			fmt.Printf("  %s%s %s\n", cyan(l[0]), strings.Repeat(" ", max(0, 28-len(l[0]))), dim(l[1])) // pad the text, not the colour codes
+		}
 	}
 	return 0
 }

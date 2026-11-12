@@ -289,28 +289,9 @@ const (
 	BundledKept      = "kept"      // the user's own or edited copy; left alone
 )
 
-// InstallBundledSkill installs a skill that ships inside the binary (fsys rooted at the skill
-// directory). Same rules as pack skills: an existing directory paws doesn't own, or that the
-// user edited, is kept.
-func InstallBundledSkill(fsys fs.FS, skillsDir, name, source string) (string, error) {
-	dest := filepath.Join(skillsDir, name)
-	if exists(dest) {
-		if !replaceable(dest) {
-			return BundledKept, nil
-		}
-		want, err := HashSkill(fsys)
-		if err == nil && want == installedHash(dest) {
-			return BundledCurrent, nil
-		}
-	}
-	if _, err := installSkill(fsys, skillsDir, name, marker{Skill: name, Source: source}); err != nil {
-		return "", err
-	}
-	return BundledInstalled, nil
-}
-
-// ReinstallBundledSkill is InstallBundledSkill for an explicit reinstall: a paws copy is replaced
-// even if the user edited it. A directory paws didn't install (no marker) is still kept.
+// ReinstallBundledSkill installs a skill that ships inside the binary (fsys rooted at the skill directory) on an
+// explicit reinstall: a paws copy is replaced even if the user edited it. A directory paws didn't install (no
+// marker) is still kept.
 func ReinstallBundledSkill(fsys fs.FS, skillsDir, name, source string) (string, error) {
 	dest := filepath.Join(skillsDir, name)
 	if exists(dest) && readMarker(dest).Installed == "" {

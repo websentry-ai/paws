@@ -547,3 +547,32 @@ func TestSyncStripsControlCharactersFromSkipReasons(t *testing.T) {
 		t.Errorf("control characters reached the terminal: %q", out)
 	}
 }
+
+// The report this guards: a skill turned on in the portal that this CLI build has never heard of (any catalog skill
+// added after the release; here receiving-code-review) must install on sync. 0.3.2 only installed skills from the
+// catalog compiled into it and skipped the rest, while the portal showed the skill as synced.
+func TestSyncInstallsACatalogSkillThisBuildDoesNotShip(t *testing.T) {
+	home, srv := syncEnv(t)
+	hash := fakeUpstream(t, "---\nname: receiving-code-review\n---\nVerify review feedback before you act on it.\n")
+	srv.configHash = "h1"
+	srv.config = configJSON(t, "h1", map[string]any{"name": "receiving-code-review", "kind": "skill", "load": "full", "status": "on",
+		"version": "22f0b46", "content_hash": hash,
+		"upstream": map[string]any{"repo": "github.com/obra/superpowers", "path": "skills/receiving-code-review/SKILL.md",
+			"ref": "22f0b463e7a5e579904dd6211a520321035526f7"},
+		"actions": []map[string]any{{"id": "receiving-code-review", "label": "PR review comments are fetched", "event": "pre-tool",
+			"tool": "Bash", "command_regex": `(^|[;&|\n])\s*gh\s+pr\s+view\b.*--comments`}}})
+
+	code, out := captureStdout(t, func() int { return Sync(nil) })
+	if code != 0 || strings.Contains(out, "skipped") || !strings.Contains(out, "Config: 1 skill (receiving-code-review) applied.") {
+		t.Fatalf("sync exit %d, output %q", code, out)
+	}
+	if _, err := os.Stat(filepath.Join(os.Getenv("HOME"), ".claude", "skills", "receiving-code-review", "SKILL.md")); err != nil {
+		t.Errorf("the skill is not installed: %v", err)
+	}
+	if got := fmt.Sprint(portalFiles(t, home)); got != "[receiving-code-review--receiving-code-review.md]" {
+		t.Errorf("portal files %s", got)
+	}
+	if d := deny(t, "gh pr view 42 --comments"); !strings.Contains(d, `"receiving-code-review"`) {
+		t.Errorf("the rule is not live: deny %q", d)
+	}
+}

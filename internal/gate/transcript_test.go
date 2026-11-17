@@ -19,7 +19,65 @@ const (
 	lnCompact   = `{"type":"system","subtype":"compact_boundary","isSidechain":false,"compactMetadata":{"trigger":"auto","preTokens":129149}}`
 	lnAttach    = `{"type":"attachment","isSidechain":false,"attachment":{"type":"hook_success","hookName":"PreToolUse:Bash","stdout":"{}"}}`
 	lnGarbage   = `not json at all`
+
+	// A message the user typed. An interactive session tags it origin human; a headless (-p) run leaves origin out.
+	lnPrompt         = `{"type":"user","isSidechain":false,"promptId":"p1","origin":{"kind":"human"},"message":{"role":"user","content":"commit and push it"}}`
+	lnPromptHeadless = `{"type":"user","isSidechain":false,"message":{"role":"user","content":[{"type":"text","text":"commit and push it"}]}}`
+	// User records the user did not type: a loaded skill's text, a background task finishing, a compaction summary.
+	lnSkillBody      = `{"type":"user","isSidechain":false,"isMeta":true,"message":{"role":"user","content":[{"type":"text","text":"Base directory for this skill: /x"}]}}`
+	lnTaskNote       = `{"type":"user","isSidechain":false,"origin":{"kind":"task-notification"},"message":{"role":"user","content":"<task-notification>done</task-notification>"}}`
+	lnCompactSummary = `{"type":"user","isSidechain":false,"isCompactSummary":true,"message":{"role":"user","content":"This session is being continued from a previous conversation."}}`
 )
+
+// responses is n agent responses, each a tool call and its result: what one user message can set off.
+func responses(n int) []string {
+	var out []string
+	for i := 0; i < n; i++ {
+		out = append(out,
+			fmt.Sprintf(`{"type":"assistant","isSidechain":false,"message":{"id":"msg_%d","content":[{"type":"tool_use","id":"toolu_%d","name":"Bash","input":{"command":"ls"}}]}}`, i, i),
+			fmt.Sprintf(`{"type":"user","isSidechain":false,"message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"toolu_%d","content":"ok"}]},"toolUseResult":{"stdout":"ok"}}`, i))
+	}
+	return out
+}
+
+// turns is n user messages after the load, each answered with a few tool calls.
+func turns(n int, prompt string) []string {
+	var out []string
+	for i := 0; i < n; i++ {
+		out = append(out, prompt)
+		out = append(out, responses(3)...)
+	}
+	return out
+}
+
+// A turn is one user message and everything the agent does to answer it, however many tool calls that takes.
+func TestWindowCountsUserMessagesNotToolCalls(t *testing.T) {
+	loaded := func(lines ...[]string) bool {
+		var all []string
+		for _, l := range lines {
+			all = append(all, l...)
+		}
+		return SkillLoaded(write(t, all...), "release-checklist", DefaultSkillWindow)
+	}
+	load := []string{lnPrompt, lnSkillOK, lnSkillBody}
+	if !loaded(load, responses(200)) {
+		t.Error("200 tool calls answering the message that loaded the skill are still that one turn")
+	}
+	if !loaded(load, turns(19, lnPrompt)) {
+		t.Error("19 user messages after the one that loaded the skill: the load is in the last 20 turns")
+	}
+	if loaded(load, turns(20, lnPrompt)) {
+		t.Error("20 user messages after the one that loaded the skill: the load is 21 turns back")
+	}
+	if loaded(load, turns(20, lnPromptHeadless)) {
+		t.Error("a headless run's messages carry no origin and still count as turns")
+	}
+	for name, ln := range map[string]string{"skill text": lnSkillBody, "task notification": lnTaskNote, "compaction summary": lnCompactSummary} {
+		if !loaded(load, turns(30, ln)) {
+			t.Errorf("a %s is not a user message and must not use up the window", name)
+		}
+	}
+}
 
 func write(t *testing.T, lines ...string) string {
 	t.Helper()
@@ -49,8 +107,8 @@ func TestSkillLoaded(t *testing.T) {
 		{"garbage lines are skipped", []string{lnSkillOK, lnGarbage, lnAssistant}, 20, true},
 		{"attachments do not consume the window", []string{lnSkillOK, lnAttach, lnAttach, lnAttach, lnAssistant}, 1, true},
 		{"compaction ends the search", []string{lnSkillOK, lnCompact, lnAssistant}, 20, false},
-		{"window of 1 covers only the current turn", []string{lnSkillOK, lnAssistant, lnAssistant}, 1, false},
-		{"window of 2 reaches one turn back", []string{lnSkillOK, lnAssistant, lnAssistant}, 2, true},
+		{"window of 1 covers only the current turn", []string{lnSkillOK, lnPrompt, lnAssistant}, 1, false},
+		{"window of 2 reaches one turn back", []string{lnSkillOK, lnPrompt, lnAssistant}, 2, true},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
@@ -84,30 +142,21 @@ func TestSkillLoadedFailsClosed(t *testing.T) {
 	}
 }
 
-// A tail read starts mid-object; the partial first line must be dropped rather than
-// aborting the scan, and a load past the tail boundary must not be seen.
-func TestSkillLoadedTailBoundary(t *testing.T) {
-	filler := make([]string, 0, 400)
-	filler = append(filler, lnSkillOK)
-	pad := `{"type":"user","isSidechain":false,"toolUseResult":{"success":true,"commandName":"x","pad":"` + strings.Repeat("p", 4096) + `"}}`
-	for i := 0; i < 400; i++ {
-		filler = append(filler, pad)
+// One turn's tool output can run to megabytes (20 user messages span 4 to 16 MB in real sessions), so the
+// scan reads back as far as the window goes, not a fixed tail: a load 5 MB back in the same turn still counts.
+func TestSkillLoadedReadsBackAsFarAsTheWindow(t *testing.T) {
+	lines := []string{lnPrompt, lnSkillOK}
+	pad := `{"type":"user","isSidechain":false,"message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"t","content":"x"}]},"toolUseResult":{"stdout":"` + strings.Repeat("p", 4096) + `"}}`
+	for i := 0; i < 1280; i++ {
+		lines = append(lines, pad)
 	}
-	filler = append(filler, lnAssistant)
-	p := write(t, filler...)
-
-	fi, err := os.Stat(p)
-	if err != nil {
-		t.Fatal(err)
+	lines = append(lines, lnAssistant)
+	p := write(t, lines...)
+	if fi, err := os.Stat(p); err != nil || fi.Size() < 5<<20 {
+		t.Fatalf("fixture must be over 5 MB: %v %v", fi, err)
 	}
-	if fi.Size() <= tailBytes {
-		t.Fatalf("fixture is %d bytes, need > tailBytes (%d) to exercise the boundary", fi.Size(), tailBytes)
-	}
-	if SkillLoaded(p, "release-checklist", 20) {
-		t.Fatal("load beyond the tail window was reported as found")
-	}
-	if !SkillLoaded(p, "x", 20) {
-		t.Fatal("load inside the tail was not found — partial-line handling broke the scan")
+	if !SkillLoaded(p, "release-checklist", DefaultSkillWindow) {
+		t.Fatal("a load 5 MB back in the current turn was not found")
 	}
 }
 
@@ -127,20 +176,18 @@ func BenchmarkSkillLoaded(b *testing.B) {
 	}
 }
 
-func TestWindowCountsResponsesNotBlocks(t *testing.T) {
-	// 20 responses of 3 blocks each (thinking, text, tool_use) after the skill load: still in window.
-	lines := []string{lnSkillOK}
+// A load further back than maxWindowBytes counts as not loaded: the scan stops there.
+func TestSkillLoadedStopsAtTheReadLimit(t *testing.T) {
+	orig := maxWindowBytes
+	maxWindowBytes = 64 << 10
+	t.Cleanup(func() { maxWindowBytes = orig })
+	lines := []string{lnPrompt, lnSkillOK}
+	pad := `{"type":"assistant","isSidechain":false,"message":{"id":"m","content":[{"type":"text","text":"` + strings.Repeat("p", 4096) + `"}]}}`
 	for i := 0; i < 20; i++ {
-		for _, kind := range []string{"thinking", "text", "tool_use"} {
-			lines = append(lines, fmt.Sprintf(`{"type":"assistant","isSidechain":false,"message":{"id":"msg_%d","content":[{"type":"%s"}]}}`, i, kind))
-		}
+		lines = append(lines, pad)
 	}
-	if !SkillLoaded(write(t, lines...), "release-checklist", DefaultSkillWindow) {
-		t.Error("20 responses split into 60 entries are 20 turns, inside the window")
-	}
-	lines = append(lines, `{"type":"assistant","isSidechain":false,"message":{"id":"msg_20","content":[{"type":"text"}]}}`)
 	if SkillLoaded(write(t, lines...), "release-checklist", DefaultSkillWindow) {
-		t.Error("the 21st response is outside the window")
+		t.Error("a load past the read limit was found")
 	}
 }
 
@@ -171,7 +218,7 @@ func TestRequestBlobs(t *testing.T) {
 	if skill(lnBlobSkillCall, lnBlobSkillOK, lnCompact) {
 		t.Error("a compaction since the blob ends the search")
 	}
-	if skill(lnBlobSkillCall, lnBlobSkillOK, lnAssistant, lnAssistant) {
+	if skill(lnBlobSkillCall, lnBlobSkillOK, lnPrompt, lnAssistant) {
 		t.Error("the blob is subject to the window like any other record")
 	}
 	if SkillLoaded(write(t, lnBlobSkillCall, lnBlobSkillOK), "other-skill", 20) {

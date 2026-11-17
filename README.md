@@ -112,8 +112,9 @@ The full reference: [docs/rules.md](docs/rules.md).
   notice; an internal error allows the call. A hook that wedges your terminal
   gets uninstalled within the hour.
 - **Per context window.** A skill counts as loaded when it was invoked in the
-  last 20 agent turns. After a compaction its text is gone, so the next gated
-  call denies once more.
+  last 20 turns. A turn is one message you send and everything Claude does to
+  answer it, however many tool calls that takes. After a compaction its text
+  is gone, so the next gated call denies once more.
 - **Not a sandbox.** Regex rules match command text, not shell semantics.
   A gate makes an agent that follows instructions load the skill; it doesn't
   stop an adversary. The hook runs `unbound-paws gate` from your PATH, so a

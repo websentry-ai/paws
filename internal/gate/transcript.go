@@ -8,23 +8,32 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"strconv"
 	"strings"
 )
 
-// tailBytes is how much of a transcript's end is read. Sessions reach tens of MB,
-// and a window's worth of turns lives in the last few hundred KB of them.
+// tailBytes is how much of a transcript's end the `when` conditions read.
 const tailBytes = 1 << 20
+
+// maxWindowBytes caps how far back a skill-window scan reads. 20 user messages span 4 to 16 MB
+// in real sessions; a load further back than this counts as not loaded, which costs one reload.
+var maxWindowBytes int64 = 64 << 20
+
+// windowChunk is how much a window scan reads at a time, walking back from the end of the file.
+const windowChunk = 1 << 20
 
 // transcriptEntry is the subset of a transcript line the skill scan needs.
 type transcriptEntry struct {
-	Type        string `json:"type"`
-	Subtype     string `json:"subtype"`
-	IsSidechain bool   `json:"isSidechain"`
+	Type             string `json:"type"`
+	Subtype          string `json:"subtype"`
+	IsSidechain      bool   `json:"isSidechain"`
+	IsMeta           bool   `json:"isMeta"`           // text Claude Code injects as a user record, like a loaded skill's body
+	IsCompactSummary bool   `json:"isCompactSummary"` // the summary that opens the context after a compaction
+	Origin           *struct {
+		Kind string `json:"kind"` // "human" for a typed message; others (task-notification) are injected
+	} `json:"origin"`
 	// Polymorphic in the log: an object for tool results, a bare string for hook denials.
 	ToolUseResult json.RawMessage `json:"toolUseResult"`
-	Message       struct {
-		ID string `json:"id"`
-	} `json:"message"`
 
 	raw []byte // the whole line, for the few records whose content blocks are read
 }
@@ -89,8 +98,9 @@ type skillResult struct {
 	Success     bool   `json:"success"`
 }
 
-// SkillLoaded reports whether skill was invoked successfully within the last
-// `window` agent turns of the transcript at path.
+// SkillLoaded reports whether skill was invoked successfully within the last `window`
+// turns of the transcript at path. A turn is one message the user typed and everything
+// the agent did to answer it, however many tool calls that took.
 //
 // False is the answer for every uncertain case — no transcript, unreadable file,
 // window exhausted, or a context compaction between the load and now — because
@@ -100,22 +110,20 @@ func SkillLoaded(path, skill string, window int) bool {
 	if skill == "" {
 		return false
 	}
-	var calls map[string]bool // built on the first blob tool_result: most scans end before one
-	return scanWindow(path, window, func(e transcriptEntry) bool {
+	lines := windowLines(path, window)
+	calls := skillCalls(lines, path, skill)
+	// Only a line with the skill's result record or one of its calls' ids (a blob answering it) can match.
+	name, _ := json.Marshal(skill)
+	needles := [][]byte{append([]byte(`"commandName":`), name...)}
+	for id := range calls {
+		needles = append(needles, []byte(id))
+	}
+	return scanLines(lines, path, needles, func(e transcriptEntry) bool {
 		if e.Type == requestBlob {
 			// A tool_result answering a Skill tool_use for this skill, not an error. The pairing
 			// by id is what keeps a command that prints "Launching skill: x" from counting.
-			if !bytes.Contains(e.raw, []byte(`"tool_result"`)) {
-				return false
-			}
 			for _, b := range e.blocks() {
-				if b.Type != "tool_result" || b.IsError {
-					continue
-				}
-				if calls == nil {
-					calls = skillCalls(path, skill)
-				}
-				if calls[b.ToolUseID] {
+				if b.Type == "tool_result" && !b.IsError && calls[b.ToolUseID] {
 					return true
 				}
 			}
@@ -132,12 +140,8 @@ func SkillLoaded(path, skill string, window int) bool {
 var skillToolName = []byte(`"name":"Skill"`)
 
 // skillCalls returns the ids of the log's own Skill tool_use blocks that invoke skill.
-func skillCalls(path, skill string) map[string]bool {
+func skillCalls(lines [][]byte, path, skill string) map[string]bool {
 	calls := map[string]bool{}
-	lines, err := tailLines(path)
-	if err != nil {
-		return calls
-	}
 	name, _ := json.Marshal(skill)
 	input := append([]byte(`"skill":`), name...) // skips the huge tool-definition lines cheaply
 	for _, l := range lines {
@@ -179,11 +183,8 @@ func DenyDelivered(path, marker string, window int) bool {
 		reason := result[loc[1]:]
 		return strings.HasPrefix(reason, marker) || strings.Contains(reason, "\n\n"+marker)
 	}
-	return scanWindow(path, window, func(e transcriptEntry) bool {
+	return scanLines(windowLines(path, window), path, [][]byte{[]byte(" hook error: ")}, func(e transcriptEntry) bool {
 		if e.Type == requestBlob {
-			if !bytes.Contains(e.raw, []byte(" hook error: ")) {
-				return false
-			}
 			for _, b := range e.blocks() {
 				if b.Type == "tool_result" && b.IsError && denied(b.text(), blobDenyPrefix) {
 					return true
@@ -202,44 +203,135 @@ func DenyDelivered(path, marker string, window int) bool {
 	})
 }
 
-// scanWindow walks the transcript backwards and reports whether hit matches an entry before
-// the window of agent turns runs out or a compaction boundary is crossed.
-func scanWindow(path string, window int, hit func(transcriptEntry) bool) bool {
-	if path == "" || window < 1 {
-		return false
-	}
-	lines, err := tailLines(path)
-	if err != nil {
-		return false
-	}
-	turns, lastID := 0, ""
-	for i := len(lines) - 1; i >= 0; i-- {
+// scanLines reports whether hit matches one of the log's own entries among lines. Only lines
+// holding one of needles are parsed: a window can be megabytes, and most of it can't match.
+func scanLines(lines [][]byte, path string, needles [][]byte, hit func(transcriptEntry) bool) bool {
+	for _, l := range lines {
+		if !containsAny(l, needles) {
+			continue
+		}
 		var e transcriptEntry
-		if json.Unmarshal(lines[i], &e) != nil {
+		if json.Unmarshal(l, &e) != nil {
 			continue
 		}
-		e.raw = lines[i]
-		if foreign(e, path) {
-			continue
-		}
-		switch {
-		case e.Type == "system" && e.Subtype == "compact_boundary":
-			return false
-		case e.Type == "assistant":
-			// Claude Code writes one entry per content block (thinking, text, each tool_use),
-			// all sharing the response's message id. A turn is one response, not one entry.
-			if e.Message.ID == "" || e.Message.ID != lastID {
-				turns++
-			}
-			lastID = e.Message.ID
-			if turns > window {
-				return false
-			}
-		case hit(e):
+		e.raw = l
+		if !foreign(e, path) && hit(e) {
 			return true
 		}
 	}
 	return false
+}
+
+func containsAny(l []byte, needles [][]byte) bool {
+	for _, n := range needles {
+		if bytes.Contains(l, n) {
+			return true
+		}
+	}
+	return false
+}
+
+// windowCache holds windows already read in this process. paws gate is one process per hook
+// call, so several rules scanning the same transcript read it once.
+var windowCache = map[string][][]byte{}
+
+// windowLines returns the lines of the last `window` turns of the transcript at path, newest
+// first. It reads back from the end of the file until the window-th message the user typed, a
+// compaction boundary, the start of the file or maxWindowBytes, whichever comes first.
+func windowLines(path string, window int) [][]byte {
+	if path == "" || window < 1 {
+		return nil
+	}
+	key := strconv.Itoa(window) + "\x00" + path
+	if lines, ok := windowCache[key]; ok {
+		return lines
+	}
+	lines := readWindow(path, window)
+	windowCache[key] = lines
+	return lines
+}
+
+func readWindow(path string, window int) [][]byte {
+	f, err := os.Open(path)
+	if err != nil {
+		return nil
+	}
+	defer f.Close()
+	fi, err := f.Stat()
+	if err != nil {
+		return nil
+	}
+	var out [][]byte
+	turns, end := 0, fi.Size()
+	var carry []byte // a line whose start is in the chunk before the one just read
+	for end > 0 {
+		n := min(int64(windowChunk), end, maxWindowBytes-(fi.Size()-end))
+		if n <= 0 {
+			break // the read limit: anything older counts as not loaded
+		}
+		buf := make([]byte, n, n+int64(len(carry)))
+		if _, err := f.ReadAt(buf, end-n); err != nil && !errors.Is(err, io.EOF) {
+			return nil
+		}
+		end -= n
+		lines := bytes.Split(append(buf, carry...), []byte("\n"))
+		if end > 0 {
+			carry, lines = lines[0], lines[1:] // the chunk started mid-line
+		}
+		for i := len(lines) - 1; i >= 0; i-- {
+			l := lines[i]
+			if len(l) == 0 {
+				continue
+			}
+			e, ok := turnMark(l, path)
+			if ok && e.Type == "system" {
+				return out // a compaction: the agent no longer has anything from before it
+			}
+			out = append(out, l)
+			if ok {
+				if turns++; turns == window {
+					return out
+				}
+			}
+		}
+	}
+	return out
+}
+
+var (
+	userType   = []byte(`"type":"user"`)
+	compaction = []byte(`"subtype":"compact_boundary"`)
+	// Keys of user records that are never a typed message. Inside a JSON string a quote is escaped,
+	// so text that quotes one of these can't match.
+	notTyped = [][]byte{[]byte(`"toolUseResult":`), []byte(`"isMeta":true`), []byte(`"isCompactSummary":true`)}
+)
+
+// turnMark parses l when it opens a turn (a message the user typed) or is a compaction boundary,
+// and reports whether it is either. The byte checks keep large tool results, pasted images and
+// skill text unparsed.
+func turnMark(l []byte, path string) (transcriptEntry, bool) {
+	var e transcriptEntry
+	isCompaction := bytes.Contains(l, compaction)
+	if !isCompaction && (!bytes.Contains(l, userType) || containsAny(l, notTyped)) {
+		return e, false
+	}
+	if json.Unmarshal(l, &e) != nil || foreign(e, path) {
+		return e, false
+	}
+	if e.Type == "system" {
+		return e, e.Subtype == "compact_boundary"
+	}
+	return e, typedMessage(e, l)
+}
+
+var toolResultBlock = []byte(`"type":"tool_result"`)
+
+// typedMessage reports whether e (the line l) is a message the user typed. A tool result, a loaded
+// skill's text (isMeta), a compaction summary and a record another source injected (a background
+// task's notification carries a non-human origin) are not. A headless run's prompt has no origin.
+func typedMessage(e transcriptEntry, l []byte) bool {
+	return e.Type == "user" && len(e.ToolUseResult) == 0 && !e.IsMeta && !e.IsCompactSummary &&
+		(e.Origin == nil || e.Origin.Kind == "human") && !bytes.Contains(l, toolResultBlock)
 }
 
 // foreign reports whether e belongs to another thread than the log's own. Claude Code marks every record

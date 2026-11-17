@@ -256,3 +256,27 @@ func TestCapText(t *testing.T) {
 		t.Errorf("capText should cut on a rune boundary under the cap, got len %d", len(got))
 	}
 }
+
+// The report this guards: one `git commit && git push` matched a commit rule and a push rule that both require
+// verification-before-completion, and the deny listed that skill twice. Each skill is named once, in one message.
+func TestRequireSkillReasonNamesEachSkillOnce(t *testing.T) {
+	DryRun = true
+	defer func() { DryRun = false }()
+
+	gate := func(name, skill string) *rule.Rule {
+		return mustRule(t, "---\nname: "+name+"\nevent: pre-tool\naction:\n  type: require-skill\n  skill: "+skill+"\n---\n")
+	}
+	rules := []*rule.Rule{gate("git--commit", "git"), gate("secret-scan--commit", "secret-scan"),
+		gate("verification-before-completion--commit", "verification-before-completion"),
+		gate("verification-before-completion--push", "verification-before-completion")}
+
+	reason := Decide(Event{Kind: rule.KindTool, Tool: "Bash", Target: `git commit -m "x" && git push`}, rules).Reason
+	for _, s := range []string{"git", "secret-scan", "verification-before-completion"} {
+		if n := strings.Count(reason, `"`+s+`"`); n != 1 {
+			t.Errorf("%s is named %d times, want once:\n%s", s, n, reason)
+		}
+	}
+	if strings.Contains(reason, "\n\n") {
+		t.Errorf("the skills come as one message, not one per rule:\n%s", reason)
+	}
+}

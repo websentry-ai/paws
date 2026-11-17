@@ -107,9 +107,10 @@ The repo root is the nearest directory with `.git` above the agent's cwd.
 ## Action
 
 `require-skill` is the one action. It denies the call until `skill` was
-invoked in the last 20 agent turns, then allows it. On `session-start`,
-which can't be denied, it adds context naming the skill instead (`message`
-replaces that text).
+invoked in the last 20 turns, then allows it. A turn is one message the user
+sends and everything the agent does to answer it, however many tool calls.
+On `session-start`, which can't be denied, it adds context naming the skill
+instead (`message` replaces that text).
 
 `deny_message` replaces the default deny, which names the skill and tells
 the agent to invoke it and retry the same command. A compaction resets the

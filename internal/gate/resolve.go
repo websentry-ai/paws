@@ -34,7 +34,8 @@ func (ev Event) ownLog() string {
 	return ev.Transcript
 }
 
-// DefaultSkillWindow is how many of the agent's own turns back a skill load still counts for.
+// DefaultSkillWindow is how many turns back a skill load still counts for: the user's last 20 messages
+// and the agent's work on each.
 const DefaultSkillWindow = 20
 
 // skillLoadSatisfied tags an audit record whose allow came from a cleared require-skill gate.

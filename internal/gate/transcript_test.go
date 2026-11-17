@@ -72,7 +72,12 @@ func TestWindowCountsUserMessagesNotToolCalls(t *testing.T) {
 	if loaded(load, turns(20, lnPromptHeadless)) {
 		t.Error("a headless run's messages carry no origin and still count as turns")
 	}
-	for name, ln := range map[string]string{"skill text": lnSkillBody, "task notification": lnTaskNote, "compaction summary": lnCompactSummary} {
+	harness := map[string]string{"skill text": lnSkillBody, "task notification": lnTaskNote, "compaction summary": lnCompactSummary,
+		// Older and headless logs carry no origin; the content marks what Claude Code wrote itself.
+		"slash-command output":             `{"type":"user","isSidechain":false,"message":{"role":"user","content":"<local-command-stdout>ok</local-command-stdout>"}}`,
+		"task notification without origin": `{"type":"user","isSidechain":false,"message":{"role":"user","content":[{"type":"text","text":"<task-notification>done</task-notification>"}]}}`,
+		"shell escape output":              `{"type":"user","isSidechain":false,"message":{"role":"user","content":"<bash-stdout>ok</bash-stdout>"}}`}
+	for name, ln := range harness {
 		if !loaded(load, turns(30, ln)) {
 			t.Errorf("a %s is not a user message and must not use up the window", name)
 		}

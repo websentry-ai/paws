@@ -24,14 +24,9 @@ const windowChunk = 1 << 20
 
 // transcriptEntry is the subset of a transcript line the skill scan needs.
 type transcriptEntry struct {
-	Type             string `json:"type"`
-	Subtype          string `json:"subtype"`
-	IsSidechain      bool   `json:"isSidechain"`
-	IsMeta           bool   `json:"isMeta"`           // text Claude Code injects as a user record, like a loaded skill's body
-	IsCompactSummary bool   `json:"isCompactSummary"` // the summary that opens the context after a compaction
-	Origin           *struct {
-		Kind string `json:"kind"` // "human" for a typed message; others (task-notification) are injected
-	} `json:"origin"`
+	Type        string `json:"type"`
+	Subtype     string `json:"subtype"`
+	IsSidechain bool   `json:"isSidechain"`
 	// Polymorphic in the log: an object for tool results, a bare string for hook denials.
 	ToolUseResult json.RawMessage `json:"toolUseResult"`
 
@@ -283,12 +278,12 @@ func readWindow(path string, window int) [][]byte {
 			if len(l) == 0 {
 				continue
 			}
-			e, ok := turnMark(l, path)
-			if ok && e.Type == "system" {
+			m := turnMark(l, path)
+			if m == compactionMark {
 				return out // a compaction: the agent no longer has anything from before it
 			}
 			out = append(out, l)
-			if ok {
+			if m == userTurn {
 				if turns++; turns == window {
 					return out
 				}
@@ -306,32 +301,41 @@ var (
 	notTyped = [][]byte{[]byte(`"toolUseResult":`), []byte(`"isMeta":true`), []byte(`"isCompactSummary":true`)}
 )
 
-// turnMark parses l when it opens a turn (a message the user typed) or is a compaction boundary,
-// and reports whether it is either. The byte checks keep large tool results, pasted images and
-// skill text unparsed.
-func turnMark(l []byte, path string) (transcriptEntry, bool) {
-	var e transcriptEntry
+type mark int
+
+const (
+	noMark         mark = iota
+	userTurn            // a message the user typed: a turn starts here
+	compactionMark      // a compaction boundary: the window ends here
+)
+
+// turnMark says whether l opens a turn or is a compaction boundary. The byte checks keep large
+// tool results, pasted images and skill text unparsed.
+func turnMark(l []byte, path string) mark {
 	isCompaction := bytes.Contains(l, compaction)
 	if !isCompaction && (!bytes.Contains(l, userType) || containsAny(l, notTyped)) {
-		return e, false
+		return noMark
 	}
-	if json.Unmarshal(l, &e) != nil || foreign(e, path) {
-		return e, false
+	var e struct {
+		mainEntry
+		Subtype string `json:"subtype"`
+		Origin  *struct {
+			Kind string `json:"kind"` // "human" for a typed message; others (task-notification) are injected
+		} `json:"origin"`
+		ToolUseResult json.RawMessage `json:"toolUseResult"`
 	}
-	if e.Type == "system" {
-		return e, e.Subtype == "compact_boundary"
+	if json.Unmarshal(l, &e) != nil || e.IsSidechain && !subagentLog(path) {
+		return noMark
 	}
-	return e, typedMessage(e, l)
-}
-
-var toolResultBlock = []byte(`"type":"tool_result"`)
-
-// typedMessage reports whether e (the line l) is a message the user typed. A tool result, a loaded
-// skill's text (isMeta), a compaction summary and a record another source injected (a background
-// task's notification carries a non-human origin) are not. A headless run's prompt has no origin.
-func typedMessage(e transcriptEntry, l []byte) bool {
-	return e.Type == "user" && len(e.ToolUseResult) == 0 && !e.IsMeta && !e.IsCompactSummary &&
-		(e.Origin == nil || e.Origin.Kind == "human") && !bytes.Contains(l, toolResultBlock)
+	switch {
+	case e.Type == "system" && e.Subtype == "compact_boundary":
+		return compactionMark
+	case len(e.ToolUseResult) == 0 && (e.Origin == nil || e.Origin.Kind == "human") && isUserPrompt(e.mainEntry):
+		// isUserPrompt is the same test agent-count uses: it also skips records Claude Code writes
+		// itself (slash-command output, shell escapes), which carry no origin in older logs.
+		return userTurn
+	}
+	return noMark
 }
 
 // foreign reports whether e belongs to another thread than the log's own. Claude Code marks every record

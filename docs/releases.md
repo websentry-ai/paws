@@ -65,7 +65,9 @@ branches and tags** choose **Selected branches and tags** and add `main`.
 Optionally add yourself under **Required reviewers**, so each release waits for
 your approval before it gets the certificate.
 
-Then set the secrets in it. Pipe each value straight into `gh secret set` so it
+Set that branch rule before adding any secret: a run that names an environment
+which doesn't exist yet creates it with no rules. Don't add these names as
+repository secrets either. Then set the secrets in it. Pipe each value straight into `gh secret set` so it
 never lands in a file or the shell history:
 
 1. **Developer ID certificate.** Create a *Developer ID Application*

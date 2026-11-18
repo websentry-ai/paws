@@ -57,16 +57,24 @@ Without the secrets below, the macOS binaries ship unsigned and the cask isn't
 published; nothing else changes. macOS refuses to run an unnotarized binary that
 a cask downloaded, so the cask goes out only together with notarization.
 
-Set these repository secrets once. Pipe each value straight into
-`gh secret set` so it never lands in a file or the shell history:
+The secrets live in a GitHub environment named `release`, not in the
+repository, so only the release job on `main` can read them; a workflow pushed
+on another branch can't. Create it once under **Settings**, then
+**Environments**, then **New environment** `release`: under **Deployment
+branches and tags** choose **Selected branches and tags** and add `main`.
+Optionally add yourself under **Required reviewers**, so each release waits for
+your approval before it gets the certificate.
+
+Then set the secrets in it. Pipe each value straight into `gh secret set` so it
+never lands in a file or the shell history:
 
 1. **Developer ID certificate.** Create a *Developer ID Application*
    certificate in the Apple Developer account, then export it with its private
    key from Keychain Access as a `.p12` with a password.
 
    ```bash
-   base64 -i DeveloperID.p12 | gh secret set MACOS_SIGN_P12 --repo websentry-ai/paws
-   gh secret set MACOS_SIGN_PASSWORD --repo websentry-ai/paws   # prompts for the .p12 password
+   base64 -i DeveloperID.p12 | gh secret set MACOS_SIGN_P12 --env release --repo websentry-ai/paws
+   gh secret set MACOS_SIGN_PASSWORD --env release --repo websentry-ai/paws   # prompts for the .p12 password
    ```
 
 2. **Notary key.** In App Store Connect, open **Users and Access**, then
@@ -74,9 +82,9 @@ Set these repository secrets once. Pipe each value straight into
    with **Developer** access. Apple lets you download the `.p8` once.
 
    ```bash
-   base64 -i AuthKey_XXXXXXXXXX.p8 | gh secret set MACOS_NOTARY_KEY --repo websentry-ai/paws
-   gh secret set MACOS_NOTARY_KEY_ID --repo websentry-ai/paws      # the key ID, XXXXXXXXXX
-   gh secret set MACOS_NOTARY_ISSUER_ID --repo websentry-ai/paws   # the issuer ID above the keys table
+   base64 -i AuthKey_XXXXXXXXXX.p8 | gh secret set MACOS_NOTARY_KEY --env release --repo websentry-ai/paws
+   gh secret set MACOS_NOTARY_KEY_ID --env release --repo websentry-ai/paws      # the key ID, XXXXXXXXXX
+   gh secret set MACOS_NOTARY_ISSUER_ID --env release --repo websentry-ai/paws   # the issuer ID above the keys table
    ```
 
 3. **Tap token.** Create a fine-grained personal access token with resource
@@ -84,7 +92,7 @@ Set these repository secrets once. Pipe each value straight into
    write**.
 
    ```bash
-   gh secret set HOMEBREW_TAP_TOKEN --repo websentry-ai/paws
+   gh secret set HOMEBREW_TAP_TOKEN --env release --repo websentry-ai/paws
    ```
 
 The release waits for Apple's verdict, up to 20 minutes per binary, so a

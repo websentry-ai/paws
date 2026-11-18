@@ -15,7 +15,8 @@ GitHub release, or npm publication is created. Pushes and pull requests run
 checks only.
 
 GoReleaser builds macOS, Linux, and Windows binaries for x64 and arm64. It
-uploads the archives and `checksums.txt` to `v<VERSION>`. The npm wrapper
+uploads the archives, two `unbound-paws_*_darwin_*` archives for the Homebrew
+cask, and `checksums.txt` to `v<VERSION>`. The npm wrapper
 uses that same version and downloads those assets. Stable versions publish
 to `latest`. Prereleases publish to `next`.
 
@@ -44,6 +45,57 @@ workflow with **Publish to npm after releasing the binaries** unchecked:
 
 ```bash
 gh workflow run ci.yml --ref main -f publish_npm=false
+```
+
+## macOS signing and Homebrew
+
+GoReleaser signs every macOS binary with the Developer ID certificate and
+notarizes it with Apple, from the Linux runner. It also commits a cask to
+[websentry-ai/homebrew-tap](https://github.com/websentry-ai/homebrew-tap), so
+`brew install --cask websentry-ai/tap/unbound-paws` installs the new version.
+Without the secrets below, the macOS binaries ship unsigned and the cask isn't
+published; nothing else changes. macOS refuses to run an unnotarized binary that
+a cask downloaded, so the cask goes out only together with notarization.
+
+Set these repository secrets once. Pipe each value straight into
+`gh secret set` so it never lands in a file or the shell history:
+
+1. **Developer ID certificate.** Create a *Developer ID Application*
+   certificate in the Apple Developer account, then export it with its private
+   key from Keychain Access as a `.p12` with a password.
+
+   ```bash
+   base64 -i DeveloperID.p12 | gh secret set MACOS_SIGN_P12 --repo websentry-ai/paws
+   gh secret set MACOS_SIGN_PASSWORD --repo websentry-ai/paws   # prompts for the .p12 password
+   ```
+
+2. **Notary key.** In App Store Connect, open **Users and Access**, then
+   **Integrations**, then **App Store Connect API**, and generate a team key
+   with **Developer** access. Apple lets you download the `.p8` once.
+
+   ```bash
+   base64 -i AuthKey_XXXXXXXXXX.p8 | gh secret set MACOS_NOTARY_KEY --repo websentry-ai/paws
+   gh secret set MACOS_NOTARY_KEY_ID --repo websentry-ai/paws      # the key ID, XXXXXXXXXX
+   gh secret set MACOS_NOTARY_ISSUER_ID --repo websentry-ai/paws   # the issuer ID above the keys table
+   ```
+
+3. **Tap token.** Create a fine-grained personal access token with resource
+   owner `websentry-ai`, access to `homebrew-tap` only, and **Contents: Read and
+   write**.
+
+   ```bash
+   gh secret set HOMEBREW_TAP_TOKEN --repo websentry-ai/paws
+   ```
+
+The release waits for Apple's verdict, up to 20 minutes per binary, so a
+rejected binary fails the release instead of shipping. After a release, check on
+a Mac:
+
+```bash
+brew install --cask websentry-ai/tap/unbound-paws
+unbound-paws version
+codesign -dv --verbose=2 "$(command -v unbound-paws)" 2>&1 | grep Authority   # Developer ID Application: ...
+spctl -a -vvv -t install "$(command -v unbound-paws)"                          # source=Notarized Developer ID
 ```
 
 ## Verify the install

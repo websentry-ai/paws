@@ -219,8 +219,48 @@ func TestSyncRefusesMismatchedSkillsAndKeepsUserCopies(t *testing.T) {
 	if got := fmt.Sprint(portalFiles(t, home)); got != "[git--c.md]" {
 		t.Errorf("portal files %s", got)
 	}
+	if st := loadPortalState(); st.AppliedHash != "" {
+		t.Errorf("applied hash %q recorded with humanizer missing; it must be retried", st.AppliedHash)
+	}
+}
+
+// A skill that fails to install once, with no error, is tried again on the next check of the same config. Recording
+// the config as applied would report the laptop synced and leave the skill out until the config changed.
+func TestSyncRetriesASkillThatWasSkipped(t *testing.T) {
+	home, srv := syncEnv(t)
+	good := fstest.MapFS{"SKILL.md": {Data: []byte("# humanizer\n"), Mode: 0o644}}
+	want, err := pack.HashSkill(good)
+	if err != nil {
+		t.Fatal(err)
+	}
+	serveSkills(t, func(context.Context, string) (fs.FS, error) {
+		return fstest.MapFS{"SKILL.md": {Data: []byte("# humanizer, cut short"), Mode: 0o644}}, nil
+	})
+	srv.configHash = "h1"
+	srv.config = configJSON(t, "h1", humanizerSkill(want), backupRule())
+
+	if code, out := captureStdout(t, func() int { return Sync(nil) }); code != 0 || !strings.Contains(out, "skipped humanizer") {
+		t.Fatalf("first sync exit %d, output %q", code, out)
+	}
+	if st := loadPortalState(); st.AppliedHash != "" {
+		t.Fatalf("applied hash %q recorded with humanizer missing", st.AppliedHash)
+	}
+	if deny(t, "gh pr create") != "" {
+		t.Fatal("the gate fired for a skill that is not installed")
+	}
+
+	serveSkills(t, func(context.Context, string) (fs.FS, error) { return good, nil })
+	if code, out := captureStdout(t, func() int { return Sync(nil) }); code != 0 || !strings.Contains(out, "Config: 2 skills (backup-first, humanizer) applied.") {
+		t.Fatalf("second sync exit %d, output %q", code, out)
+	}
 	if st := loadPortalState(); st.AppliedHash != "h1" {
-		t.Errorf("a mismatch is final for this config; applied hash %q, want h1", st.AppliedHash)
+		t.Errorf("applied hash %q, want h1 once every skill is in", st.AppliedHash)
+	}
+	if got := fmt.Sprint(portalFiles(t, home)); got != "[backup-first--2.md digests/backup-first.md humanizer--a1.md]" {
+		t.Errorf("portal files %s", got)
+	}
+	if deny(t, "gh pr create") == "" {
+		t.Error("the gate did not fire once humanizer was installed")
 	}
 }
 

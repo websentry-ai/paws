@@ -74,7 +74,7 @@ type applyResult struct {
 	Hash    string
 	Applied []string // skills whose rule files are in place
 	Skipped []string // "<skill>: <reason>"
-	Pending bool     // a skill waits for its SKILL.md; keep checking instead of recording the hash
+	Pending bool     // a skill was left out; keep checking instead of recording the hash
 }
 
 func portalDir() string {
@@ -279,6 +279,8 @@ func applyConfig(cfg portalConfig, cwd string) (applyResult, error) {
 			res.Skipped = append(res.Skipped, s.Name+": "+skip)
 		}
 		if len(files) == 0 {
+			// Recording the hash with this skill missing would report it synced and never try it again.
+			res.Pending = true
 			continue
 		}
 		for p, data := range files {

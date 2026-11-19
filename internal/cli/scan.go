@@ -128,7 +128,7 @@ func buildScan(creds *credentials, days int) ([]byte, history.Summary, error) {
 	if err := fetchCatalog(portalCtx, api+"/paws/v1/catalog/triggers", maxPortalResponse, &cat); err != nil {
 		return nil, history.Summary{}, err
 	}
-	triggers, names := scanTriggers(cat)
+	catalog := scanCatalog(cat)
 	until := scanNow().UTC()
 	// Once logged in, the hooks upload each call as it happens, so the scan stops where they started and no call
 	// counts twice.
@@ -140,7 +140,7 @@ func buildScan(creds *credentials, days int) ([]byte, history.Summary, error) {
 	since := until.AddDate(0, 0, -days)
 	src := hook.Transcripts{Dir: filepath.Join(userClaudeDir(), "projects")}
 	fmt.Fprintf(os.Stderr, "Reading the Claude Code sessions in %s from %s to %s...\n", src.Dir, since.Format(time.DateOnly), until.Format(time.DateOnly))
-	sum, err := history.Summarize(src, since, until, days, triggers, names)
+	sum, err := history.Summarize(src, since, until, days, catalog)
 	if err != nil {
 		return nil, sum, fmt.Errorf("reading %s: %w", src.Dir, err)
 	}
@@ -148,14 +148,14 @@ func buildScan(creds *credentials, days int) ([]byte, history.Summary, error) {
 	return append(body, '\n'), sum, err
 }
 
-// scanTriggers turns the catalog's actions into matchers, built as the portal config builds a skill's rule files
-// (so a scan matches what the gate would), and returns the catalog's skill names.
-func scanTriggers(cat catalogTriggers) ([]history.Trigger, map[string]bool) {
-	var out []history.Trigger
-	names := map[string]bool{}
+// scanCatalog turns the catalog's actions into matchers, built as the portal config builds a skill's rule files (so a
+// scan matches what the gate would), with the catalog's skill names and the MCP servers its triggers name.
+func scanCatalog(cat catalogTriggers) history.Catalog {
+	out := history.Catalog{Skills: map[string]bool{}}
 	for _, s := range cat.Skills {
-		names[s.Name] = true
+		out.Skills[s.Name] = true
 		for i, a := range s.Actions {
+			out.MCPServers = append(out.MCPServers, history.MCPServers(a.Tool)...)
 			name := ruleFileName(s.Name, a.ID, i)
 			data, err := managedRuleFile(s.Name, name, a, "", "")
 			if err != nil {
@@ -165,10 +165,10 @@ func scanTriggers(cat catalogTriggers) ([]history.Trigger, map[string]bool) {
 			if err != nil || rule.Kind(r.Event) != rule.KindTool {
 				continue // a session-start trigger has no tool call to count
 			}
-			out = append(out, history.Trigger{Skill: s.Name, Action: actionID(a.ID), Matches: r.Matches})
+			out.Triggers = append(out.Triggers, history.Trigger{Skill: s.Name, Action: actionID(a.ID), Matches: r.Matches})
 		}
 	}
-	return out, names
+	return out
 }
 
 // actionID is a catalog action's id as text: the backend sends a number or a string.

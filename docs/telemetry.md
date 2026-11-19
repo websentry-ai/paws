@@ -196,7 +196,7 @@ The body:
 |---|---|
 | `skills` | catalog skills whose triggers matched: calls (each call once, however many of the skill's actions matched it), the last day one ran, and calls per action id |
 | `loaded` | catalog skills Claude loaded without being asked. Other skill names are never sent |
-| `unmatched` | calls no trigger matched, at most 100, by signature: a known program plus its subcommands for CLIs with a fixed vocabulary (`kubectl delete`, `aws s3api create-bucket`, `rm`), a SQL verb, `read`/`edit` plus the file extension, `mcp <server> <tool>`, or a tool name. An unknown program is counted as `bash other`: the first word of a real command is often a path, a variable or a script of your own |
+| `unmatched` | calls no trigger matched, at most 100, by signature. Every word comes from a list paws ships or from the catalog, never from you: a known program plus the CLI's own subcommands (`kubectl delete`, `aws s3api create-bucket`, `rm`), a SQL verb, `read`/`edit` plus a known file extension, `mcp <server> <tool>` for a server the catalog's triggers name, or a Claude Code tool's name. Anything else is `other`: an unknown program is `bash other`, a git or kubectl alias or plugin stops at `git` or `kubectl`, an MCP server you set up yourself is `mcp other <create\|update\|delete\|send\|read>`, and an unknown extension or tool is left out |
 | `sessions`, `tool_calls` | how many sessions had a call in the window, and how many calls (Skill loads not included) |
 
 Never sent: commands, arguments, paths, hostnames, MCP inputs, prompts, replies, tool output, session or project

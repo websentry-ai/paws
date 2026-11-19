@@ -4,11 +4,8 @@
 package history
 
 import (
-	"path/filepath"
-	"regexp"
 	"runtime"
 	"sort"
-	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -83,9 +80,18 @@ type Count struct {
 // maxUnmatched bounds the signature list; the long tail says little.
 const maxUnmatched = 100
 
-// Summarize reads src's calls in [since, until) and counts them against triggers. catalogSkills are the names a
-// Skill call may report. Each distinct (tool, target) is matched once, however often it ran.
-func Summarize(src Source, since, until time.Time, days int, triggers []Trigger, catalogSkills map[string]bool) (Summary, error) {
+// Catalog is what a scan matches against, from the catalog the portal serves.
+type Catalog struct {
+	Triggers []Trigger
+	Skills   map[string]bool // the names a Skill call may report
+	// MCPServers are the server parts of the catalog's MCP tool patterns, as in mcp__<server>__<tool> ("attio",
+	// "claude_ai_Gmail", "*azure*"). An unmatched MCP call names its server only when one of these covers it.
+	MCPServers []string
+}
+
+// Summarize reads src's calls in [since, until) and counts them against cat. Each distinct (tool, target) is
+// matched once, however often it ran.
+func Summarize(src Source, since, until time.Time, days int, cat Catalog) (Summary, error) {
 	type key struct{ tool, target string }
 	type seen struct {
 		n    int
@@ -103,7 +109,7 @@ func Summarize(src Source, since, until time.Time, days int, triggers []Trigger,
 			ids[c.ID] = true
 		}
 		if c.Tool == SkillTool {
-			if catalogSkills[c.Target] {
+			if cat.Skills[c.Target] {
 				loaded[c.Target]++
 			}
 			return
@@ -144,7 +150,7 @@ func Summarize(src Source, since, until time.Time, days int, triggers []Trigger,
 			p := partial{bySkill: map[string]*tally{}, unmatched: map[string]int{}}
 			for i := int(next.Add(1)) - 1; i < len(keys); i = int(next.Add(1)) - 1 {
 				k := keys[i]
-				p.add(k.tool, k.target, calls[k].n, calls[k].last, triggers)
+				p.add(k.tool, k.target, calls[k].n, calls[k].last, &cat)
 			}
 			parts[w] = p
 		}()
@@ -201,9 +207,9 @@ type partial struct {
 }
 
 // add counts n calls of (tool, target), the latest at last, against every trigger.
-func (p partial) add(tool, target string, n int, last time.Time, triggers []Trigger) {
+func (p partial) add(tool, target string, n int, last time.Time, cat *Catalog) {
 	matched := map[string]bool{}
-	for _, t := range triggers {
+	for _, t := range cat.Triggers {
 		if !t.Matches(tool, target) {
 			continue
 		}
@@ -222,7 +228,7 @@ func (p partial) add(tool, target string, n int, last time.Time, triggers []Trig
 		}
 	}
 	if len(matched) == 0 {
-		p.unmatched[Signature(tool, target)] += n
+		p.unmatched[cat.Signature(tool, target)] += n
 	}
 }
 
@@ -246,110 +252,4 @@ func day(t time.Time) string {
 		return ""
 	}
 	return t.UTC().Format(time.DateOnly)
-}
-
-// Signature is a call's coarse shape, safe to send: no argument, path or input survives it.
-//
-//	Bash               a known program, plus its subcommands for CLIs whose subcommands are a fixed vocabulary
-//	                   ("kubectl delete", "aws s3api", "rm"); a SQL verb (DELETE, DROP...); "bash other" for the rest
-//	Read/Write/Edit    "read" or "edit" plus the file's extension ("edit .tf")
-//	mcp__server__tool  "mcp <server> <tool>"
-//	anything else      the tool name in lower case
-//
-// An unknown program is never named: the first word of a real command is often a path, a variable or a script.
-func Signature(tool, target string) string {
-	switch {
-	case tool == "Bash":
-		return "bash " + bashSignature(target)
-	case fileTools[tool]:
-		verb := "edit"
-		if tool == "Read" {
-			verb = "read"
-		}
-		ext := strings.ToLower(filepath.Ext(target))
-		if !extRe.MatchString(ext) {
-			return verb
-		}
-		return verb + " " + ext
-	case strings.HasPrefix(tool, "mcp__"):
-		server, name, ok := strings.Cut(strings.TrimPrefix(tool, "mcp__"), "__")
-		if !ok || !wordRe.MatchString(server) || !wordRe.MatchString(name) {
-			return "mcp other"
-		}
-		return "mcp " + strings.ToLower(server) + " " + strings.ToLower(name)
-	case wordRe.MatchString(tool):
-		return strings.ToLower(tool)
-	}
-	return "other"
-}
-
-var (
-	fileTools = map[string]bool{"Read": true, "Write": true, "Edit": true, "NotebookEdit": true}
-	extRe     = regexp.MustCompile(`^\.[a-z0-9]{1,8}$`)
-	wordRe    = regexp.MustCompile(`^[A-Za-z][A-Za-z0-9_-]{0,63}$`)
-	subRe     = regexp.MustCompile(`^[a-z][a-z0-9-]{0,31}$`)
-	// sqlVerb finds a destructive SQL statement anywhere in a command, as the gate's action keys do.
-	sqlVerb   = regexp.MustCompile(`(?i:\b(delete)\s+from\b|\b(drop)\s+(?:table|database|schema|index|view)\b|\b(truncate)\s+table\b|\b(update)\s+\S+\s+set\b)`)
-	chainSep  = regexp.MustCompile(`&&|\|\||[;|&\n]`)
-	envAssign = regexp.MustCompile(`^[A-Za-z_][A-Za-z0-9_]*=`)
-)
-
-func bashSignature(cmd string) string {
-	if m := sqlVerb.FindStringSubmatch(cmd); m != nil {
-		for _, g := range m[1:] {
-			if g != "" {
-				return strings.ToUpper(g)
-			}
-		}
-	}
-	for _, seg := range chainSep.Split(cmd, -1) {
-		words := strings.Fields(seg)
-		for len(words) > 0 && (envAssign.MatchString(words[0]) || words[0] == "sudo") {
-			words = words[1:]
-		}
-		if len(words) == 0 || words[0] == "cd" || words[0] == "pushd" {
-			continue
-		}
-		// A bare name only: /usr/bin/rm is rm, but ./deploy.sh and ~/bin/x are scripts of the user's own.
-		name := words[0]
-		if strings.HasPrefix(name, "/usr/") || strings.HasPrefix(name, "/bin/") || strings.HasPrefix(name, "/opt/homebrew/") {
-			name = filepath.Base(name)
-		}
-		n, known := programs[name]
-		if !known {
-			return "other"
-		}
-		key := []string{name}
-		for _, w := range words[1:] {
-			if n == 0 {
-				break
-			}
-			if !subRe.MatchString(w) {
-				break
-			}
-			key = append(key, w)
-			n--
-		}
-		return strings.Join(key, " ")
-	}
-	return "other"
-}
-
-// programs are the commands a signature may name, with how many subcommand words it keeps. Only CLIs whose
-// subcommands are their own fixed vocabulary keep any: make, npm run, yarn and npx take the user's own target,
-// script or package names there.
-var programs = map[string]int{
-	"git": 1, "gh": 2, "glab": 2, "docker": 1, "podman": 1, "kubectl": 1, "helm": 1, "terraform": 1, "tofu": 1,
-	"aws": 2, "gcloud": 2, "az": 2, "go": 1, "cargo": 1, "pip": 1, "pip3": 1, "uv": 1, "poetry": 1, "brew": 1,
-	"apt": 1, "apt-get": 1, "systemctl": 1, "vault": 1, "supabase": 1, "vercel": 1, "fly": 1, "flyctl": 1,
-	"heroku": 1, "wrangler": 1, "stripe": 1, "firebase": 1, "pulumi": 1, "kind": 1, "minikube": 1, "eksctl": 1,
-	"npm": 0, "pnpm": 0, "yarn": 0, "bun": 0, "npx": 0, "make": 0, "rclone": 0, "gsutil": 0, "sf": 0,
-	"launchctl": 0, "node": 0, "deno": 0, "python": 0, "python3": 0, "pytest": 0, "ruby": 0, "java": 0,
-	"rm": 0, "rmdir": 0, "mv": 0, "cp": 0, "find": 0, "ls": 0, "cat": 0, "head": 0, "tail": 0, "grep": 0, "rg": 0,
-	"sed": 0, "awk": 0, "wc": 0, "sort": 0, "jq": 0, "xargs": 0, "echo": 0, "mkdir": 0, "touch": 0, "chmod": 0,
-	"chown": 0, "ln": 0, "tar": 0, "zip": 0, "unzip": 0, "curl": 0, "wget": 0, "ssh": 0, "scp": 0, "rsync": 0,
-	"dd": 0, "mkfs": 0, "diskutil": 0, "kill": 0, "pkill": 0, "killall": 0, "lsof": 0, "ps": 0, "open": 0,
-	"psql": 0, "pg_dump": 0, "pg_restore": 0, "mysql": 0, "mysqldump": 0, "sqlite3": 0, "mongosh": 0,
-	"mongodump": 0, "redis-cli": 0, "openssl": 0, "gpg": 0, "security": 0, "defaults": 0, "crontab": 0,
-	"shred": 0, "truncate": 0, "ansible": 0, "ansible-playbook": 0, "cdk": 0, "sam": 0, "serverless": 0,
 }

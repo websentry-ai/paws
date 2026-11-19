@@ -38,7 +38,7 @@ func TestSummarizeCountsEachCallOnce(t *testing.T) {
 		{Skill: "coreutils", Action: "recursive", Matches: func(tool, target string) bool { return strings.Contains(target, "-rf") }},
 		{Skill: "git", Action: "git", Matches: func(tool, target string) bool { return strings.HasPrefix(target, "git ") }},
 	}
-	sum, err := Summarize(src, at(1), at(19), 30, triggers, map[string]bool{"coreutils": true, "git": true})
+	sum, err := Summarize(src, at(1), at(19), 30, Catalog{Triggers: triggers, Skills: map[string]bool{"coreutils": true, "git": true}})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -60,7 +60,7 @@ func TestSummarizeCountsEachCallOnce(t *testing.T) {
 }
 
 func TestSummarizeEmpty(t *testing.T) {
-	sum, err := Summarize(fakeSource{}, at(1), at(2), 30, nil, nil)
+	sum, err := Summarize(fakeSource{}, at(1), at(2), 30, Catalog{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -71,38 +71,63 @@ func TestSummarizeEmpty(t *testing.T) {
 }
 
 func TestSignatureSendsNoArgumentsOrPaths(t *testing.T) {
+	cat := &Catalog{MCPServers: []string{"claude_ai_Notion", "attio", "*", "*azure*"}}
 	cases := map[[2]string]string{
 		{"Bash", "rm -rf /Users/alice/secret-project/build"}:            "bash rm",
 		{"Bash", "cd /Users/alice/acme && git push origin main"}:        "bash git push",
 		{"Bash", "AWS_SECRET_ACCESS_KEY=abc aws s3api create-bucket"}:   "bash aws s3api create-bucket",
+		{"Bash", "aws acme-alias run"}:                                  "bash aws",
 		{"Bash", "sudo kubectl delete pod web-1"}:                       "bash kubectl delete",
+		{"Bash", "kubectl acme-prod-debug"}:                             "bash kubectl",
+		{"Bash", "git deploy-customerx"}:                                "bash git",
+		{"Bash", "gh acme-ext run"}:                                     "bash gh",
+		{"Bash", "gh pr create --title 'Fix acme login'"}:               "bash gh pr create",
+		{"Bash", "gh pr acme-thing"}:                                    "bash gh pr",
+		{"Bash", "gh api repos/acme/x"}:                                 "bash gh api",
 		{"Bash", "/Users/alice/bin/deploy-acme.sh --prod"}:              "bash other",
 		{"Bash", "./scripts/release-customer-x"}:                        "bash other",
 		{"Bash", "acme-internal-cli rotate"}:                            "bash other",
 		{"Bash", "make deploy-acme-prod"}:                               "bash make",
-		{"Bash", "npm run build:customer-x"}:                            "bash npm",
+		{"Bash", "npm run build:customer-x"}:                            "bash npm run",
+		{"Bash", "npm acme-script"}:                                     "bash npm",
+		{"Bash", "yarn acme-script"}:                                    "bash yarn",
 		{"Bash", "npx @acme/private-tool"}:                              "bash npx",
 		{"Bash", "/usr/bin/rm -f x"}:                                    "bash rm",
 		{"Bash", `psql -c "DROP TABLE customers"`}:                      "bash DROP",
 		{"Bash", "git -C /Users/alice/acme commit -m 'acme'"}:           "bash git",
-		{"Bash", "gh pr create --title 'Fix acme login'"}:               "bash gh pr create",
 		{"Edit", "/Users/alice/acme/main.tf"}:                           "edit .tf",
 		{"Write", "/Users/alice/acme/Dockerfile"}:                       "edit",
 		{"Read", "/Users/alice/acme/.env.acme-prod"}:                    "read",
-		{"mcp__claude_ai_Notion__notion-create-pages", `{"title":"x"}`}: "mcp claude_ai_notion notion-create-pages",
-		{"mcp__bad server__x", "{}"}:                                    "mcp other",
+		{"Read", "/Users/alice/acme/notes.acmeco"}:                      "read",
+		{"mcp__claude_ai_Notion__notion-create-pages", `{"title":"x"}`}: "mcp notion create-pages",
+		{"mcp__attio__create-note", `{}`}:                               "mcp attio create-note",
+		{"mcp__azure_prod__storage_list", `{}`}:                         "mcp azure_prod storage-list",
+		{"mcp__acme_prod_db__query", `{"sql":"select"}`}:                "mcp other read",
+		{"mcp__acme_crm__delete_customer", `{}`}:                        "mcp other delete",
+		{"mcp__bad server__x", "{}"}:                                    "mcp other read",
 		{"WebFetch", "https://internal.acme.com/x"}:                     "webfetch",
 		{"Agent", "summarize acme's Q3 numbers"}:                        "agent",
+		{"AcmeInternalTool", "x"}:                                       "other",
 	}
 	for in, want := range cases {
-		got := Signature(in[0], in[1])
+		got := cat.Signature(in[0], in[1])
 		if got != want {
 			t.Errorf("Signature(%q, %q) = %q, want %q", in[0], in[1], got, want)
+		}
+		if strings.Contains(want, "azure") {
+			continue // a server the catalog names (*azure*) is the vendor's, so the case names it on purpose
 		}
 		for _, leak := range []string{"alice", "acme", "customer", "secret", "abc", "/"} {
 			if strings.Contains(got, leak) {
 				t.Errorf("Signature(%q, %q) = %q leaks %q", in[0], in[1], got, leak)
 			}
 		}
+	}
+}
+
+func TestMCPServers(t *testing.T) {
+	got := MCPServers("mcp__attio__create-note|Bash|mcp__*azure*__storage*|mcp__")
+	if strings.Join(got, ",") != "attio,*azure*" {
+		t.Errorf("got %v", got)
 	}
 }

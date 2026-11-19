@@ -131,6 +131,8 @@ unbound-paws login --key pk_... # a machine with no browser: a one-time key made
 unbound-paws login --key -      # the same, reading the key from stdin
 unbound-paws sync --dry-run     # print exactly what the next upload holds, send nothing
 unbound-paws sync               # upload and pull settings now
+unbound-paws scan --dry-run     # count past Claude Code sessions' tool calls against the catalog; print, send nothing
+unbound-paws login --scan       # log in, then send those counts so the portal picks skills on day one
 unbound-paws logout             # forget the token and remove the portal's rules
 ```
 
@@ -149,6 +151,9 @@ What leaves the machine once you are logged in:
 
 Never prompts, replies, file contents, tool output, absolute paths or session
 ids. Field by field: [docs/telemetry.md](docs/telemetry.md#portal-upload).
+
+`unbound-paws scan` sends counts only: how many past tool calls each catalog skill's triggers matched, never the
+calls ([docs/telemetry.md](docs/telemetry.md#history-scan)).
 
 When: from the async hooks that run when you send Claude a message and when
 Claude finishes a turn, at most every 5 minutes (`PAWS_SYNC_INTERVAL`); in the

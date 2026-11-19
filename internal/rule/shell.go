@@ -30,22 +30,36 @@ const (
 	maxFuncWalks   = 64       // function bodies one line may read
 )
 
-// splitCache holds the last line read: the gate checks every rule against the same line.
+// splitCache holds the last lines read: the gate checks every rule against the same line, and paws scan does the
+// same on several goroutines at once, each with its own line. The parse runs outside the lock, so no caller waits
+// for another's.
 var splitCache struct {
 	sync.Mutex
-	line string
-	cmds []command
+	next    int
+	entries [splitCacheSize]struct {
+		line string
+		cmds []command
+	}
 }
+
+const splitCacheSize = 64
 
 func parseLine(line string) []command {
 	splitCache.Lock()
-	defer splitCache.Unlock()
-	if splitCache.cmds != nil && splitCache.line == line {
-		return splitCache.cmds
+	for _, e := range splitCache.entries {
+		if e.cmds != nil && e.line == line {
+			splitCache.Unlock()
+			return e.cmds
+		}
 	}
+	splitCache.Unlock()
 	sp := &splitter{cmds: []command{}, walked: map[funcWalk]bool{}, budget: maxScriptBytes, walks: maxFuncWalks}
 	sp.split(line, 0, map[string][]*syntax.Stmt{})
-	splitCache.line, splitCache.cmds = line, sp.cmds
+	splitCache.Lock()
+	e := &splitCache.entries[splitCache.next]
+	e.line, e.cmds = line, sp.cmds
+	splitCache.next = (splitCache.next + 1) % splitCacheSize
+	splitCache.Unlock()
 	return sp.cmds
 }
 

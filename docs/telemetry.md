@@ -163,6 +163,45 @@ Nothing else is sent: no prompts, replies, file contents, tool output,
 absolute paths, rule file paths, session or agent ids. Telemetry records
 (`skill_invoked`, `tool_result`, `turn_end`) are not uploaded.
 
+## History scan
+
+Opt-in, and only when you ask: `unbound-paws scan`, or `unbound-paws login --scan`, which scans once the login
+works. It reads the tool calls in your past Claude Code sessions (`~/.claude/projects/**/*.jsonl`, subagent logs
+included, `$CLAUDE_CONFIG_DIR` when set), matches them against the catalog's triggers on this machine with the
+gate's own matcher, and sends `POST /history` one summary of counts, so the portal can rank skills before
+the hooks have synced anything.
+
+- `--days 30` (the default) or `--days 90`. Claude Code deletes sessions older than 30 days unless its
+  `cleanupPeriodDays` setting was raised, so 90 finds more only then.
+- Once logged in, the window ends at the login: the hooks have uploaded every call since.
+- Only the `tool_use` blocks of assistant records are decoded. Prompts, replies, thinking and tool results are
+  never read. A call copied into a resumed or forked session's log counts once, by its id.
+- `unbound-paws scan --dry-run` prints the body and sends nothing; an upload sends those same bytes. It works
+  without a login.
+- Each scan replaces this laptop's last one on the portal, so running it again never adds to the counts.
+
+The body:
+
+```
+{ "source": "claude-code", "window_days": 30, "since": "2026-10-20", "until": "2026-11-19",
+  "sessions": 412, "tool_calls": 18234,
+  "skills": [{"skill": "coreutils", "calls": 19, "last_seen": "2026-11-17",
+              "actions": [{"id": "coreutils", "calls": 19}]}],
+  "loaded": [{"name": "humanizer", "count": 12}],
+  "unmatched": [{"name": "bash kubectl delete", "count": 4}, {"name": "edit .tf", "count": 9}],
+  "catalog_version": "..." }
+```
+
+| Field | Value |
+|---|---|
+| `skills` | catalog skills whose triggers matched: calls (each call once, however many of the skill's actions matched it), the last day one ran, and calls per action id |
+| `loaded` | catalog skills Claude loaded without being asked. Other skill names are never sent |
+| `unmatched` | calls no trigger matched, at most 100, by signature: a known program plus its subcommands for CLIs with a fixed vocabulary (`kubectl delete`, `aws s3api create-bucket`, `rm`), a SQL verb, `read`/`edit` plus the file extension, `mcp <server> <tool>`, or a tool name. An unknown program is counted as `bash other`: the first word of a real command is often a path, a variable or a script of your own |
+| `sessions`, `tool_calls` | how many sessions had a call in the window, and how many calls (Skill loads not included) |
+
+Never sent: commands, arguments, paths, hostnames, MCP inputs, prompts, replies, tool output, session or project
+names. The scan date and window are kept in `~/.paws/portal/state.json`.
+
 ## Portal settings
 
 Settings come down; the gate stays offline. When the config hash changes

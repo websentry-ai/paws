@@ -27,6 +27,8 @@ type fakePortal struct {
 	requests   []string
 	keyBody    map[string]string
 	keyEmail   string // account_email in the /device/key reply; "" leaves it out, like an older portal
+	triggers   string // the /catalog/triggers reply
+	histories  []string
 }
 
 func (s *fakePortal) ServeHTTP(w http.ResponseWriter, r *http.Request) {
@@ -66,6 +68,13 @@ func (s *fakePortal) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			cfg = fmt.Sprintf(`{"config_hash":%q,"skills":[]}`, hash)
 		}
 		io.WriteString(w, cfg)
+	case "GET /paws/v1/catalog/triggers":
+		io.WriteString(w, s.triggers)
+	case "POST /paws/v1/history":
+		b, _ := io.ReadAll(r.Body)
+		s.histories = append(s.histories, string(b))
+		s.auths = append(s.auths, r.Header.Get("Authorization"))
+		io.WriteString(w, `{"saved":true}`)
 	case "POST /paws/v1/device/key":
 		json.NewDecoder(r.Body).Decode(&s.keyBody)
 		if s.keyBody["key"] == "pk_used" {

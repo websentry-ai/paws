@@ -12,6 +12,7 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"strconv"
 	"strings"
 	"time"
 	"unicode"
@@ -209,9 +210,10 @@ func printable(s string) string {
 // reads the key from stdin, keeping it out of shell history). Then it syncs once, so the
 // portal sees this machine's skills right away.
 func Login(args []string) int {
-	key, ok := loginKey(args)
-	if !ok {
-		fmt.Fprintln(os.Stderr, "usage: unbound-paws login [--key <one-time-key> | --key -]")
+	args, scan, days, ok := loginScanFlags(args)
+	key, keyOK := loginKey(args)
+	if !ok || !keyOK {
+		fmt.Fprintln(os.Stderr, "usage: unbound-paws login [--key <one-time-key> | --key -] [--scan [--days 30|90]]")
 		return 2
 	}
 	path := credentialsPath()
@@ -267,13 +269,41 @@ func Login(args []string) int {
 	rep, err := syncNow(&c, cwd)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "paws: first sync failed: %v (run `%s sync` to retry)\n", err, cliName)
+		if scan {
+			fmt.Fprintf(os.Stderr, "paws: skipped the scan; run `%s scan` once sync works\n", cliName)
+		}
 		return 0
 	}
 	printSyncReport(rep)
 	if !hasPawsHook(filepath.Join(userClaudeDir(), "settings.json")) {
 		fmt.Printf("Skills you turn on in the portal apply only where paws is registered. To use them in every project: %s init --global\n", cliName)
 	}
+	if scan && runScan(&c, days, false) != 0 {
+		fmt.Fprintf(os.Stderr, "paws: logged in, but the scan didn't go through (run `%s scan` to retry)\n", cliName)
+	}
 	return 0
+}
+
+// loginScanFlags takes --scan and --days N out of login's arguments; --days needs --scan.
+func loginScanFlags(args []string) (rest []string, scan bool, days int, ok bool) {
+	days = defaultScanDays
+	daysSet := false
+	for i := 0; i < len(args); i++ {
+		switch {
+		case args[i] == "--scan":
+			scan = true
+		case args[i] == "--days" && i+1 < len(args):
+			i++
+			n, err := strconv.Atoi(args[i])
+			if err != nil || !scanDays[n] {
+				return nil, false, 0, false
+			}
+			days, daysSet = n, true
+		default:
+			rest = append(rest, args[i])
+		}
+	}
+	return rest, scan, days, scan || !daysSet
 }
 
 // loginKey reads `--key K` or `--key=K`; no arguments means the device flow.

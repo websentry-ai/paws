@@ -129,11 +129,25 @@ func TestScanStopsWhereTheLoginStarted(t *testing.T) {
 	if err := writePrivate(filepath.Join(home, "credentials.json"), credentials{API: api, Token: "tok-abc", CreatedAt: "2026-11-02T12:00:00Z"}); err != nil {
 		t.Fatal(err)
 	}
+	// Without paws registered for every project, nothing has uploaded the calls since the login, so the scan keeps them.
 	code, dry := captureStdout(t, func() int { return Scan([]string{"--dry-run", "--days", "90"}) })
 	if code != 0 {
 		t.Fatalf("exit %d", code)
 	}
 	var got historyUpload
+	json.Unmarshal([]byte(dry), &got)
+	if got.Until != "2026-11-19" || got.ToolCalls != 7 {
+		t.Errorf("no global hook: window %s..%s, %d calls; want every call up to now", got.Since, got.Until, got.ToolCalls)
+	}
+	// With the global hook, the hooks have uploaded every call since the login, so the scan covers the 90 days before.
+	if code, out := captureStdout(t, func() int { return Init([]string{"--global"}) }); code != 0 {
+		t.Fatalf("init --global exit %d: %s", code, out)
+	}
+	code, dry = captureStdout(t, func() int { return Scan([]string{"--dry-run", "--days", "90"}) })
+	if code != 0 {
+		t.Fatalf("exit %d", code)
+	}
+	got = historyUpload{}
 	json.Unmarshal([]byte(dry), &got)
 	if got.Until != "2026-11-02" || got.Since != "2026-08-04" || got.WindowDays != 90 || got.ToolCalls != 3 {
 		t.Errorf("window %s..%s (%d days), %d calls; want the calls before the login only", got.Since, got.Until, got.WindowDays, got.ToolCalls)

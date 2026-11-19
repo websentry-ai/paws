@@ -71,12 +71,20 @@ func TestSummarizeEmpty(t *testing.T) {
 }
 
 func TestSignatureSendsNoArgumentsOrPaths(t *testing.T) {
-	cat := &Catalog{MCPServers: []string{"claude_ai_Notion", "attio", "*", "*azure*", "*a*", "*e*"}}
+	cat := &Catalog{MCPPatterns: []string{"claude_ai_Notion__*", "attio__create-note", "*__crashlytics_*", "*azure*__storage*",
+		"*a*__*", "*e*__x"}}
 	cases := map[[2]string]string{
 		{"Bash", "rm -rf /Users/alice/secret-project/build"}:            "bash rm",
 		{"Bash", "cd /Users/alice/acme && git push origin main"}:        "bash git push",
 		{"Bash", "AWS_SECRET_ACCESS_KEY=abc aws s3api create-bucket"}:   "bash aws s3api create-bucket",
 		{"Bash", "aws acme-alias run"}:                                  "bash aws",
+		{"Bash", "aws s3 customer-project"}:                             "bash aws s3",
+		{"Bash", "aws s3api put-public-access-block --bucket acme"}:     "bash aws s3api put-public-access-block",
+		{"Bash", "aws ec2 create-acme-thing"}:                           "bash aws ec2",
+		{"Bash", "aws s3 cp x s3://acme"}:                               "bash aws s3 cp",
+		{"Bash", "gcloud compute instances list"}:                       "bash gcloud compute instances",
+		{"Bash", "gcloud compute acme-vm"}:                              "bash gcloud compute",
+		{"Bash", "az vm create"}:                                        "bash az vm create",
 		{"Bash", "sudo kubectl delete pod web-1"}:                       "bash kubectl delete",
 		{"Bash", "kubectl acme-prod-debug"}:                             "bash kubectl",
 		{"Bash", "git deploy-customerx"}:                                "bash git",
@@ -99,7 +107,8 @@ func TestSignatureSendsNoArgumentsOrPaths(t *testing.T) {
 		{"Write", "/Users/alice/acme/Dockerfile"}:                       "edit",
 		{"Read", "/Users/alice/acme/.env.acme-prod"}:                    "read",
 		{"Read", "/Users/alice/acme/notes.acmeco"}:                      "read",
-		{"mcp__claude_ai_Notion__notion-create-pages", `{"title":"x"}`}: "mcp notion create-pages",
+		{"mcp__claude_ai_Notion__notion-create-pages", `{"title":"x"}`}: "mcp notion create",
+		{"mcp__attio__customer_project_sync", `{}`}:                     "mcp attio read",
 		{"mcp__attio__create-note", `{}`}:                               "mcp attio create-note",
 		{"mcp__azure_prod__storage_list", `{}`}:                         "mcp azure read",
 		{"mcp__acme_azure_internal__delete_thing", `{}`}:                "mcp azure delete",
@@ -123,9 +132,9 @@ func TestSignatureSendsNoArgumentsOrPaths(t *testing.T) {
 	}
 }
 
-func TestMCPServers(t *testing.T) {
-	got := MCPServers("mcp__attio__create-note|Bash|mcp__*azure*__storage*|mcp__")
-	if strings.Join(got, ",") != "attio,*azure*" {
+func TestMCPPatterns(t *testing.T) {
+	got := MCPPatterns("mcp__attio__create-note|Bash|mcp__*azure*__storage*|mcp__")
+	if strings.Join(got, ",") != "attio__create-note,*azure*__storage*" {
 		t.Errorf("got %v", got)
 	}
 }

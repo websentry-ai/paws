@@ -84,9 +84,10 @@ const maxUnmatched = 100
 type Catalog struct {
 	Triggers []Trigger
 	Skills   map[string]bool // the names a Skill call may report
-	// MCPServers are the server parts of the catalog's MCP tool patterns, as in mcp__<server>__<tool> ("attio",
-	// "claude_ai_Gmail", "*azure*"). An unmatched MCP call names its server only when one of these covers it.
-	MCPServers []string
+	// MCPPatterns are the catalog's MCP tool patterns without their mcp__ prefix, as in <server>__<tool>
+	// ("attio__create-note", "claude_ai_Gmail__*", "*azure*__storage*"). An unmatched MCP call names its server only
+	// when one of them covers it, and its tool only when one names that tool exactly.
+	MCPPatterns []string
 }
 
 // Summarize reads src's calls in [since, until) and counts them against cat. Each distinct (tool, target) is

@@ -15,9 +15,10 @@ import (
 //	Bash               a known program, plus the CLI's own subcommands ("kubectl delete", "aws s3api create-bucket",
 //	                   "rm"); a SQL verb (DELETE, DROP...); "bash other" for anything else
 //	Read/Write/Edit    "read" or "edit" plus a known file extension ("edit .tf")
-//	mcp__server__tool  "mcp <server> <tool>" for a server a catalog pattern names exactly; "mcp <word> <class>" for
-//	                   one a wildcard pattern covers, with the pattern's own word ("*azure*" gives azure); else
-//	                   "mcp other <create|update|delete|send|read>"
+//	mcp__server__tool  "mcp <server> <tool>" when a catalog pattern names that server and tool exactly;
+//	                   "mcp <server> <class>" for another tool on a server the catalog names exactly; "mcp <word>
+//	                   <class>" for a server a wildcard pattern covers, with the pattern's own word ("*azure*" gives
+//	                   azure); else "mcp other <create|update|delete|send|read>"
 //	other tools        a Claude Code tool's name in lower case, else "other"
 func (c *Catalog) Signature(tool, target string) string {
 	switch {
@@ -41,17 +42,20 @@ func (c *Catalog) Signature(tool, target string) string {
 }
 
 func (c *Catalog) mcpSignature(tool string) string {
-	raw, _, _ := strings.Cut(strings.TrimPrefix(tool, "mcp__"), "__")
+	rawServer, rawTool, _ := strings.Cut(strings.TrimPrefix(tool, "mcp__"), "__")
 	class := rule.MCPAction(tool)
 	if class == "" {
 		class = "read"
 	}
-	exact, vendor := c.serverName(raw)
-	if server, name, ok := gate.MCPParts(tool); ok && exact && wordRe.MatchString(server) && wordRe.MatchString(name) {
-		return server + " " + name // the catalog names this very server, so its tool names are the vendor's
-	}
-	if vendor != "" {
-		return vendor + " " + class // only the catalog's own word: raw may be a name the user chose, like azure_prod
+	exact, namedTool, vendor := c.serverName(rawServer, rawTool)
+	server, name, ok := gate.MCPParts(tool)
+	switch {
+	case ok && exact && namedTool && wordRe.MatchString(server) && wordRe.MatchString(name):
+		return server + " " + name // the catalog names this very server and this very tool
+	case ok && exact && wordRe.MatchString(server):
+		return server + " " + class // a tool the catalog doesn't name may be one the user added to the server
+	case vendor != "":
+		return vendor + " " + class // only the catalog's own word: the server may be named by the user, like azure_prod
 	}
 	return "other " + class
 }
@@ -59,41 +63,43 @@ func (c *Catalog) mcpSignature(tool string) string {
 // minVendorWord is the shortest wildcard literal a signature may send: a pattern like *a* covers almost every server.
 const minVendorWord = 4
 
-// serverName says how the catalog's MCP server patterns cover raw, ignoring case: exact when a pattern without * is
-// raw itself, else vendor is the longest literal part of a wildcard pattern that covers it ("*azure*" gives
-// "azure"). Both come from the catalog, never from raw.
-func (c *Catalog) serverName(raw string) (exact bool, vendor string) {
-	raw = strings.ToLower(raw)
-	for _, p := range c.MCPServers {
-		p = strings.ToLower(p)
-		if !strings.Contains(p, "*") {
-			if p == raw {
-				return true, ""
+// serverName says how the catalog's MCP patterns cover a call to rawServer's rawTool, ignoring case: exact when a
+// pattern's server part, without *, is rawServer itself, and namedTool when one of those patterns also names rawTool
+// exactly; else vendor is the longest literal part of a wildcard server pattern that covers it ("*azure*" gives
+// "azure"). All of it comes from the catalog, never from the call.
+func (c *Catalog) serverName(rawServer, rawTool string) (exact, namedTool bool, vendor string) {
+	rawServer, rawTool = strings.ToLower(rawServer), strings.ToLower(rawTool)
+	for _, p := range c.MCPPatterns {
+		ps, pt, _ := strings.Cut(strings.ToLower(p), "__")
+		if !strings.Contains(ps, "*") {
+			if ps == rawServer {
+				exact = true
+				namedTool = namedTool || pt == rawTool && !strings.Contains(pt, "*")
 			}
 			continue
 		}
 		word := ""
-		for _, part := range strings.Split(p, "*") {
+		for _, part := range strings.Split(ps, "*") {
 			if len(part) > len(word) {
 				word = part
 			}
 		}
 		word = strings.Trim(word, "_-")
-		if len(word) >= minVendorWord && vendorRe.MatchString(word) && len(word) > len(vendor) && rule.MatchToolSpec(p, raw) {
+		if len(word) >= minVendorWord && vendorRe.MatchString(word) && len(word) > len(vendor) && rule.MatchToolSpec(ps, rawServer) {
 			vendor = word
 		}
 	}
-	return false, vendor
+	return exact, namedTool, vendor
 }
 
-// MCPServers returns the server parts of the MCP patterns in a matcher tool spec ("mcp__attio__create-note|Bash" is
-// ["attio"]).
-func MCPServers(spec string) []string {
+// MCPPatterns returns the MCP patterns in a matcher tool spec without their mcp__ prefix, server and tool parts
+// joined by __ ("mcp__attio__create-note|Bash" is ["attio__create-note"]).
+func MCPPatterns(spec string) []string {
 	var out []string
 	for _, p := range strings.Split(spec, "|") {
 		if rest, ok := strings.CutPrefix(strings.TrimSpace(p), "mcp__"); ok {
 			if server, _, _ := strings.Cut(rest, "__"); server != "" {
-				out = append(out, server)
+				out = append(out, rest)
 			}
 		}
 	}
@@ -108,8 +114,6 @@ var (
 	sqlVerb   = regexp.MustCompile(`(?i:\b(delete)\s+from\b|\b(drop)\s+(?:table|database|schema|index|view)\b|\b(truncate)\s+table\b|\b(update)\s+\S+\s+set\b)`)
 	chainSep  = regexp.MustCompile(`&&|\|\||[;|&\n]`)
 	envAssign = regexp.MustCompile(`^[A-Za-z_][A-Za-z0-9_]*=`)
-	// cloudOp is an operation the cloud vendor names, after one of its services: create-bucket, instances.
-	cloudOp = regexp.MustCompile(`^[a-z][a-z0-9]*(-[a-z0-9]+)*$`)
 )
 
 func bashSignature(cmd string) string {
@@ -176,7 +180,19 @@ var (
 		network system prune tag login logout inspect cp kill buildx container image save load`)}
 	terraformWords = cliWords{first: set(`init plan apply destroy validate fmt import state output show refresh workspace
 		providers taint untaint login force-unlock graph console`)}
-	cloudOps = func(w string) bool { return cloudOp.MatchString(w) && len(w) <= 64 }
+	// cloudOps keeps an operation or resource group after a cloud service only when every part of it is a word from
+	// cloudWords: create-bucket, put-public-access-block, instances. A name the user typed there isn't one.
+	cloudOps = func(w string) bool {
+		if len(w) > 64 {
+			return false
+		}
+		for _, part := range strings.Split(w, "-") {
+			if !cloudWords[part] {
+				return false
+			}
+		}
+		return true
+	}
 )
 
 var subcommands = map[string]cliWords{
@@ -192,7 +208,7 @@ var subcommands = map[string]cliWords{
 	"helm":      {first: set(`install upgrade uninstall rollback list status template lint package repo dependency pull push show get history search create test`)},
 	"terraform": terraformWords,
 	"tofu":      terraformWords,
-	// Past one of its services, the cloud vendor names the operation; aliases only add top-level commands.
+	// Past one of its services, a word is kept only when it is built from cloudWords.
 	"aws": {first: set(`s3 s3api ec2 iam rds dynamodb lambda cloudformation sts sqs sns ecs eks ecr logs cloudwatch
 		route53 kms secretsmanager ssm cloudfront elasticache elbv2 elb autoscaling apigateway apigatewayv2 events
 		stepfunctions kinesis firehose glue athena redshift organizations sso configure backup efs acm cognito-idp
@@ -227,6 +243,24 @@ var subcommands = map[string]cliWords{
 	"minikube":  {first: set(`start stop delete status service`)},
 	"eksctl":    {first: set(`create delete get update upgrade scale utils`)},
 }
+
+// cloudWords are the verbs and resource nouns cloud CLI operations are made of (aws s3api put-bucket-tagging,
+// gcloud compute instances, az vm create).
+var cloudWords = set(`create delete put get describe list update terminate run start stop attach detach modify remove
+	add copy invoke publish send receive tag untag reboot restore import export enable disable deploy cancel associate
+	disassociate authorize revoke batch scan query wait set reset rotate upload download sync cp ls rm mb rb mv
+	presign register deregister login logout connect show apply
+	bucket buckets object objects policy policies acl acls public access block encryption tagging tags versioning
+	lifecycle website cors notification replication logging ownership controls table tables item items backup
+	backups instance instances image images snapshot snapshots volume volumes security group groups role roles user
+	users key keys function functions stack stacks change cluster clusters service services task tasks repository
+	repositories secret secrets parameter parameters distribution distributions invalidation record records zone
+	zones queue queues topic topics subscription subscriptions caller identity db database databases vpc vpcs
+	subnet subnets route routes gateway gateways alarm alarms rule rules target targets event events log logs
+	stream streams account accounts project projects member members binding bindings network networks firewall
+	firewalls address addresses disk disks node nodes nodegroup pool pools job jobs workflow workflows credential
+	credentials token tokens certificate certificates domain domains vm vms storage webapp keyvault ip iam
+	permission permissions version versions alias aliases configuration`)
 
 // programs are the commands a signature may name.
 var programs = set(`git gh glab docker podman kubectl helm terraform tofu aws gcloud az go cargo pip pip3 uv poetry

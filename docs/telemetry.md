@@ -173,7 +173,7 @@ the hooks have synced anything.
 
 - `--days 30` (the default) or `--days 90`. Claude Code deletes sessions older than 30 days unless its
   `cleanupPeriodDays` setting was raised, so 90 finds more only then.
-- Once logged in, the window ends at the login: the hooks have uploaded every call since.
+- Once logged in with paws registered for every project (`init --global`), the window ends at the login: the hooks have uploaded every call since. Without the global hook it runs up to now, so calls in projects paws isn't registered in still count.
 - Only the `tool_use` blocks of assistant records are decoded. Prompts, replies, thinking and tool results are
   never read. A call copied into a resumed or forked session's log counts once, by its id.
 - `unbound-paws scan --dry-run` prints the body and sends nothing; an upload sends those same bytes. It works
@@ -196,7 +196,7 @@ The body:
 |---|---|
 | `skills` | catalog skills whose triggers matched: calls (each call once, however many of the skill's actions matched it), the last day one ran, and calls per action id |
 | `loaded` | catalog skills Claude loaded without being asked. Other skill names are never sent |
-| `unmatched` | calls no trigger matched, at most 100, by signature. Every word comes from a list paws ships or from the catalog, never from you: a known program plus the CLI's own subcommands (`kubectl delete`, `aws s3api create-bucket`, `rm`), a SQL verb, `read`/`edit` plus a known file extension, `mcp <server> <tool>` for a server a catalog trigger names exactly, `mcp <word> <class>` for one a wildcard trigger covers (the trigger's own word: `*azure*` sends `azure`, never your server's name), or a Claude Code tool's name. Anything else is `other`: an unknown program is `bash other`, a git or kubectl alias or plugin stops at `git` or `kubectl`, an MCP server you set up yourself is `mcp other <create\|update\|delete\|send\|read>`, and an unknown extension or tool is left out |
+| `unmatched` | calls no trigger matched, at most 100, by signature. Every word comes from a list paws ships or from the catalog, never from you: a known program plus the CLI's own subcommands (`kubectl delete`, `rm`; for aws, gcloud and az, an operation only when it is made of known cloud verbs and nouns, as in `aws s3api create-bucket`), a SQL verb, `read`/`edit` plus a known file extension, `mcp <server> <tool>` when a catalog trigger names that server and tool exactly, `mcp <server> <class>` for another tool on such a server, `mcp <word> <class>` for a server a wildcard trigger covers (the trigger's own word: `*azure*` sends `azure`, never your server's name), or a Claude Code tool's name. Anything else is `other`: an unknown program is `bash other`, a git or kubectl alias or plugin stops at `git` or `kubectl`, an MCP server you set up yourself is `mcp other <create\|update\|delete\|send\|read>`, and an unknown extension or tool is left out |
 | `sessions`, `tool_calls` | how many sessions had a call in the window, and how many calls (Skill loads not included) |
 
 Never sent: commands, arguments, paths, hostnames, MCP inputs, prompts, replies, tool output, session or project

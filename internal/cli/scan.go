@@ -130,9 +130,10 @@ func buildScan(creds *credentials, days int) ([]byte, history.Summary, error) {
 	}
 	catalog := scanCatalog(cat)
 	until := scanNow().UTC()
-	// Once logged in, the hooks upload each call as it happens, so the scan stops where they started and no call
-	// counts twice.
-	if creds != nil {
+	// Once logged in with paws registered for every project, the hooks upload each call as it happens, so the scan
+	// stops where they started and no call counts twice. Without the global hook, calls since login in projects paws
+	// isn't registered in would reach the portal from nowhere, so the scan keeps them.
+	if creds != nil && hasPawsHook(filepath.Join(userClaudeDir(), "settings.json")) {
 		if at, err := time.Parse(time.RFC3339, creds.CreatedAt); err == nil && at.Before(until) {
 			until = at
 		}
@@ -149,13 +150,13 @@ func buildScan(creds *credentials, days int) ([]byte, history.Summary, error) {
 }
 
 // scanCatalog turns the catalog's actions into matchers, built as the portal config builds a skill's rule files (so a
-// scan matches what the gate would), with the catalog's skill names and the MCP servers its triggers name.
+// scan matches what the gate would), with the catalog's skill names and the MCP tool patterns its triggers name.
 func scanCatalog(cat catalogTriggers) history.Catalog {
 	out := history.Catalog{Skills: map[string]bool{}}
 	for _, s := range cat.Skills {
 		out.Skills[s.Name] = true
 		for i, a := range s.Actions {
-			out.MCPServers = append(out.MCPServers, history.MCPServers(a.Tool)...)
+			out.MCPPatterns = append(out.MCPPatterns, history.MCPPatterns(a.Tool)...)
 			name := ruleFileName(s.Name, a.ID, i)
 			data, err := managedRuleFile(s.Name, name, a, "", "")
 			if err != nil {

@@ -5,7 +5,8 @@ version: 2
 project_name: paws
 
 builds:
-  - main: ./cmd/paws
+  - id: paws
+    main: ./cmd/paws
     binary: paws
     env:
       - CGO_ENABLED=0
@@ -14,14 +15,74 @@ builds:
     flags: [-trimpath]
     ldflags:
       - -s -w -X main.version={{.Version}}
+  # The same macOS binary under its command name, for the Homebrew cask: a cask can link a binary
+  # only by the name it has in the archive, and the paws archives above keep `paws` for npm and
+  # install.sh.
+  - id: brew
+    main: ./cmd/paws
+    binary: unbound-paws
+    env:
+      - CGO_ENABLED=0
+    goos: [darwin]
+    goarch: [amd64, arm64]
+    flags: [-trimpath]
+    ldflags:
+      - -s -w -X main.version={{.Version}}
 
 archives:
-  - name_template: "{{ .ProjectName }}_{{ .Version }}_{{ .Os }}_{{ .Arch }}"
+  - id: paws
+    ids: [paws]
+    name_template: "{{ .ProjectName }}_{{ .Version }}_{{ .Os }}_{{ .Arch }}"
     formats: [tar.gz]
     format_overrides:
       - goos: windows
         formats: [zip]
     files: [LICENSE, README.md]
+  - id: brew
+    ids: [brew]
+    name_template: "unbound-paws_{{ .Version }}_{{ .Os }}_{{ .Arch }}"
+    formats: [tar.gz]
+    files: [LICENSE, README.md]
+
+# Signs every macOS binary with the Developer ID certificate and notarizes it with Apple, from the
+# Linux runner. It runs only when the signing secrets are set (see .github/workflows/ci.yml).
+notarize:
+  macos:
+    - enabled: '{{ isEnvSet "MACOS_SIGN_P12" }}'
+      ids: [paws, brew]
+      sign:
+        certificate: "{{ .Env.MACOS_SIGN_P12 }}"
+        password: "{{ .Env.MACOS_SIGN_PASSWORD }}"
+      notarize:
+        issuer_id: "{{ .Env.MACOS_NOTARY_ISSUER_ID }}"
+        key_id: "{{ .Env.MACOS_NOTARY_KEY_ID }}"
+        key: "{{ .Env.MACOS_NOTARY_KEY }}"
+        # Wait for Apple's verdict, so a rejected binary fails the release instead of shipping.
+        wait: true
+        timeout: 20m
+
+# brew install --cask websentry-ai/tap/unbound-paws
+# Published only when the binaries were notarized and the tap token is set: macOS refuses to run an
+# unnotarized binary that a cask downloaded.
+homebrew_casks:
+  - name: unbound-paws
+    ids: [brew]
+    binaries: [unbound-paws]
+    homepage: https://paws.getunbound.ai
+    description: Skills that actually fire. A Claude Code hook that makes sure the right skill is loaded.
+    caveats: |
+      Turn paws on for Claude Code:
+        unbound-paws init --global   # every project
+        unbound-paws init            # just this repo
+    repository:
+      owner: websentry-ai
+      name: homebrew-tap
+      token: "{{ .Env.HOMEBREW_TAP_TOKEN }}"
+    commit_author:
+      name: paws-release
+      email: paws-release@users.noreply.github.com
+    commit_msg_template: "unbound-paws {{ .Tag }}"
+    skip_upload: '{{ if and (isEnvSet "MACOS_SIGN_P12") (isEnvSet "HOMEBREW_TAP_TOKEN") }}auto{{ else }}true{{ end }}'
 
 checksum:
   name_template: checksums.txt

@@ -200,7 +200,12 @@ The body:
 | `sessions`, `tool_calls` | how many sessions had a call in the window, and how many calls (Skill loads not included) |
 
 Never sent: commands, arguments, paths, hostnames, MCP inputs, prompts, replies, tool output, session or project
-names. The scan date and window are kept in `~/.paws/portal/state.json`.
+names.
+
+The counts answer the catalog's questions, so a scan trusts the catalog the way installing its skills already
+does: a catalog of thousands of narrow triggers could learn about past commands from which ones matched. A scan
+refuses a catalog of more than 500 skills, 1,000 triggers or 20 triggers per skill (the published catalog has 169,
+217 and 3). The scan date and window are kept in `~/.paws/portal/state.json`.
 
 ## Portal settings
 

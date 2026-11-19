@@ -128,7 +128,10 @@ func buildScan(creds *credentials, days int) ([]byte, history.Summary, error) {
 	if err := fetchCatalog(portalCtx, api+"/paws/v1/catalog/triggers", maxPortalResponse, &cat); err != nil {
 		return nil, history.Summary{}, err
 	}
-	catalog := scanCatalog(cat)
+	catalog, err := scanCatalog(cat)
+	if err != nil {
+		return nil, history.Summary{}, err
+	}
 	until := scanNow().UTC()
 	// Once logged in with paws registered for every project, the hooks upload each call as it happens, so the scan
 	// stops where they started and no call counts twice. Without the global hook, calls since login in projects paws
@@ -149,10 +152,29 @@ func buildScan(creds *credentials, days int) ([]byte, history.Summary, error) {
 	return append(body, '\n'), sum, err
 }
 
+// Bounds on what a catalog may ask a scan to count. Each action's count is information about the laptop's past
+// commands, so a catalog of thousands of narrow patterns could rebuild text from them; the live catalog is far
+// below these (169 skills, 217 actions, at most 3 per skill), and a scan refuses a catalog over them.
+const (
+	maxScanSkills          = 500
+	maxScanActions         = 1000
+	maxScanActionsPerSkill = 20
+)
+
 // scanCatalog turns the catalog's actions into matchers, built as the portal config builds a skill's rule files (so a
 // scan matches what the gate would), with the catalog's skill names and the MCP tool patterns its triggers name.
-func scanCatalog(cat catalogTriggers) history.Catalog {
+func scanCatalog(cat catalogTriggers) (history.Catalog, error) {
 	out := history.Catalog{Skills: map[string]bool{}}
+	actions := 0
+	for _, s := range cat.Skills {
+		actions += len(s.Actions)
+		if len(s.Actions) > maxScanActionsPerSkill {
+			return out, fmt.Errorf("the paws catalog sent %d triggers for %s; a scan counts at most %d per skill", len(s.Actions), printable(s.Name), maxScanActionsPerSkill)
+		}
+	}
+	if len(cat.Skills) > maxScanSkills || actions > maxScanActions {
+		return out, fmt.Errorf("the paws catalog sent %d skills with %d triggers; a scan counts at most %d skills and %d triggers", len(cat.Skills), actions, maxScanSkills, maxScanActions)
+	}
 	for _, s := range cat.Skills {
 		out.Skills[s.Name] = true
 		for i, a := range s.Actions {
@@ -169,7 +191,7 @@ func scanCatalog(cat catalogTriggers) history.Catalog {
 			out.Triggers = append(out.Triggers, history.Trigger{Skill: s.Name, Action: actionID(a.ID), Matches: r.Matches})
 		}
 	}
-	return out
+	return out, nil
 }
 
 // actionID is a catalog action's id as text: the backend sends a number or a string.

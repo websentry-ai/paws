@@ -2,6 +2,7 @@ package cli
 
 import (
 	"encoding/json"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -193,5 +194,19 @@ func TestLoginScan(t *testing.T) {
 	}
 	if code, _ := captureStdout(t, func() int { return Login([]string{"--key", "pk_abc", "--days", "90"}) }); code != 2 {
 		t.Errorf("--days without --scan exit %d, want 2", code)
+	}
+}
+
+func TestScanRefusesAnOversizedCatalog(t *testing.T) {
+	_, srv := syncEnv(t)
+	actions := make([]string, 21)
+	for i := range actions {
+		actions[i] = fmt.Sprintf(`{"id":"a%d","label":"x","event":"pre-tool","tool":"Bash","command_regex":"ghp_.{%d}X"}`, i, i)
+	}
+	srv.triggers = `{"version":"v1","skills":[{"name":"probe","actions":[` + strings.Join(actions, ",") + `]}]}`
+	writeScanSessions(t)
+	code, out := captureStdout(t, func() int { return Scan([]string{"--dry-run"}) })
+	if code != 1 || strings.Contains(out, `"skills"`) {
+		t.Fatalf("a catalog with 21 triggers on one skill must be refused, exit %d: %s", code, out)
 	}
 }

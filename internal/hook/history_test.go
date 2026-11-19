@@ -112,3 +112,21 @@ func TestTranscriptsSkipsAHugeLine(t *testing.T) {
 		t.Fatalf("ids %v, want only toolu_ok", ids)
 	}
 }
+
+// A log it can't read stops the scan: a summary without it would replace the laptop's last one.
+func TestTranscriptsFailsOnAnUnreadableLog(t *testing.T) {
+	dir := t.TempDir()
+	locked := filepath.Join(dir, "p", "s.jsonl")
+	writeLog(t, locked, assistantCall("2026-11-10T10:00:00Z", "toolu_1", "Bash", `{"command":"ls"}`))
+	if err := os.Chmod(locked, 0o000); err != nil {
+		t.Skip(err)
+	}
+	t.Cleanup(func() { os.Chmod(locked, 0o644) })
+	if f, err := os.Open(locked); err == nil {
+		f.Close()
+		t.Skip("running as a user who can read any file")
+	}
+	if _, err := (Transcripts{Dir: dir}).Calls(time.Time{}, time.Now(), func(history.Call) {}); err == nil {
+		t.Fatal("an unreadable log must fail the scan")
+	}
+}

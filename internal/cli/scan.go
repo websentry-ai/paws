@@ -42,6 +42,35 @@ type catalogTriggers struct {
 	} `json:"skills"`
 }
 
+// scanStateFile is in the portal folder beside state.json, not in it: the hooks' syncs rewrite state.json in the
+// background, and a scan saving its own fields there could overwrite theirs.
+const scanStateFile = "scan.json"
+
+// scanState is the last scan the portal got and the window it covered. Running a scan is the consent; it replaces
+// the one before.
+type scanState struct {
+	ScannedAt time.Time `json:"scanned_at"`
+	Days      int       `json:"window_days"`
+}
+
+func saveScanState(st scanState) error {
+	dir := portalDir()
+	if dir == "" {
+		return errors.New("no home directory for the portal state; set PAWS_HOME")
+	}
+	data, _ := json.MarshalIndent(st, "", "  ")
+	return writeAtomic(filepath.Join(dir, scanStateFile), append(data, '\n'), 0o600)
+}
+
+func loadScanState() scanState {
+	var st scanState
+	if dir := portalDir(); dir != "" {
+		data, _ := os.ReadFile(filepath.Join(dir, scanStateFile))
+		json.Unmarshal(data, &st)
+	}
+	return st
+}
+
 // scanNow is replaceable in tests: the clock the window ends at when no login bounds it.
 var scanNow = time.Now
 
@@ -104,9 +133,7 @@ func runScan(creds *credentials, days int, dry bool) int {
 		}
 		return 1
 	}
-	st := loadPortalState()
-	st.HistoryScannedAt, st.HistoryDays = scanNow().UTC(), days
-	if err := savePortalState(st); err != nil {
+	if err := saveScanState(scanState{ScannedAt: scanNow().UTC(), Days: days}); err != nil {
 		fmt.Fprintf(os.Stderr, "paws: %v\n", err)
 	}
 	printScan(sum)

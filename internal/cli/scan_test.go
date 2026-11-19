@@ -110,8 +110,11 @@ func TestScanUploadsCountsOnly(t *testing.T) {
 	if !strings.Contains(out, "terraform") || !strings.Contains(out, "Sent the counts") {
 		t.Errorf("output %q", out)
 	}
-	if st := loadPortalState(); st.HistoryDays != 30 || st.HistoryScannedAt.IsZero() {
-		t.Errorf("state %+v: the scan date and window are kept", st)
+	if st := loadScanState(); st.Days != 30 || st.ScannedAt.IsZero() {
+		t.Errorf("scan.json %+v: the scan date and window are kept", st)
+	}
+	if strings.Contains(readFileOrEmpty(filepath.Join(os.Getenv("PAWS_HOME"), "portal", "state.json")), "scan") {
+		t.Error("the scan must not write the state.json the hooks' syncs rewrite")
 	}
 
 	// A second scan sends the same summary again; the portal keeps one per laptop, so nothing doubles.
@@ -209,4 +212,9 @@ func TestScanRefusesAnOversizedCatalog(t *testing.T) {
 	if code != 1 || strings.Contains(out, `"skills"`) {
 		t.Fatalf("a catalog with 21 triggers on one skill must be refused, exit %d: %s", code, out)
 	}
+}
+
+func readFileOrEmpty(path string) string {
+	data, _ := os.ReadFile(path)
+	return string(data)
 }

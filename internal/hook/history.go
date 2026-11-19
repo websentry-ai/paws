@@ -5,6 +5,8 @@ import (
 	"bytes"
 	"encoding/json"
 	"errors"
+	"fmt"
+	"io"
 	"io/fs"
 	"os"
 	"path/filepath"
@@ -40,24 +42,26 @@ func (t Transcripts) Calls(since, until time.Time, fn func(history.Call)) (int, 
 	if err != nil {
 		return 0, err
 	}
+	// An unreadable folder or log stops the scan: a summary missing it would replace this laptop's last one.
 	err = filepath.WalkDir(root, func(path string, d fs.DirEntry, err error) error {
 		if err != nil {
-			if path == root {
-				return err
-			}
-			return nil // an unreadable folder is skipped, not the whole scan
+			return err
 		}
 		if d.IsDir() || filepath.Ext(path) != ".jsonl" {
 			return nil
 		}
 		info, err := d.Info()
-		if err != nil || info.ModTime().Before(since) {
+		if err != nil {
+			return err
+		}
+		if info.ModTime().Before(since) {
 			return nil // nothing in a log last written before the window can be in it
 		}
-		if readLog(path, since, until, fn) {
+		found, err := readLog(path, since, until, fn)
+		if found {
 			sessions[sessionOf(root, path)] = true
 		}
-		return nil
+		return err
 	})
 	return len(sessions), err
 }
@@ -72,10 +76,10 @@ func sessionOf(root, path string) string {
 }
 
 // readLog passes the log's calls in the window to fn and reports whether it had any.
-func readLog(path string, since, until time.Time, fn func(history.Call)) bool {
+func readLog(path string, since, until time.Time, fn func(history.Call)) (bool, error) {
 	f, err := os.Open(path)
 	if err != nil {
-		return false
+		return false, err
 	}
 	defer f.Close()
 	r := bufio.NewReaderSize(f, 1<<20)
@@ -90,8 +94,11 @@ func readLog(path string, since, until time.Time, fn func(history.Call)) bool {
 				}
 			}
 		}
+		if errors.Is(err, io.EOF) {
+			return found, nil
+		}
 		if err != nil {
-			return found
+			return found, fmt.Errorf("%s: %w", path, err)
 		}
 	}
 }

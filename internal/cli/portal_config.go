@@ -36,10 +36,6 @@ type portalState struct {
 	Revoked     bool      `json:"revoked,omitempty"` // the portal answered 401; login was forgotten
 	// AccountDeleted: the portal said the account was deleted (403 account_deleted); Revoked is set too.
 	AccountDeleted bool `json:"account_deleted,omitempty"`
-	// HistoryScannedAt and HistoryDays: the last `paws scan` the portal got, and the window it covered. Running
-	// a scan is the consent; it replaces the one before.
-	HistoryScannedAt time.Time `json:"history_scanned_at,omitzero"`
-	HistoryDays      int       `json:"history_days,omitempty"`
 }
 
 // portalConfig is GET /config: the account's skills that are on.
@@ -123,7 +119,7 @@ func savePortalState(st portalState) error {
 	return writeAtomic(filepath.Join(dir, "state.json"), append(data, '\n'), 0o600)
 }
 
-// clearPortal removes every rule file and digest the portal config wrote, and state.json.
+// clearPortal removes every rule file and digest the portal config wrote, state.json and scan.json.
 func clearPortal() error {
 	dir := portalDir()
 	if dir == "" {
@@ -132,8 +128,10 @@ func clearPortal() error {
 	if err := writeManaged(dir, nil); err != nil {
 		return err
 	}
-	if err := os.Remove(filepath.Join(dir, "state.json")); err != nil && !errors.Is(err, os.ErrNotExist) {
-		return err
+	for _, name := range []string{"state.json", scanStateFile} {
+		if err := os.Remove(filepath.Join(dir, name)); err != nil && !errors.Is(err, os.ErrNotExist) {
+			return err
+		}
 	}
 	return nil
 }

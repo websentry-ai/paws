@@ -15,7 +15,9 @@ import (
 //	Bash               a known program, plus the CLI's own subcommands ("kubectl delete", "aws s3api create-bucket",
 //	                   "rm"); a SQL verb (DELETE, DROP...); "bash other" for anything else
 //	Read/Write/Edit    "read" or "edit" plus a known file extension ("edit .tf")
-//	mcp__server__tool  "mcp <server> <tool>" for a server the catalog names; else "mcp other <create|update|...>"
+//	mcp__server__tool  "mcp <server> <tool>" for a server a catalog pattern names exactly; "mcp <word> <class>" for
+//	                   one a wildcard pattern covers, with the pattern's own word ("*azure*" gives azure); else
+//	                   "mcp other <create|update|delete|send|read>"
 //	other tools        a Claude Code tool's name in lower case, else "other"
 func (c *Catalog) Signature(tool, target string) string {
 	switch {
@@ -40,27 +42,48 @@ func (c *Catalog) Signature(tool, target string) string {
 
 func (c *Catalog) mcpSignature(tool string) string {
 	raw, _, _ := strings.Cut(strings.TrimPrefix(tool, "mcp__"), "__")
-	server, name, ok := gate.MCPParts(tool)
-	if ok && c.knownServer(raw) && wordRe.MatchString(server) && wordRe.MatchString(name) {
-		return server + " " + name // a server the catalog names: its tool names are the vendor's
-	}
 	class := rule.MCPAction(tool)
 	if class == "" {
 		class = "read"
 	}
+	exact, vendor := c.serverName(raw)
+	if server, name, ok := gate.MCPParts(tool); ok && exact && wordRe.MatchString(server) && wordRe.MatchString(name) {
+		return server + " " + name // the catalog names this very server, so its tool names are the vendor's
+	}
+	if vendor != "" {
+		return vendor + " " + class // only the catalog's own word: raw may be a name the user chose, like azure_prod
+	}
 	return "other " + class
 }
 
-// knownServer reports whether one of the catalog's MCP server patterns covers raw, ignoring case. A pattern that
-// is only *, which covers any server, doesn't count.
-func (c *Catalog) knownServer(raw string) bool {
+// minVendorWord is the shortest wildcard literal a signature may send: a pattern like *a* covers almost every server.
+const minVendorWord = 4
+
+// serverName says how the catalog's MCP server patterns cover raw, ignoring case: exact when a pattern without * is
+// raw itself, else vendor is the longest literal part of a wildcard pattern that covers it ("*azure*" gives
+// "azure"). Both come from the catalog, never from raw.
+func (c *Catalog) serverName(raw string) (exact bool, vendor string) {
 	raw = strings.ToLower(raw)
 	for _, p := range c.MCPServers {
-		if strings.Trim(p, "*") != "" && rule.MatchToolSpec(strings.ToLower(p), raw) {
-			return true
+		p = strings.ToLower(p)
+		if !strings.Contains(p, "*") {
+			if p == raw {
+				return true, ""
+			}
+			continue
+		}
+		word := ""
+		for _, part := range strings.Split(p, "*") {
+			if len(part) > len(word) {
+				word = part
+			}
+		}
+		word = strings.Trim(word, "_-")
+		if len(word) >= minVendorWord && vendorRe.MatchString(word) && len(word) > len(vendor) && rule.MatchToolSpec(p, raw) {
+			vendor = word
 		}
 	}
-	return false
+	return false, vendor
 }
 
 // MCPServers returns the server parts of the MCP patterns in a matcher tool spec ("mcp__attio__create-note|Bash" is
@@ -80,6 +103,7 @@ func MCPServers(spec string) []string {
 var (
 	fileTools = map[string]bool{"Read": true, "Write": true, "Edit": true, "NotebookEdit": true}
 	wordRe    = regexp.MustCompile(`^[a-z][a-z0-9_-]{0,63}$`)
+	vendorRe  = regexp.MustCompile(`^[a-z][a-z0-9_-]{0,31}$`)
 	// sqlVerb finds a destructive SQL statement anywhere in a command, as the gate's action keys do.
 	sqlVerb   = regexp.MustCompile(`(?i:\b(delete)\s+from\b|\b(drop)\s+(?:table|database|schema|index|view)\b|\b(truncate)\s+table\b|\b(update)\s+\S+\s+set\b)`)
 	chainSep  = regexp.MustCompile(`&&|\|\||[;|&\n]`)

@@ -71,7 +71,7 @@ func TestSummarizeEmpty(t *testing.T) {
 }
 
 func TestSignatureSendsNoArgumentsOrPaths(t *testing.T) {
-	cat := &Catalog{MCPServers: []string{"claude_ai_Notion", "attio", "*", "*azure*"}}
+	cat := &Catalog{MCPServers: []string{"claude_ai_Notion", "attio", "*", "*azure*", "*a*", "*e*"}}
 	cases := map[[2]string]string{
 		{"Bash", "rm -rf /Users/alice/secret-project/build"}:            "bash rm",
 		{"Bash", "cd /Users/alice/acme && git push origin main"}:        "bash git push",
@@ -101,7 +101,8 @@ func TestSignatureSendsNoArgumentsOrPaths(t *testing.T) {
 		{"Read", "/Users/alice/acme/notes.acmeco"}:                      "read",
 		{"mcp__claude_ai_Notion__notion-create-pages", `{"title":"x"}`}: "mcp notion create-pages",
 		{"mcp__attio__create-note", `{}`}:                               "mcp attio create-note",
-		{"mcp__azure_prod__storage_list", `{}`}:                         "mcp azure_prod storage-list",
+		{"mcp__azure_prod__storage_list", `{}`}:                         "mcp azure read",
+		{"mcp__acme_azure_internal__delete_thing", `{}`}:                "mcp azure delete",
 		{"mcp__acme_prod_db__query", `{"sql":"select"}`}:                "mcp other read",
 		{"mcp__acme_crm__delete_customer", `{}`}:                        "mcp other delete",
 		{"mcp__bad server__x", "{}"}:                                    "mcp other read",
@@ -113,9 +114,6 @@ func TestSignatureSendsNoArgumentsOrPaths(t *testing.T) {
 		got := cat.Signature(in[0], in[1])
 		if got != want {
 			t.Errorf("Signature(%q, %q) = %q, want %q", in[0], in[1], got, want)
-		}
-		if strings.Contains(want, "azure") {
-			continue // a server the catalog names (*azure*) is the vendor's, so the case names it on purpose
 		}
 		for _, leak := range []string{"alice", "acme", "customer", "secret", "abc", "/"} {
 			if strings.Contains(got, leak) {

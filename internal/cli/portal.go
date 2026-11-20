@@ -12,6 +12,7 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"strconv"
 	"strings"
 	"time"
 	"unicode"
@@ -72,6 +73,10 @@ type credentials struct {
 	CreatedAt string          `json:"created_at"`
 	// AccountEmail is the account this machine joined; empty when the portal predates it.
 	AccountEmail string `json:"account_email,omitempty"`
+	// SyncFrom is sync's cursor when this login began: this login's syncs upload only the audit records after it.
+	// Empty when nothing had been synced, or for a login from before scan.
+	SyncFrom  string `json:"sync_from,omitempty"`
+	SyncFromN int    `json:"sync_from_count,omitempty"` // with SyncFrom, sync's cursor: records at that second up to here
 }
 
 func credentialsPath() string {
@@ -209,9 +214,10 @@ func printable(s string) string {
 // reads the key from stdin, keeping it out of shell history). Then it syncs once, so the
 // portal sees this machine's skills right away.
 func Login(args []string) int {
-	key, ok := loginKey(args)
-	if !ok {
-		fmt.Fprintln(os.Stderr, "usage: unbound-paws login [--key <one-time-key> | --key -]")
+	args, scan, days, ok := loginScanFlags(args)
+	key, keyOK := loginKey(args)
+	if !ok || !keyOK {
+		fmt.Fprintln(os.Stderr, "usage: unbound-paws login [--key <one-time-key> | --key -] [--scan [--days 30|90]]")
 		return 2
 	}
 	path := credentialsPath()
@@ -234,11 +240,17 @@ func Login(args []string) int {
 			return 1
 		}
 	}
+	// Logging in again on this laptop (step 2 run twice, or another account) replaces its device: the portal retires
+	// the old one, so its history scan and laptop slot stop counting.
+	replaces := ""
+	if old, err := loadCredentials(); err == nil && old != nil && strings.TrimSuffix(old.API, "/") == strings.TrimSuffix(api, "/") {
+		replaces = old.Token
+	}
 	var tok deviceToken
 	if key != "" {
-		tok, err = redeemKey(api, key)
+		tok, err = redeemKey(api, key, replaces)
 	} else {
-		tok, err = deviceLogin(api)
+		tok, err = deviceLogin(api, replaces)
 	}
 	if errors.Is(err, errAccountDeleted) {
 		fmt.Fprintln(os.Stderr, accountDeletedMessage)
@@ -250,6 +262,9 @@ func Login(args []string) int {
 	}
 	c := credentials{API: api, Token: tok.Token, DeviceID: tok.DeviceID, CreatedAt: time.Now().UTC().Format(time.RFC3339),
 		AccountEmail: strings.TrimSpace(printable(tok.AccountEmail))}
+	// Scan needs to know which audit records this account received through sync.
+	cur := accountSyncFrom(api, c.AccountEmail)
+	c.SyncFrom, c.SyncFromN = cur.TS, cur.N
 	if err := writePrivate(path, c); err != nil {
 		fmt.Fprintf(os.Stderr, "paws: saving credentials: %v\n", err)
 		return 1
@@ -267,13 +282,41 @@ func Login(args []string) int {
 	rep, err := syncNow(&c, cwd)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "paws: first sync failed: %v (run `%s sync` to retry)\n", err, cliName)
+		if scan {
+			fmt.Fprintf(os.Stderr, "paws: skipped the scan; run `%s scan` once sync works\n", cliName)
+		}
 		return 0
 	}
 	printSyncReport(rep)
 	if !hasPawsHook(filepath.Join(userClaudeDir(), "settings.json")) {
 		fmt.Printf("Skills you turn on in the portal apply only where paws is registered. To use them in every project: %s init --global\n", cliName)
 	}
+	if scan && runScan(&c, days, false) != 0 {
+		fmt.Fprintf(os.Stderr, "paws: logged in, but the scan didn't go through (run `%s scan` to retry)\n", cliName)
+	}
 	return 0
+}
+
+// loginScanFlags takes --scan and --days N out of login's arguments; --days needs --scan.
+func loginScanFlags(args []string) (rest []string, scan bool, days int, ok bool) {
+	days = defaultScanDays
+	daysSet := false
+	for i := 0; i < len(args); i++ {
+		switch {
+		case args[i] == "--scan":
+			scan = true
+		case args[i] == "--days" && i+1 < len(args):
+			i++
+			n, err := strconv.Atoi(args[i])
+			if err != nil || !scanDays[n] {
+				return nil, false, 0, false
+			}
+			days, daysSet = n, true
+		default:
+			rest = append(rest, args[i])
+		}
+	}
+	return rest, scan, days, scan || !daysSet
 }
 
 // loginKey reads `--key K` or `--key=K`; no arguments means the device flow.
@@ -303,7 +346,7 @@ func readKey(r io.Reader) (string, error) {
 }
 
 // deviceLogin shows a code to confirm in the browser and waits for the confirmation.
-func deviceLogin(api string) (deviceToken, error) {
+func deviceLogin(api, replaces string) (deviceToken, error) {
 	dc, err := requestDeviceCode(api)
 	if err != nil {
 		return deviceToken{}, err
@@ -313,13 +356,17 @@ func deviceLogin(api string) (deviceToken, error) {
 		openURL(dc.VerificationURI)
 	}
 	fmt.Println("Waiting for confirmation (Ctrl-C to cancel)...")
-	return pollDeviceToken(api, dc)
+	return pollDeviceToken(api, dc, replaces)
 }
 
-// redeemKey trades a one-time key made in the portal for a device token.
-func redeemKey(api, key string) (deviceToken, error) {
+// redeemKey trades a one-time key made in the portal for a device token. replaces is the token this laptop held
+// before, if any.
+func redeemKey(api, key, replaces string) (deviceToken, error) {
 	body := deviceInfo()
 	body["key"] = key
+	if replaces != "" {
+		body["replaces"] = replaces
+	}
 	var tok deviceToken
 	status, resp, err := postJSON(api+"/paws/v1/device/key", "", body)
 	if err != nil {
@@ -369,7 +416,11 @@ const maxDeviceWait = 15 * time.Minute
 
 // pollDeviceToken asks every interval seconds (default 5, at most 60) until the code is
 // confirmed, denied or expired, giving up once expires_in (at most 15 minutes) has passed.
-func pollDeviceToken(api string, dc deviceCode) (deviceToken, error) {
+func pollDeviceToken(api string, dc deviceCode, replaces string) (deviceToken, error) {
+	body := map[string]string{"device_code": dc.DeviceCode}
+	if replaces != "" {
+		body["replaces"] = replaces
+	}
 	interval := time.Duration(min(dc.Interval, 60)) * time.Second
 	if interval <= 0 {
 		interval = 5 * time.Second
@@ -381,7 +432,7 @@ func pollDeviceToken(api string, dc deviceCode) (deviceToken, error) {
 	for waited := time.Duration(0); waited < limit; waited += interval {
 		sleep(interval)
 		var tok deviceToken
-		status, resp, err := postJSON(api+"/paws/v1/device/token", "", map[string]string{"device_code": dc.DeviceCode})
+		status, resp, err := postJSON(api+"/paws/v1/device/token", "", body)
 		if err != nil {
 			return tok, err
 		}
@@ -419,6 +470,11 @@ func Logout(args []string) int {
 		fmt.Println("Not logged in.")
 		return 0
 	}
+	// Best effort: the portal retires this laptop's device, so its history scan and laptop slot stop counting.
+	// Offline, or a portal from before this endpoint, logs out locally all the same.
+	if c, err := loadCredentials(); err == nil && c != nil && c.Token != "" {
+		postJSON(strings.TrimSuffix(c.API, "/")+"/paws/v1/device/logout", c.Token, map[string]string{})
+	}
 	if err := clearPortal(); err != nil {
 		fmt.Fprintf(os.Stderr, "paws: removing portal rules: %v\n", err)
 		return 1
@@ -434,4 +490,37 @@ func Logout(args []string) int {
 		fmt.Println("Logged out.")
 	}
 	return 0
+}
+
+// accountSyncFrom is where sync's cursor stood when this account first logged in on this machine. Sync's cursor
+// outlives a logout, so another account's syncs may have uploaded the records before it; from there on, this account
+// may have received any record. It is kept per account in sync-from.json, which a logout leaves alone, so logging in
+// again with the same account keeps the first point: a later point would treat records this account already received
+// as not uploaded, and scan would count those calls twice. (Records another account synced in between are then taken
+// as this account's too, so a scan can only undercount them.) The first account noted on a machine starts at the
+// beginning, for the same reason.
+func accountSyncFrom(api, account string) syncCursor {
+	state := syncStatePath()
+	cur, err := loadSyncCursor(state)
+	if state == "" || err != nil {
+		return syncCursor{}
+	}
+	path := filepath.Join(filepath.Dir(state), "sync-from.json")
+	first := map[string]syncCursor{}
+	if data, err := os.ReadFile(path); err == nil {
+		_ = json.Unmarshal(data, &first)
+	}
+	key := strings.TrimSuffix(api, "/") + " " + strings.ToLower(account)
+	if seen, ok := first[key]; ok {
+		return seen
+	}
+	if len(first) == 0 {
+		// No login has been noted here yet: either a new machine (the cursor is at the start anyway) or one
+		// upgraded from a paws without this file, whose earlier syncs may have gone to this same account. Take them
+		// as this account's, so its calls aren't counted twice.
+		cur = syncCursor{}
+	}
+	first[key] = cur
+	_ = writePrivate(path, first)
+	return cur
 }

@@ -30,7 +30,9 @@ apply `command` (Bash: the command with secrets redacted, cut to 500 bytes),
 or to the working directory outside a repo; left out when the file is outside
 that root, so it is never absolute) and `mcp` (`server` and `tool` as Claude
 Code names them, `class`: `send`, `create`, `update` or `delete`, left out for
-reads). Never file contents, MCP input, URLs, search patterns or tool output.
+reads), plus `target_hash` (the first 8 bytes of the SHA-256 of the call's full input, in hex; `paws scan` uses it
+to match transcript calls to these records, and sync never sends it). Never file contents, MCP input, URLs, search
+patterns or tool output.
 
 The `action` key:
 
@@ -162,6 +164,50 @@ shortened, e.g. `gh pr create`, `edit docs/**`, `each new session`).
 Nothing else is sent: no prompts, replies, file contents, tool output,
 absolute paths, rule file paths, session or agent ids. Telemetry records
 (`skill_invoked`, `tool_result`, `turn_end`) are not uploaded.
+
+## History scan
+
+Opt-in, and only when you ask: `unbound-paws scan`, or `unbound-paws login --scan`, which scans once the login
+works. It reads the tool calls in your past Claude Code sessions (`~/.claude/projects/**/*.jsonl`, subagent logs
+included, `$CLAUDE_CONFIG_DIR` when set), matches them against the catalog's triggers on this machine with the
+gate's own matcher, and sends `POST /history` one summary of counts, so the portal can rank skills before
+the hooks have synced anything.
+
+- `--days 30` (the default) or `--days 90`. Claude Code deletes sessions older than 30 days unless its
+  `cleanupPeriodDays` setting was raised, so 90 finds more only then.
+- Once logged in, every call the hook logged (`~/.paws/audit.log`, from before the login too) is left out: sync uploads those. Each call is matched to its own record by session, tool, time and command or file, so calls the hook never logged still count. Only records this login's syncs uploaded count: `login` notes where sync's cursor stood the first time each account logged in on this machine (`sync_from` in `credentials.json`, kept per account in `~/.paws/sync-from.json`, which logout leaves), so after switching accounts the calls an earlier account received still count for the new one, and logging in again with the same account doesn't count its synced calls twice. A call from the last 12 hours waits for a later scan until its result has been in the transcript for 2 minutes: it may still be running, or its async PostToolUse hook may still be writing the record. Once the audit log has rotated, tool calls older than its oldest kept record are left out, since their records, and what they uploaded, may be gone; skill loads still count.
+- Only the `tool_use` blocks of assistant records are decoded. Prompts, replies, thinking and tool results are
+  never read. A call copied into a resumed or forked session's log counts once, by its id.
+- `unbound-paws scan --dry-run` prints the body and sends nothing; an upload sends those same bytes. It works
+  without a login.
+- Each scan replaces this laptop's last one on the portal, so running it again never adds to the counts.
+
+The body:
+
+```
+{ "source": "claude-code", "window_days": 30, "since": "2026-10-20", "until": "2026-11-19",
+  "sessions": 412, "tool_calls": 18234,
+  "skills": [{"skill": "coreutils", "calls": 19, "last_seen": "2026-11-17",
+              "actions": [{"id": "coreutils", "calls": 19}]}],
+  "loaded": [{"name": "humanizer", "count": 12}],
+  "unmatched": [{"name": "bash kubectl delete", "count": 4}, {"name": "edit .tf", "count": 9}],
+  "catalog_version": "..." }
+```
+
+| Field | Value |
+|---|---|
+| `skills` | catalog skills whose triggers matched: calls (each call once, however many of the skill's actions matched it), the last day one ran, and calls per action id |
+| `loaded` | catalog skills Claude loaded without being asked. Other skill names are never sent |
+| `unmatched` | calls no trigger matched, at most 100, by signature. Every word comes from a list paws ships or from the catalog, never from you: a known program plus the CLI's own subcommands (`kubectl delete`, `rm`; for aws, gcloud and az, an operation only when it is made of known cloud verbs and nouns, as in `aws s3api create-bucket`), a SQL verb, `read`/`edit` plus a known file extension, `mcp <server> <tool>` when a catalog trigger names that server and tool exactly, `mcp <server> <class>` for another tool on such a server, `mcp <word> <class>` for a server a wildcard trigger covers (the trigger's own word: `*azure*` sends `azure`, never your server's name), or a Claude Code tool's name. Anything else is `other`: an unknown program is `bash other`, a git or kubectl alias or plugin stops at `git` or `kubectl`, an MCP server you set up yourself is `mcp other <create\|update\|delete\|send\|read>`, and an unknown extension or tool is left out |
+| `sessions`, `tool_calls` | how many sessions had a call in the window, and how many calls (Skill loads not included) |
+
+Never sent: commands, arguments, paths, hostnames, MCP inputs, prompts, replies, tool output, session or project
+names.
+
+The counts answer the catalog's questions, so a scan trusts the catalog the way installing its skills already
+does: a catalog of thousands of narrow triggers could learn about past commands from which ones matched. A scan
+refuses a catalog of more than 500 skills, 1,000 triggers or 20 triggers per skill (the published catalog has 169,
+217 and 3). The scan date and window are kept in `~/.paws/portal/scan.json`.
 
 ## Portal settings
 

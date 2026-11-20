@@ -1,6 +1,10 @@
 package rule
 
-import "testing"
+import (
+	"fmt"
+	"sync"
+	"testing"
+)
 
 func gitRule(t *testing.T, event string) *Rule {
 	t.Helper()
@@ -180,4 +184,27 @@ func TestFunctionsThatDefineFunctionsStayBounded(t *testing.T) {
 	if cmds := parseLine(line); len(cmds) > 2000 {
 		t.Fatalf("%d commands: function expansion must stay bounded", len(cmds))
 	}
+}
+
+// paws scan matches many lines on several goroutines at once; each still gets its own line's commands.
+func TestMatchesFromSeveralGoroutines(t *testing.T) {
+	commit := gitRule(t, "pre-commit")
+	lines := map[string]bool{}
+	for i := range 200 {
+		lines[fmt.Sprintf("bash -c 'git commit -m %d'", i)] = true
+		lines[fmt.Sprintf("bash -c 'git status %d'", i)] = false
+	}
+	var wg sync.WaitGroup
+	for range 8 {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			for line, want := range lines {
+				if got := commit.Matches("Bash", line); got != want {
+					t.Errorf("%q: matched %v, want %v", line, got, want)
+				}
+			}
+		}()
+	}
+	wg.Wait()
 }

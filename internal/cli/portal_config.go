@@ -119,7 +119,7 @@ func savePortalState(st portalState) error {
 	return writeAtomic(filepath.Join(dir, "state.json"), append(data, '\n'), 0o600)
 }
 
-// clearPortal removes every rule file and digest the portal config wrote, and state.json.
+// clearPortal removes every rule file and digest the portal config wrote, state.json and scan.json.
 func clearPortal() error {
 	dir := portalDir()
 	if dir == "" {
@@ -128,8 +128,10 @@ func clearPortal() error {
 	if err := writeManaged(dir, nil); err != nil {
 		return err
 	}
-	if err := os.Remove(filepath.Join(dir, "state.json")); err != nil && !errors.Is(err, os.ErrNotExist) {
-		return err
+	for _, name := range []string{"state.json", scanStateFile} {
+		if err := os.Remove(filepath.Join(dir, name)); err != nil && !errors.Is(err, os.ErrNotExist) {
+			return err
+		}
 	}
 	return nil
 }

@@ -54,6 +54,8 @@ func run(args []string) int {
 		return cli.Logout(args[1:])
 	case "sync":
 		return cli.Sync(args[1:])
+	case "scan":
+		return cli.Scan(args[1:])
 	case "version", "--version", "-v":
 		fmt.Println("paws " + version)
 		return 0
@@ -87,9 +89,14 @@ Usage:
                                                          A catalog on disk as JSON; --portal: the portal's catalog document.
   unbound-paws validate [root]                           Check root/catalog bindings and root/packs manifests.
   unbound-paws pin [root]                                Fetch upstream skills and pin their content hashes.
-  unbound-paws login [--key <one-time-key>|-]            Link this machine to the paws portal (opt-in); --key for no browser (- reads stdin).
+  unbound-paws login [--key <one-time-key>|-] [--scan [--days 30|90]]
+                                                         Link this machine to the paws portal (opt-in); --key for no browser (- reads stdin).
+                                                         --scan also runs scan once logged in.
   unbound-paws logout                                    Forget the portal login and remove its rules.
   unbound-paws sync [--dry-run]                          Upload new records and pull portal settings now; --dry-run prints the upload.
+  unbound-paws scan [--days 30|90] [--dry-run]           Count the tool calls of past Claude Code sessions against the catalog and send
+                                                         the counts (never prompts, output, arguments or paths) so the portal can pick
+                                                         skills; --dry-run prints exactly what would be sent.
   unbound-paws version                                   Print version.
 
 Rules are .paws/**/*.md files; paws reads every .paws/ from the working

@@ -484,3 +484,68 @@ func TestPortalErrorNamesAFirewallBlock(t *testing.T) {
 		t.Errorf("a portal 403 should keep its own message, got %v", err)
 	}
 }
+
+// Sync's cursor outlives a logout, so a login records where it stood: paws scan treats only later records as uploaded
+// to this account.
+func TestLoginRecordsWhereSyncStood(t *testing.T) {
+	srv := &fakePortal{t: t}
+	home := portalEnv(t, srv)
+	if err := writePrivate(filepath.Join(home, "sync-state.json"), syncCursor{TS: "2026-11-04T00:00:00Z", N: 3}); err != nil {
+		t.Fatal(err)
+	}
+	if code, out := captureStdout(t, func() int { return Login([]string{"--key", "pk_abc"}) }); code != 0 {
+		t.Fatalf("login exit %d: %s", code, out)
+	}
+	// No login was noted on this machine before (it synced under an older paws), so its syncs may have gone to this
+	// account: it starts at the beginning.
+	c, err := loadCredentials()
+	if err != nil || c == nil || c.SyncFrom != "" || c.SyncFromN != 0 {
+		t.Fatalf("credentials %+v, %v; want no sync_from on the first noted login", c, err)
+	}
+	// On a machine where another account was noted first, this account may have received only the records synced
+	// from its own first login on.
+	writePrivate(filepath.Join(home, "sync-from.json"), map[string]syncCursor{"https://other.example someone@else.dev": {}})
+	os.Remove(filepath.Join(home, "credentials.json"))
+	if code, out := captureStdout(t, func() int { return Login([]string{"--key", "pk_abc"}) }); code != 0 {
+		t.Fatalf("login exit %d: %s", code, out)
+	}
+	if c, err = loadCredentials(); err != nil || c == nil || c.SyncFrom != "2026-11-04T00:00:00Z" || c.SyncFromN != 3 {
+		t.Fatalf("credentials %+v, %v; want sync_from 2026-11-04T00:00:00Z, count 3", c, err)
+	}
+	// The same account logs in again after more syncs (login --scan, or after a logout): it keeps the first point,
+	// since it received the records synced since then.
+	if err := writePrivate(filepath.Join(home, "sync-state.json"), syncCursor{TS: "2026-11-09T00:00:00Z", N: 1}); err != nil {
+		t.Fatal(err)
+	}
+	os.Remove(filepath.Join(home, "credentials.json"))
+	if code, out := captureStdout(t, func() int { return Login([]string{"--key", "pk_abc"}) }); code != 0 {
+		t.Fatalf("second login exit %d: %s", code, out)
+	}
+	if c, _ := loadCredentials(); c == nil || c.SyncFrom != "2026-11-04T00:00:00Z" {
+		t.Errorf("after logging in again: %+v; want the first sync_from kept", c)
+	}
+}
+
+// Logging in again on a laptop sends the token it held, so the portal retires the old device; logging out tells the
+// portal too. A token for another portal is never sent.
+func TestLoginReplacesTheLaptopsOldDevice(t *testing.T) {
+	srv := &fakePortal{t: t}
+	home := portalEnv(t, srv)
+	api := strings.TrimSuffix(os.Getenv("PAWS_PORTAL_API"), "/")
+	writePrivate(filepath.Join(home, "credentials.json"), credentials{API: api, Token: "tok-old"})
+	if code, out := captureStdout(t, func() int { return Login([]string{"--key", "pk_abc"}) }); code != 0 {
+		t.Fatalf("login exit %d: %s", code, out)
+	}
+	if srv.keyBody["replaces"] != "tok-old" {
+		t.Errorf("POST /device/key replaces = %q, want tok-old", srv.keyBody["replaces"])
+	}
+	writePrivate(filepath.Join(home, "credentials.json"), credentials{API: "https://other.example", Token: "tok-elsewhere"})
+	srv.keyBody = nil // Decode merges into a map it already has
+	captureStdout(t, func() int { return Login([]string{"--key", "pk_abc"}) })
+	if _, sent := srv.keyBody["replaces"]; sent {
+		t.Errorf("sent another portal's token: %v", srv.keyBody)
+	}
+	if code, out := captureStdout(t, func() int { return Logout(nil) }); code != 0 || srv.count("POST /paws/v1/device/logout") != 1 {
+		t.Errorf("logout exit %d, %d logout calls: %s", code, srv.count("POST /paws/v1/device/logout"), out)
+	}
+}

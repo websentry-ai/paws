@@ -1,6 +1,8 @@
 package gate
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
 	"path"
 	"path/filepath"
 	"regexp"
@@ -46,6 +48,13 @@ func RedactCommand(s string) string {
 	return s[:cut]
 }
 
+// TargetHash identifies a call's full input (the command, path, or MCP input as JSON) in the local audit log without
+// keeping it: paws scan matches the calls in Claude Code's transcripts to these records by it. Sync never sends it.
+func TargetHash(target string) string {
+	sum := sha256.Sum256([]byte(target))
+	return hex.EncodeToString(sum[:8])
+}
+
 // LogAction appends an `action` record for a finished tool call. Best-effort, never blocks.
 func LogAction(ev Event) {
 	if DryRun {
@@ -57,7 +66,7 @@ func LogAction(ev Event) {
 		return
 	}
 	rec := map[string]any{"ts": time.Now().UTC().Format(time.RFC3339), "agent": ev.Agent, "event": "action",
-		"session": ev.Session, "tool": a.Tool, "action": a.Action}
+		"session": ev.Session, "tool": a.Tool, "action": a.Action, "target_hash": TargetHash(ev.Target)}
 	if a.Command != "" {
 		rec["command"] = a.Command
 	}

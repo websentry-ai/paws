@@ -74,6 +74,9 @@ func anyCommand(cmds []command, f func(command) bool) bool {
 	return false
 }
 
+// MatchToolSpec reports whether a matcher tool spec (a pipe list of names, * for any run of characters) covers tool.
+func MatchToolSpec(spec, tool string) bool { return matchTool(spec, tool) }
+
 // matchTool matches a matcher tool spec ("", "*", or a pipe list of names where * stands for any run of
 // characters, such as "mcp__slack__*" or "mcp__*__get_issue") against a tool.
 func matchTool(spec, tool string) bool {

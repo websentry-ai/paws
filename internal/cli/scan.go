@@ -44,27 +44,49 @@ type catalogTriggers struct {
 	} `json:"skills"`
 }
 
-// skipSynced leaves out the calls the hooks have uploaded already: made at or after the login, in a session whose
-// calls the hook logged.
+// skipSynced leaves out the calls the hooks have uploaded already: each call made at or after the login that the
+// hook logged, matched one to one against the audit log's action records of that session and tool. A session the
+// hook joined partway counts its earlier calls; one it never saw counts all of them.
 type skipSynced struct {
 	history.Source
-	after    time.Time
-	sessions map[string]bool
+	after  time.Time
+	logged map[string][]*loggedCall // by session, in log order
 }
+
+// loggedCall is an action record: what the hook wrote when a call finished.
+type loggedCall struct {
+	tool string
+	at   time.Time
+	used bool
+}
+
+// maxCallTime bounds how long after a call starts the hook may log it (a long build or test run).
+const maxCallTime = 30 * time.Minute
 
 func (s skipSynced) Calls(since, until time.Time, fn func(history.Call)) (int, error) {
 	return s.Source.Calls(since, until, func(c history.Call) {
-		if !c.At.Before(s.after) && s.sessions[c.Session] {
+		if !c.At.Before(s.after) && s.take(c) {
 			return
 		}
 		fn(c)
 	})
 }
 
-// hookedSessions are the sessions with an action record in the audit log at or after `after`: the ones the hook ran
-// in, whose calls sync uploads.
-func hookedSessions(after time.Time) map[string]bool {
-	out := map[string]bool{}
+// take marks and reports the first unused record of c's session and tool written while c could have been running.
+// The log has whole seconds, so a record may read up to a second before the call.
+func (s skipSynced) take(c history.Call) bool {
+	for _, r := range s.logged[c.Session] {
+		if !r.used && r.tool == c.Tool && !r.at.Before(c.At.Add(-time.Second)) && r.at.Before(c.At.Add(maxCallTime)) {
+			r.used = true
+			return true
+		}
+	}
+	return false
+}
+
+// loggedCalls are the audit log's action records at or after `after`, by session.
+func loggedCalls(after time.Time) map[string][]*loggedCall {
+	out := map[string][]*loggedCall{}
 	log := gate.AuditPath()
 	if log == "" {
 		return out
@@ -84,12 +106,13 @@ func hookedSessions(after time.Time) map[string]bool {
 			var r struct {
 				TS      string `json:"ts"`
 				Session string `json:"session"`
+				Tool    string `json:"tool"`
 			}
 			if json.Unmarshal(line, &r) != nil || r.Session == "" {
 				continue
 			}
 			if ts, err := time.Parse(time.RFC3339, r.TS); err == nil && !ts.Before(after) {
-				out[r.Session] = true
+				out[r.Session] = append(out[r.Session], &loggedCall{tool: r.Tool, at: ts})
 			}
 		}
 		f.Close()
@@ -218,12 +241,11 @@ func buildScan(creds *credentials, days int) ([]byte, history.Summary, error) {
 	since := until.AddDate(0, 0, -days)
 	transcripts := hook.Transcripts{Dir: filepath.Join(userClaudeDir(), "projects")}
 	var src history.Source = transcripts
-	// Once logged in, the hooks upload the calls they see. A call made after the login in a session whose calls the
-	// hook logged has reached the portal already, so it is left out; a session the hook never saw (paws not
-	// registered there yet) still counts, whenever the hook was set up.
+	// Once logged in, the hooks upload the calls they log. Each of those reached the portal already, so it is left
+	// out; a call the hook never logged (paws not registered there, or not yet) still counts.
 	if creds != nil {
 		if at, err := time.Parse(time.RFC3339, creds.CreatedAt); err == nil {
-			src = skipSynced{Source: src, after: at, sessions: hookedSessions(at)}
+			src = skipSynced{Source: src, after: at, logged: loggedCalls(at)}
 		}
 	}
 	fmt.Fprintf(os.Stderr, "Reading the Claude Code sessions in %s from %s to %s...\n", transcripts.Dir, since.Format(time.DateOnly), until.Format(time.DateOnly))

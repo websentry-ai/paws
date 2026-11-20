@@ -147,12 +147,14 @@ func TestScanLeavesOutWhatTheHooksUploaded(t *testing.T) {
 	if got := scanCalls(); got.Until != "2026-11-19" || got.ToolCalls != 7 {
 		t.Errorf("no hook records: until %s, %d calls; want every call up to now", got.Until, got.ToolCalls)
 	}
-	// The hook logged sess-1 after the login, so sync has its later calls: the scan keeps only the ones before.
+	// The hook joined sess-1 partway: it logged the Notion call (t4) and the git commit (t5), not the terraform
+	// edit (t3, before it) or the later calls (t8, t9). Only the two it logged were uploaded, so only they go.
 	appendLines(t, filepath.Join(home, "audit.log"),
-		`{"v":2,"ts":"2026-11-03T10:00:00Z","agent":"claude-code","event":"action","session":"sess-1","tool":"Bash","action":"ls"}`,
+		`{"v":2,"ts":"2026-11-03T09:00:01Z","agent":"claude-code","event":"action","session":"sess-1","tool":"mcp__claude_ai_Notion__notion-create-pages","action":"notion create-pages"}`,
+		`{"v":2,"ts":"2026-11-03T09:00:02Z","agent":"claude-code","event":"action","session":"sess-1","tool":"Bash","action":"git commit"}`,
 		`{"v":2,"ts":"2026-10-30T10:00:00Z","agent":"claude-code","event":"action","session":"sess-other","tool":"Bash","action":"ls"}`)
-	if got := scanCalls(); got.ToolCalls != 3 {
-		t.Errorf("hook logged sess-1 after login: %d calls, want the 3 made before the login", got.ToolCalls)
+	if got := scanCalls(); got.ToolCalls != 5 {
+		t.Errorf("hook logged 2 of sess-1's calls after login: %d calls, want 7-2=5", got.ToolCalls)
 	}
 }
 

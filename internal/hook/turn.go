@@ -126,7 +126,9 @@ func contentBlocks(content json.RawMessage) []turnBlock {
 	return blocks
 }
 
-// hookDenied: Claude Code reports a call a PreToolUse hook refused as "PreToolUse:<Tool> hook error: <reason>".
+// hookDenied: a call that never ran. Claude Code reports one a PreToolUse hook refused as "PreToolUse:<Tool> hook
+// error: <reason>", and one the user rejected at the permission prompt as "The user doesn't want to proceed with
+// this tool use".
 func hookDenied(content json.RawMessage) bool {
 	var s string
 	if json.Unmarshal(content, &s) != nil {
@@ -138,7 +140,9 @@ func hookDenied(content json.RawMessage) bool {
 			s += p.Text
 		}
 	}
-	return strings.Contains(s, "PreToolUse:") && strings.Contains(s, " hook error: ")
+	// Refused by a hook, or rejected by the user at the permission prompt: either way the call never ran.
+	return strings.Contains(s, "PreToolUse:") && strings.Contains(s, " hook error: ") ||
+		strings.Contains(s, "The user doesn't want to proceed with this tool use")
 }
 
 func toCall(b turnBlock, at time.Time, agent string) outcome.Call {

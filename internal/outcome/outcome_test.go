@@ -209,6 +209,8 @@ func TestSameKeepsQuotedSpacing(t *testing.T) {
 		{"cd x && rm -rf build", "rm -rf build", true},
 		{"rm -rf 'a  b'", "rm -rf 'a b'", false},
 		{`rm -rf "a  b"`, `rm  -rf "a  b"`, true},
+		{`rm -rf "x\" a  b"`, `rm -rf "x\" a b"`, false}, // an escaped quote doesn't end the string
+		{`rm -rf a\  b`, `rm -rf a\ b`, false},           // an escaped space is part of the name
 	}
 	for _, c := range cases {
 		if got := Same(c.a, c.b); got != c.same {

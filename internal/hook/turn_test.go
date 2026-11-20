@@ -96,3 +96,17 @@ func TestTurnCallsSkipsSidechainRecordsInTheMainLog(t *testing.T) {
 		t.Fatalf("calls %v, %v; want the main agent's call a only", calls, err)
 	}
 }
+
+// A call the user rejected at the permission prompt never ran, like a refused one.
+func TestTurnCallsMarksRejectedCallsAsNotRun(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "s.jsonl")
+	os.WriteFile(path, []byte(strings.Join([]string{
+		`{"type":"user","timestamp":"2026-11-20T10:00:00Z","message":{"content":"clean up"}}`,
+		`{"type":"assistant","timestamp":"2026-11-20T10:00:01Z","message":{"content":[{"type":"tool_use","id":"a","name":"Bash","input":{"command":"rm -rf build"}}]}}`,
+		`{"type":"user","timestamp":"2026-11-20T10:00:02Z","message":{"content":[{"type":"tool_result","tool_use_id":"a","is_error":true,"content":"The user doesn't want to proceed with this tool use. The tool use was rejected."}]}}`,
+	}, "\n")+"\n"), 0o600)
+	calls, _, err := TurnCalls(path, time.Time{})
+	if err != nil || len(calls) != 1 || !calls[0].Denied {
+		t.Fatalf("calls %+v, %v; want the rejected call marked as not run", calls, err)
+	}
+}

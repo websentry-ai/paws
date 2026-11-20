@@ -24,7 +24,7 @@ type Call struct {
 	// AgentStart is when the subagent was launched (the first record of its log); zero for the main conversation, or
 	// when unknown, in which case its first call stands in.
 	AgentStart time.Time
-	Denied     bool // a hook (paws or another) refused it
+	Denied     bool // it never ran: a hook (paws or another) refused it, or the user rejected it
 }
 
 // Env is the call as an expect check sees it.
@@ -181,13 +181,18 @@ func Same(a, b string) bool {
 	return norm(a) == norm(b)
 }
 
-// squeeze trims a command and turns each run of whitespace outside quotes into one space.
+// squeeze trims a command and turns each run of whitespace outside quotes into one space, reading quotes and
+// backslash escapes as a shell does.
 func squeeze(s string) string {
 	var b strings.Builder
 	var quote rune
-	space := false
+	space, escaped := false, false
 	for _, r := range strings.TrimSpace(s) {
 		switch {
+		case escaped: // the character after a backslash is literal: an escaped quote or space
+			escaped = false
+		case r == '\\' && quote != '\'':
+			escaped = true // single quotes have no escapes
 		case quote != 0:
 			if r == quote {
 				quote = 0

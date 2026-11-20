@@ -10,6 +10,7 @@ import (
 	"io/fs"
 	"os"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"time"
 
@@ -95,7 +96,7 @@ func readLog(path, session string, since, until time.Time, fn func(history.Call)
 	var recent []history.Call // made within MaxCallTime of until: counted only once their result is in the log
 	finished := map[string]bool{}
 	for {
-		line, err := readLine(r)
+		line, head, err := readLine(r)
 		if len(line) > 0 && bytes.Contains(line, toolUseNeedle) {
 			for _, c := range logCalls(line, session) {
 				switch {
@@ -113,6 +114,9 @@ func readLog(path, session string, since, until time.Time, fn func(history.Call)
 				finished[id] = true
 			}
 		}
+		for _, m := range resultIDPattern.FindAllSubmatch(head, -1) { // a result too long to decode
+			finished[string(m[1])] = true
+		}
 		if errors.Is(err, io.EOF) {
 			for _, c := range recent {
 				if finished[c.ID] {
@@ -128,22 +132,35 @@ func readLog(path, session string, since, until time.Time, fn func(history.Call)
 	}
 }
 
-// readLine returns the next line, or nil for one longer than maxLine (its rest is skipped).
-func readLine(r *bufio.Reader) ([]byte, error) {
+// readLine returns the next line, or nil for one longer than maxLine (its rest is skipped). For a long line, head is
+// its first headSize bytes, enough to find the ids of the results it carries.
+func readLine(r *bufio.Reader) (line, head []byte, err error) {
 	var buf []byte
 	long := false
 	for {
 		chunk, err := r.ReadSlice('\n')
 		if !long && len(buf)+len(chunk) > maxLine {
-			long, buf = true, nil
+			long = true
+			head = append(buf, chunk...)
+			if len(head) > headSize {
+				head = head[:headSize]
+			}
+			head, buf = append([]byte(nil), head...), nil
 		} else if !long {
 			buf = append(buf, chunk...)
 		}
 		if !errors.Is(err, bufio.ErrBufferFull) {
-			return buf, err
+			return buf, head, err
 		}
 	}
 }
+
+// headSize bounds the start of an over-long line kept for its result ids: Claude Code writes each result's
+// tool_use_id before its content.
+const headSize = 64 << 10
+
+// resultIDPattern finds a result's id in the start of a line too long to decode (a large tool output).
+var resultIDPattern = regexp.MustCompile(`"tool_use_id"\s*:\s*"([^"\\]+)"`)
 
 // logRecord is the part of an assistant record a call needs.
 type logRecord struct {

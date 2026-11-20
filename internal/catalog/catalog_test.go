@@ -101,6 +101,9 @@ func TestValidateProblems(t *testing.T) {
 		{"duplicate binding name", func(t *testing.T, root string) {
 			write(t, filepath.Join(root, "catalog/other/dup.md"), binding("humanizer-pr", "humanizer"))
 		}, `binding name "humanizer-pr" already used`},
+		{"bad expect check", func(t *testing.T, root string) {
+			write(t, filepath.Join(root, "catalog/writing/check.md"), strings.Replace(binding("check", "x"), "---\n", "---\nexpect:\n  - id: c\n    when: never\n    if: 'call.text matches ('\n", 1))
+		}, "expect c: bad if"},
 		{"missing tags", func(t *testing.T, root string) {
 			write(t, filepath.Join(root, "catalog/writing/untagged.md"), "---\nname: untagged\nevent: pre-tool\naction:\n  type: require-skill\n  skill: s\n---\n")
 		}, "at least one tag"},

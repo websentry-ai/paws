@@ -130,6 +130,11 @@ func LoadFS(fsys fs.FS, display string) (*Catalog, []Problem) {
 			bad(p, err)
 			return nil
 		}
+		// A laptop drops a check it can't use and keeps enforcing; the catalog must not publish one.
+		if r.ExpectErr != nil {
+			bad(p, r.ExpectErr)
+			return nil
+		}
 		c.Bindings[rel] = &Binding{Rule: r, Rel: rel}
 		return nil
 	})

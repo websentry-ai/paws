@@ -39,7 +39,14 @@ func gradeTurn(in *hook.Input, ev gate.Event, stoppedAt time.Time) {
 	if settled.After(stoppedAt) {
 		settled = time.Time{} // a later Stop already ran: this one may still have its own turn's denies
 	}
-	defer markGraded(ev.Session, stoppedAt)
+	// Settled through this Stop unless the turn couldn't be read in full: then its denies stay eligible, and the
+	// next Stop reads them again (once: by then they're the turn before's, and the next Stop settles them).
+	settle := true
+	defer func() {
+		if settle {
+			markGraded(ev.Session, stoppedAt)
+		}
+	}()
 	var fresh []auditRecord
 	for _, d := range all {
 		if denyIn(d, settled, stoppedAt) {
@@ -52,6 +59,7 @@ func gradeTurn(in *hook.Input, ev gate.Event, stoppedAt time.Time) {
 	// The turn that stopped: a prompt the user sends while this async hook runs belongs to the next turn.
 	calls, start, err := hook.TurnCalls(in.TranscriptPath, stoppedAt)
 	if err != nil || len(calls) == 0 {
+		settle = false
 		return
 	}
 	// From the turn's own start: a deny from the turn before isn't this turn's.
@@ -90,7 +98,8 @@ func gradeTurn(in *hook.Input, ev gate.Event, stoppedAt time.Time) {
 		}
 		i := blockedCall(calls, d, at, used[ruleKey])
 		if i < 0 {
-			continue // not in this log (another agent's turn, or the log isn't flushed): left ungraded
+			settle = false // not in this log (another agent's turn, or the log isn't flushed): left ungraded
+			continue
 		}
 		used[ruleKey][i] = true // claimed, graded now or before, so a later deny of this rule takes the next call
 		// Denies with the same key (the same rule twice in one second): the first graded[key] were graded before.

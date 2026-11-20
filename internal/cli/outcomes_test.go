@@ -480,3 +480,32 @@ func TestARuleWithWhenRetriesOnlyWhereItApplied(t *testing.T) {
 		t.Errorf("outcomes %v; want [same_retry]: the write to old.go isn't one new-file applied to", got)
 	}
 }
+
+// A transcript that can't be read leaves the turn's denies eligible: the next Stop that can read it grades them.
+func TestAnUnreadableTranscriptLeavesDeniesEligible(t *testing.T) {
+	home := portalEnv(t, http.NotFoundHandler())
+	cwd, _ := os.Getwd()
+	writeRule(t, filepath.Join(cwd, ".paws", "pre-tool", "rm-gate.md"), rmRule)
+	transcript := filepath.Join(t.TempDir(), "sess-u.jsonl")
+	runGate(t, map[string]any{"hook_event_name": "PreToolUse", "session_id": "sess-u", "transcript_path": transcript, "cwd": cwd,
+		"tool_name": "Bash", "tool_input": map[string]any{"command": "rm -rf build"}})
+	start := time.Now().Add(-20 * time.Second)
+	denyAt(t, home, start.Add(1100*time.Millisecond))
+	stop := map[string]any{"hook_event_name": "Stop", "session_id": "sess-u", "transcript_path": transcript, "cwd": cwd}
+	runGate(t, stop) // no transcript yet
+	transcriptLines(t, transcript, start, []struct {
+		cmd    string
+		result string
+		isErr  bool
+	}{{"rm -rf build", "PreToolUse:Bash hook error: paws: load coreutils", true}, {"rm -rf build", "", false}})
+	runGate(t, stop)
+	n := 0
+	for _, rec := range auditLines(t, home) {
+		if rec["event"] == "outcome" {
+			n++
+		}
+	}
+	if n != 1 {
+		t.Errorf("%d outcomes; want the deny graded once the transcript could be read", n)
+	}
+}

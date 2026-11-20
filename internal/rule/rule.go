@@ -121,7 +121,8 @@ func Parse(data []byte, path string) (*Rule, error) {
 		if !ok || yaml.Unmarshal(stripped, &r) != nil {
 			return nil, fmt.Errorf("bad frontmatter: %w", err)
 		}
-		r.Expect, r.ExpectErr = nil, fmt.Errorf("expect: %v", err)
+		// Keep each check that decodes on its own: one bad check only drops itself.
+		r.Expect, r.ExpectErr = decodableChecks(fm), fmt.Errorf("expect: %v", err)
 	}
 	r.SourcePath = path
 	r.Body = body(data)
@@ -275,6 +276,27 @@ func frontmatter(data []byte) ([]byte, error) {
 }
 
 // withoutExpect is the frontmatter with its top-level expect key removed; ok is false when it has none.
+// decodableChecks is the frontmatter's expect checks that decode one by one, in order.
+func decodableChecks(fm []byte) []Expect {
+	var doc yaml.Node
+	if yaml.Unmarshal(fm, &doc) != nil || len(doc.Content) == 0 || doc.Content[0].Kind != yaml.MappingNode {
+		return nil
+	}
+	m := doc.Content[0]
+	var out []Expect
+	for i := 0; i+1 < len(m.Content); i += 2 {
+		if m.Content[i].Value == "expect" && m.Content[i+1].Kind == yaml.SequenceNode {
+			for _, item := range m.Content[i+1].Content {
+				var e Expect
+				if item.Decode(&e) == nil {
+					out = append(out, e)
+				}
+			}
+		}
+	}
+	return out
+}
+
 func withoutExpect(fm []byte) ([]byte, bool) {
 	var doc yaml.Node
 	if yaml.Unmarshal(fm, &doc) != nil || len(doc.Content) == 0 || doc.Content[0].Kind != yaml.MappingNode {

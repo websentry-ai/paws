@@ -166,16 +166,43 @@ func sameCall(a, b Call) bool {
 // lead is setup in front of the real command: a `cd dir &&`, an env assignment, a `(` opening a subshell.
 var lead = regexp.MustCompile(`^\s*(?:\(\s*|(?:cd|pushd)\s+\S+\s*(?:&&|;)\s*|[A-Za-z_]\w*=\S*\s+)`)
 
-// Same reports whether two calls' targets are the same once setup in front and spacing are ignored.
+// Same reports whether two calls' targets are the same once setup in front and spacing between words are ignored;
+// spacing inside quotes counts (`'a  b'` and `'a b'` name different files).
 func Same(a, b string) bool {
 	norm := func(s string) string {
 		for {
 			loc := lead.FindStringIndex(s)
 			if loc == nil {
-				return strings.Join(strings.Fields(s), " ")
+				return squeeze(s)
 			}
 			s = s[loc[1]:]
 		}
 	}
 	return norm(a) == norm(b)
+}
+
+// squeeze trims a command and turns each run of whitespace outside quotes into one space.
+func squeeze(s string) string {
+	var b strings.Builder
+	var quote rune
+	space := false
+	for _, r := range strings.TrimSpace(s) {
+		switch {
+		case quote != 0:
+			if r == quote {
+				quote = 0
+			}
+		case r == '\'' || r == '"':
+			quote = r
+		case r == ' ' || r == '\t' || r == '\n' || r == '\r':
+			space = true
+			continue
+		}
+		if space {
+			b.WriteByte(' ')
+			space = false
+		}
+		b.WriteRune(r)
+	}
+	return b.String()
 }

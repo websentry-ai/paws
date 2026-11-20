@@ -35,7 +35,17 @@ func transcriptLines(t *testing.T, path string, start time.Time, calls []struct 
 	isErr  bool
 }) {
 	t.Helper()
-	ts := func(i int) string { return start.Add(time.Duration(i) * time.Second).UTC().Format(time.RFC3339Nano) }
+	transcriptEvery(t, path, start, time.Second, calls)
+}
+
+// transcriptEvery is transcriptLines with one record every step.
+func transcriptEvery(t *testing.T, path string, start time.Time, step time.Duration, calls []struct {
+	cmd    string
+	result string
+	isErr  bool
+}) {
+	t.Helper()
+	ts := func(i int) string { return start.Add(time.Duration(i) * step).UTC().Format(time.RFC3339Nano) }
 	lines := []string{`{"type":"user","timestamp":"` + ts(0) + `","message":{"role":"user","content":"clean up the build folder"}}`}
 	for i, c := range calls {
 		id := "toolu_" + string(rune('a'+i))
@@ -256,8 +266,9 @@ func TestADenyFromTheTurnBeforeInTheSameSecond(t *testing.T) {
 	if deny == nil || deny["at"] == nil {
 		t.Fatalf("no deny with an exact time: %v", deny)
 	}
-	// The turn before: denied at base+0.1s and graded at its Stop. This turn starts at base+0.2s and its own deny
-	// comes at base+0.9s: the same second, so only the exact times tell the two denies apart.
+	// The turn before: denied at base+0.1s and graded at its Stop. This turn starts at base+0.2s, Claude makes the
+	// call at base+0.3s and paws denies it at base+0.35s: the same second, so only the exact times tell the two
+	// denies apart.
 	base := time.Now().Add(-30 * time.Second).UTC().Truncate(time.Second)
 	at := func(d time.Duration) (string, string) {
 		t := base.Add(d)
@@ -269,13 +280,13 @@ func TestADenyFromTheTurnBeforeInTheSameSecond(t *testing.T) {
 		before[k], this[k] = v, v
 	}
 	before["ts"], before["at"] = at(100 * time.Millisecond)
-	this["ts"], this["at"] = at(900 * time.Millisecond)
+	this["ts"], this["at"] = at(350 * time.Millisecond)
 	graded := map[string]any{"ts": before["ts"], "event": "outcome", "session": "sess-b", "rule": "rm-gate",
 		"source": deny["source"], "outcome": "fixed", "blocked_at": before["ts"], "blocked_exact": before["at"]}
 	if err := os.WriteFile(log, []byte(line(before)+"\n"+line(graded)+"\n"+line(this)+"\n"), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	transcriptLines(t, transcript, base.Add(200*time.Millisecond), []struct {
+	transcriptEvery(t, transcript, base.Add(200*time.Millisecond), 100*time.Millisecond, []struct {
 		cmd    string
 		result string
 		isErr  bool
@@ -312,5 +323,51 @@ func TestADenyAfterTheStopIsTheNextTurns(t *testing.T) {
 		if rec["event"] == "outcome" {
 			t.Errorf("graded the next turn's deny against this turn: %v", rec)
 		}
+	}
+}
+
+// Another hook refused the same command earlier in the turn: paws's block is its own later call, so the listing
+// between the two refusals isn't "before the retry" for paws's block.
+func TestAnEarlierRefusalByAnotherHookIsNotTheBlock(t *testing.T) {
+	home := portalEnv(t, http.NotFoundHandler())
+	cwd, _ := os.Getwd()
+	writeRule(t, filepath.Join(cwd, ".paws", "pre-tool", "rm-gate.md"), rmRule)
+	transcript := filepath.Join(t.TempDir(), "sess-h.jsonl")
+	// Calls at -19s, -17s, -15s, -13s: refused by another hook, a listing, refused by paws, the retry.
+	transcriptLines(t, transcript, time.Now().Add(-20*time.Second), []struct {
+		cmd    string
+		result string
+		isErr  bool
+	}{
+		{"rm -rf build", "PreToolUse:Bash hook error: another hook refused it", true},
+		{"ls build", "a.o", false},
+		{"rm -rf build", "PreToolUse:Bash hook error: paws: load coreutils", true},
+		{"rm -rf build", "", false},
+	})
+	runGate(t, map[string]any{"hook_event_name": "PreToolUse", "session_id": "sess-h", "transcript_path": transcript, "cwd": cwd,
+		"tool_name": "Bash", "tool_input": map[string]any{"command": "rm -rf build"}})
+	// paws's deny happened just after its call (-15s), not at the end.
+	log := filepath.Join(home, "audit.log")
+	var lines []string
+	for _, rec := range auditLines(t, home) {
+		if rec["verdict"] == "deny" {
+			at := time.Now().Add(-15*time.Second + 50*time.Millisecond).UTC()
+			rec["ts"], rec["at"] = at.Format(time.RFC3339), at.Format(time.RFC3339Nano)
+		}
+		b, _ := json.Marshal(rec)
+		lines = append(lines, string(b))
+	}
+	if err := os.WriteFile(log, []byte(strings.Join(lines, "\n")+"\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	runGate(t, map[string]any{"hook_event_name": "Stop", "session_id": "sess-h", "transcript_path": transcript, "cwd": cwd})
+	var got []any
+	for _, rec := range auditLines(t, home) {
+		if rec["event"] == "outcome" {
+			got = append(got, rec["outcome"])
+		}
+	}
+	if len(got) != 1 || got[0] != "same_retry" {
+		t.Errorf("outcomes %v; want [same_retry]: no listing between paws's block and the retry", got)
 	}
 }

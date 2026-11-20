@@ -18,10 +18,6 @@ import (
 // outcomeTail bounds how much of the audit log's end the turn grader reads: a turn's records, many times over.
 const outcomeTail = 4 << 20
 
-// denySlack allows for the transcript's timestamp (when Claude wrote the call) and the deny record's (when the hook
-// ran) being a second or two apart.
-const denySlack = 3 * time.Second
-
 // gradeTurn runs in the Stop hook (async: Claude isn't waiting). For each call a require-skill rule denied in the turn
 // that just ended, it reads what followed in Claude Code's log and appends an outcome record: the outcome and each
 // expect check's result. Never the calls themselves. Best effort: anything it can't read, it leaves ungraded.
@@ -62,7 +58,11 @@ func gradeTurn(in *hook.Input, ev gate.Event, stoppedAt time.Time) {
 		if used[ruleKey] == nil {
 			used[ruleKey] = map[int]bool{}
 		}
-		at, _ := time.Parse(time.RFC3339, d.TS)
+		at, err := time.Parse(time.RFC3339Nano, d.At)
+		if err != nil {
+			at, _ = time.Parse(time.RFC3339, d.TS)
+			at = at.Add(time.Second - time.Nanosecond)
+		}
 		i := blockedCall(calls, d, at, used[ruleKey])
 		if i < 0 {
 			continue // not in this log (another agent's turn, or the log isn't flushed): left ungraded
@@ -128,17 +128,21 @@ func denyKey(source, name, agent, ts string) string {
 	return source + "|" + name + "|" + agent + "|" + ts
 }
 
-// blockedCall is the first refused call of d's tool and target, made by d's agent no later than the deny.
+// blockedCall finds the call a deny refused: of the refused calls this rule hasn't claimed with the deny's tool,
+// agent and target, the latest at or before the deny. A call is logged before its hooks run, on the same clock, so
+// an earlier refusal of the same command (another hook's) is never picked over the one paws refused. A record with
+// only ts counts to the end of its second.
 func blockedCall(calls []outcome.Call, d auditRecord, at time.Time, used map[int]bool) int {
+	best := -1
 	for i, c := range calls {
-		if used[i] || !c.Denied || c.Tool != d.Tool || c.Agent != d.AgentID || c.At.After(at.Add(denySlack)) {
+		if used[i] || !c.Denied || c.Tool != d.Tool || c.Agent != d.AgentID || c.At.After(at) {
 			continue
 		}
-		if gate.AuditTarget(c.Target) == d.Target {
-			return i
+		if gate.AuditTarget(c.Target) == d.Target && (best < 0 || !c.At.Before(calls[best].At)) {
+			best = i
 		}
 	}
-	return -1
+	return best
 }
 
 // turnDenies reads the end of the audit log: the session's require-skill denies since `since`, and how many blocks

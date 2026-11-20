@@ -198,3 +198,21 @@ expect:
 		t.Errorf("a never check that errors passed: %+v", res)
 	}
 }
+
+// Spacing between words doesn't make a different command; spacing inside quotes does.
+func TestSameKeepsQuotedSpacing(t *testing.T) {
+	cases := []struct {
+		a, b string
+		same bool
+	}{
+		{"rm  -rf   build", "rm -rf build", true},
+		{"cd x && rm -rf build", "rm -rf build", true},
+		{"rm -rf 'a  b'", "rm -rf 'a b'", false},
+		{`rm -rf "a  b"`, `rm  -rf "a  b"`, true},
+	}
+	for _, c := range cases {
+		if got := Same(c.a, c.b); got != c.same {
+			t.Errorf("Same(%q, %q) = %v, want %v", c.a, c.b, got, c.same)
+		}
+	}
+}

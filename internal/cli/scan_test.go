@@ -269,3 +269,24 @@ func TestScanMatchesLoggedCallsByInput(t *testing.T) {
 		t.Errorf("%d calls; want m1 only (m2 was logged)", got.ToolCalls)
 	}
 }
+
+// An audit log that exists but can't be read stops a logged-in scan: it couldn't tell which calls sync uploaded.
+func TestScanFailsOnAnUnreadableAuditLog(t *testing.T) {
+	home, srv := syncEnv(t)
+	srv.triggers = scanTriggersJSON
+	fixScanClock(t)
+	writeScanSessions(t)
+	log := filepath.Join(home, "audit.log")
+	appendLines(t, log, `{"v":2,"ts":"2026-11-03T09:00:00Z","event":"action","session":"sess-1","tool":"Bash","action":"ls"}`)
+	if err := os.Chmod(log, 0o000); err != nil {
+		t.Skip(err)
+	}
+	t.Cleanup(func() { os.Chmod(log, 0o644) })
+	if f, err := os.Open(log); err == nil {
+		f.Close()
+		t.Skip("running as a user who can read any file")
+	}
+	if code, out := captureStdout(t, func() int { return Scan(nil) }); code != 1 || len(srv.histories) != 0 {
+		t.Errorf("exit %d, %d uploads: %s; want a failed scan and nothing sent", code, len(srv.histories), out)
+	}
+}

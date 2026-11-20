@@ -6,6 +6,8 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
+	"io/fs"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -123,23 +125,31 @@ func fileTool(tool string) bool {
 }
 
 // loggedCalls are the audit log's action records, by session, and, when the log has rotated (audit.log.1 exists), the
-// time of the oldest record it kept: anything the hook logged before that may be gone.
-func loggedCalls() (map[string][]*loggedCall, time.Time) {
+// time of the oldest record it kept: anything the hook logged before that may be gone. A log file that doesn't exist
+// is empty; one that exists but can't be read is an error.
+func loggedCalls() (map[string][]*loggedCall, time.Time, error) {
 	out := map[string][]*loggedCall{}
 	var kept time.Time
 	log := gate.AuditPath()
 	if log == "" {
-		return out, kept
+		return out, kept, nil
 	}
 	for i, p := range []string{log + ".1", log} {
 		f, err := os.Open(p)
-		if err != nil {
+		if errors.Is(err, fs.ErrNotExist) {
 			continue
+		}
+		if err != nil {
+			return nil, kept, err
 		}
 		rotated := i == 0
 		rd := bufio.NewReader(f) // no line limit: a long record must not end the read early
 		for {
 			line, err := rd.ReadBytes('\n')
+			if err != nil && !errors.Is(err, io.EOF) {
+				f.Close()
+				return nil, kept, fmt.Errorf("%s: %w", p, err)
+			}
 			if len(line) == 0 && err != nil {
 				break
 			}
@@ -172,7 +182,7 @@ func loggedCalls() (map[string][]*loggedCall, time.Time) {
 		}
 		f.Close()
 	}
-	return out, kept
+	return out, kept, nil
 }
 
 // scanStateFile is in the portal folder beside state.json, not in it: the hooks' syncs rewrite state.json in the
@@ -300,7 +310,11 @@ func buildScan(creds *credentials, days int) ([]byte, history.Summary, error) {
 	// whole audit log). Each of those reached the portal already, so it is left out; a call the hook never logged (paws
 	// not registered there, or not yet) still counts.
 	if creds != nil {
-		logged, kept := loggedCalls()
+		logged, kept, err := loggedCalls()
+		if err != nil {
+			// Without the log the scan can't tell which calls sync uploaded; guessing would count them twice.
+			return nil, history.Summary{}, fmt.Errorf("reading the audit log: %w", err)
+		}
 		src = skipSynced{Source: src, logged: logged}
 		// The audit log keeps two files. Once it has rotated, records older than the kept ones may be gone though
 		// sync uploaded their calls, so the scan starts no earlier than the oldest record left.

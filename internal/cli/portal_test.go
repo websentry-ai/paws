@@ -496,8 +496,20 @@ func TestLoginRecordsWhereSyncStood(t *testing.T) {
 	if code, out := captureStdout(t, func() int { return Login([]string{"--key", "pk_abc"}) }); code != 0 {
 		t.Fatalf("login exit %d: %s", code, out)
 	}
+	// No login was noted on this machine before (it synced under an older paws), so its syncs may have gone to this
+	// account: it starts at the beginning.
 	c, err := loadCredentials()
-	if err != nil || c == nil || c.SyncFrom != "2026-11-04T00:00:00Z" || c.SyncFromN != 3 {
+	if err != nil || c == nil || c.SyncFrom != "" || c.SyncFromN != 0 {
+		t.Fatalf("credentials %+v, %v; want no sync_from on the first noted login", c, err)
+	}
+	// On a machine where another account was noted first, this account may have received only the records synced
+	// from its own first login on.
+	writePrivate(filepath.Join(home, "sync-from.json"), map[string]syncCursor{"https://other.example someone@else.dev": {}})
+	os.Remove(filepath.Join(home, "credentials.json"))
+	if code, out := captureStdout(t, func() int { return Login([]string{"--key", "pk_abc"}) }); code != 0 {
+		t.Fatalf("login exit %d: %s", code, out)
+	}
+	if c, err = loadCredentials(); err != nil || c == nil || c.SyncFrom != "2026-11-04T00:00:00Z" || c.SyncFromN != 3 {
 		t.Fatalf("credentials %+v, %v; want sync_from 2026-11-04T00:00:00Z, count 3", c, err)
 	}
 	// The same account logs in again after more syncs (login --scan, or after a logout): it keeps the first point,

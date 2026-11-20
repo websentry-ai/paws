@@ -478,7 +478,8 @@ func Logout(args []string) int {
 // may have received any record. It is kept per account in sync-from.json, which a logout leaves alone, so logging in
 // again with the same account keeps the first point: a later point would treat records this account already received
 // as not uploaded, and scan would count those calls twice. (Records another account synced in between are then taken
-// as this account's too, so a scan can only undercount them.)
+// as this account's too, so a scan can only undercount them.) The first account noted on a machine starts at the
+// beginning, for the same reason.
 func accountSyncFrom(api, account string) syncCursor {
 	state := syncStatePath()
 	cur, err := loadSyncCursor(state)
@@ -493,6 +494,12 @@ func accountSyncFrom(api, account string) syncCursor {
 	key := strings.TrimSuffix(api, "/") + " " + strings.ToLower(account)
 	if seen, ok := first[key]; ok {
 		return seen
+	}
+	if len(first) == 0 {
+		// No login has been noted here yet: either a new machine (the cursor is at the start anyway) or one
+		// upgraded from a paws without this file, whose earlier syncs may have gone to this same account. Take them
+		// as this account's, so its calls aren't counted twice.
+		cur = syncCursor{}
 	}
 	first[key] = cur
 	_ = writePrivate(path, first)

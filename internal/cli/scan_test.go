@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/websentry-ai/paws/internal/gate"
+	"github.com/websentry-ai/paws/internal/history"
 )
 
 const scanTriggersJSON = `{"version":"v1","skills":[
@@ -318,5 +319,38 @@ func TestScanCountsSyncsCursorWithinASecond(t *testing.T) {
 	json.Unmarshal([]byte(dry), &got)
 	if got.ToolCalls != 6 {
 		t.Errorf("%d calls; want 6: the Notion call (second record in its second) reached this login", got.ToolCalls)
+	}
+}
+
+// finishesDuringScan is a transcript source whose one call finishes while it is being read: the hook writes the
+// call's audit record just before the call is returned.
+type finishesDuringScan struct{ log string }
+
+func (finishesDuringScan) Name() string { return "test" }
+
+func (f finishesDuringScan) Calls(_, _ time.Time, fn func(history.Call)) (int, error) {
+	at := time.Date(2026, 11, 19, 11, 0, 0, 0, time.UTC)
+	rec := `{"v":2,"ts":"2026-11-19T11:00:05Z","event":"action","session":"s1","tool":"Bash","action":"ls","command":"ls","target_hash":"` + gate.TargetHash("ls") + `"}`
+	if err := os.WriteFile(f.log, []byte(rec+"\n"), 0o600); err != nil {
+		return 0, err
+	}
+	fn(history.Call{ID: "c1", Tool: "Bash", Target: "ls", At: at, Session: "s1"})
+	fn(history.Call{ID: "c2", Tool: history.SkillTool, Target: "coreutils", At: at, Session: "s2"})
+	return 2, nil
+}
+
+// The audit log is read after the transcripts, so a call that finished during the scan is matched to its record.
+// Sessions counts only the sessions with a call left in.
+func TestScanReadsTheAuditLogAfterTheTranscripts(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("PAWS_HOME", home)
+	src := skipSynced{Source: finishesDuringScan{log: filepath.Join(home, "audit.log")}}
+	var got []string
+	n, err := src.Calls(time.Time{}, time.Date(2026, 11, 20, 0, 0, 0, 0, time.UTC), func(c history.Call) { got = append(got, c.ID) })
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Join(got, ",") != "c2" || n != 1 {
+		t.Errorf("calls %v in %d sessions; want only the skill load c2, in 1 session", got, n)
 	}
 }

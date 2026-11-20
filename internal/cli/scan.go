@@ -52,7 +52,8 @@ type catalogTriggers struct {
 // it never saw keeps all of them.
 type skipSynced struct {
 	history.Source
-	logged map[string][]*loggedCall // by session, in log order
+	from   syncCursor               // sync's cursor when this account first logged in here
+	logged map[string][]*loggedCall // by session, in log order; read once the transcripts have been
 	before time.Time                // tool calls before this may have lost their records to rotation; zero if none
 }
 
@@ -72,11 +73,24 @@ const maxCallTime = hook.MaxCallTime
 // with all its copies.
 func (s skipSynced) Calls(since, until time.Time, fn func(history.Call)) (int, error) {
 	var calls []history.Call
-	sessions, err := s.Source.Calls(since, until, func(c history.Call) { calls = append(calls, c) })
-	if err != nil {
-		return sessions, err
+	if _, err := s.Source.Calls(since, until, func(c history.Call) { calls = append(calls, c) }); err != nil {
+		return 0, err
 	}
-	synced := map[string]bool{}
+	// The audit log is read after the transcripts: a call the transcripts show as finished had its hook record
+	// written before its result, so the record is already there, even for a call that finished during the scan.
+	logged, kept, err := loggedCalls(s.from)
+	if err != nil {
+		// Without the log the scan can't tell which calls sync uploaded; guessing would count them twice.
+		return 0, fmt.Errorf("reading the audit log: %w", err)
+	}
+	// The audit log keeps two files. Once it has rotated, records older than the kept ones may be gone though sync
+	// uploaded their calls, so tool calls from before the oldest kept record are left out. Skill loads still count:
+	// sync never sends them.
+	if from, _ := time.Parse(time.RFC3339, s.from.TS); !kept.IsZero() && kept.Before(from) {
+		kept = time.Time{} // older records went to an earlier login, so their loss can't cause a double count
+	}
+	s.logged, s.before = logged, kept
+	synced, counted := map[string]bool{}, map[string]bool{}
 	for _, c := range calls {
 		if c.ID != "" && !synced[c.ID] && c.Tool != history.SkillTool && s.take(c) { // one record per call, not per copy
 			synced[c.ID] = true
@@ -87,9 +101,10 @@ func (s skipSynced) Calls(since, until time.Time, fn func(history.Call)) (int, e
 		if c.Tool != history.SkillTool && (c.At.Before(s.before) || c.ID != "" && synced[c.ID] || c.ID == "" && s.take(c)) {
 			continue
 		}
+		counted[c.Session] = true
 		fn(c)
 	}
-	return sessions, nil
+	return len(counted), nil // sessions with a call left in
 }
 
 // take marks and reports the earliest unused record of c's session that is c: same tool, the same command (Bash,
@@ -322,20 +337,7 @@ func buildScan(creds *credentials, days int) ([]byte, history.Summary, error) {
 	if creds != nil {
 		// This login's syncs uploaded only the records after creds.SyncFrom (sync's cursor outlives a logout, so an
 		// earlier account may have received the older ones).
-		cursor := syncCursor{TS: creds.SyncFrom, N: creds.SyncFromN}
-		from, _ := time.Parse(time.RFC3339, creds.SyncFrom)
-		logged, kept, err := loggedCalls(cursor)
-		if err != nil {
-			// Without the log the scan can't tell which calls sync uploaded; guessing would count them twice.
-			return nil, history.Summary{}, fmt.Errorf("reading the audit log: %w", err)
-		}
-		// The audit log keeps two files. Once it has rotated, records older than the kept ones may be gone though
-		// sync uploaded their calls, so tool calls from before the oldest kept record are left out. Skill loads
-		// still count: sync never sends them.
-		if !kept.IsZero() && kept.Before(from) {
-			kept = time.Time{} // older records went to an earlier login, so their loss can't cause a double count
-		}
-		src = skipSynced{Source: src, logged: logged, before: kept}
+		src = skipSynced{Source: src, from: syncCursor{TS: creds.SyncFrom, N: creds.SyncFromN}}
 	}
 	fmt.Fprintf(os.Stderr, "Reading the Claude Code sessions in %s from %s to %s...\n", transcripts.Dir, since.Format(time.DateOnly), until.Format(time.DateOnly))
 	sum, err := history.Summarize(src, since, until, days, catalog)

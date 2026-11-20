@@ -55,9 +55,9 @@ type skipSynced struct {
 
 // loggedCall is an action record: what the hook wrote when a call finished.
 type loggedCall struct {
-	tool, command, file, action string
-	at                          time.Time
-	used                        bool
+	tool, command, file, action, hash string
+	at                                time.Time
+	used                              bool
 }
 
 // maxCallTime bounds how long after a call starts the hook may log it: a permission prompt left open, then a long
@@ -95,11 +95,16 @@ func (s skipSynced) Calls(since, until time.Time, fn func(history.Call)) (int, e
 // have been running. The log has whole seconds, so a record may read up to a second before the call.
 func (s skipSynced) take(c history.Call) bool {
 	want := gate.DescribeAction(gate.Event{Tool: c.Tool, Target: c.Target})
+	hash := gate.TargetHash(c.Target)
 	for _, r := range s.logged[c.Session] {
 		if r.used || r.tool != c.Tool || r.at.Before(c.At.Add(-time.Second)) || !r.at.Before(c.At.Add(maxCallTime)) {
 			continue
 		}
 		switch {
+		case r.hash != "" && r.hash != hash: // the record names another input
+			continue
+		case r.hash != "": // the same input: this call
+		// A record from before target_hash: compare the closest fields it has.
 		case c.Tool == "Bash" && r.command != want.Command:
 			continue
 		case fileTool(c.Tool) && (r.file == "" || c.Target != r.file && !strings.HasSuffix(c.Target, "/"+r.file)):
@@ -132,10 +137,12 @@ func loggedCalls() (map[string][]*loggedCall, time.Time) {
 			continue
 		}
 		rotated := i == 0
-		sc := bufio.NewScanner(f)
-		sc.Buffer(make([]byte, 0, 64<<10), 4<<20)
-		for sc.Scan() {
-			line := sc.Bytes()
+		rd := bufio.NewReader(f) // no line limit: a long record must not end the read early
+		for {
+			line, err := rd.ReadBytes('\n')
+			if len(line) == 0 && err != nil {
+				break
+			}
 			if rotated && kept.IsZero() {
 				var first struct {
 					TS string `json:"ts"`
@@ -154,12 +161,13 @@ func loggedCalls() (map[string][]*loggedCall, time.Time) {
 				Command string `json:"command"`
 				File    string `json:"file"`
 				Action  string `json:"action"`
+				Hash    string `json:"target_hash"`
 			}
 			if json.Unmarshal(line, &r) != nil || r.Session == "" {
 				continue
 			}
 			if ts, err := time.Parse(time.RFC3339, r.TS); err == nil {
-				out[r.Session] = append(out[r.Session], &loggedCall{tool: r.Tool, command: r.Command, file: r.File, action: r.Action, at: ts})
+				out[r.Session] = append(out[r.Session], &loggedCall{tool: r.Tool, command: r.Command, file: r.File, action: r.Action, hash: r.Hash, at: ts})
 			}
 		}
 		f.Close()

@@ -137,3 +137,16 @@ func TestRotationSkipsWhenAnotherProcessRotated(t *testing.T) {
 		t.Errorf("audit.log.1 was clobbered: %q", got)
 	}
 }
+
+// An action record keeps a hash of the call's full input, so paws scan can tell two calls apart without the input.
+func TestActionRecordHasTargetHash(t *testing.T) {
+	t.Setenv("PAWS_HOME", t.TempDir())
+	LogAction(Event{Agent: "claude-code", Tool: "mcp__notion__create_pages", Target: `{"title":"x"}`, Session: "s"})
+	data, err := os.ReadFile(AuditPath())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(data), `"target_hash":"`+TargetHash(`{"title":"x"}`)+`"`) || strings.Contains(string(data), `"title"`) {
+		t.Errorf("record %s: want the input's hash and not the input", data)
+	}
+}

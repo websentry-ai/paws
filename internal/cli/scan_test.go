@@ -8,6 +8,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/websentry-ai/paws/internal/gate"
 )
 
 const scanTriggersJSON = `{"version":"v1","skills":[
@@ -240,4 +242,30 @@ func TestScanRefusesAnOversizedCatalog(t *testing.T) {
 func readFileOrEmpty(path string) string {
 	data, _ := os.ReadFile(path)
 	return string(data)
+}
+
+// Two calls to the same MCP tool differ only in their input; the hook's target_hash tells them apart.
+func TestScanMatchesLoggedCallsByInput(t *testing.T) {
+	home, srv := syncEnv(t)
+	srv.triggers = scanTriggersJSON
+	fixScanClock(t)
+	userHome, _ := os.UserHomeDir()
+	call := func(id, ts, input string) string {
+		return `{"type":"assistant","timestamp":"` + ts + `","message":{"content":[{"type":"tool_use","id":"` + id + `","name":"mcp__claude_ai_Notion__notion-create-pages","input":` + input + `}]}}`
+	}
+	writeFile(t, filepath.Join(userHome, ".claude", "projects", "p", "s9.jsonl"),
+		call("m1", "2026-11-05T10:00:00Z", `{"title":"one"}`)+"\n"+call("m2", "2026-11-05T10:00:05Z", `{"title":"two"}`)+"\n")
+	api := strings.TrimSuffix(os.Getenv("PAWS_PORTAL_API"), "/")
+	writePrivate(filepath.Join(home, "credentials.json"), credentials{API: api, Token: "tok-abc", CreatedAt: "2026-11-01T00:00:00Z"})
+	// The hook joined after m1 ran: it logged only m2, written right after m1 could have finished.
+	appendLines(t, filepath.Join(home, "audit.log"), `{"v":2,"ts":"2026-11-05T10:00:06Z","event":"action","session":"s9","tool":"mcp__claude_ai_Notion__notion-create-pages","action":"notion create-pages","target_hash":"`+gate.TargetHash(`{"title":"two"}`)+`"}`)
+	code, dry := captureStdout(t, func() int { return Scan([]string{"--dry-run"}) })
+	if code != 0 {
+		t.Fatalf("exit %d", code)
+	}
+	var got historyUpload
+	json.Unmarshal([]byte(dry), &got)
+	if got.ToolCalls != 1 {
+		t.Errorf("%d calls; want m1 only (m2 was logged)", got.ToolCalls)
+	}
 }

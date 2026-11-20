@@ -30,7 +30,9 @@ apply `command` (Bash: the command with secrets redacted, cut to 500 bytes),
 or to the working directory outside a repo; left out when the file is outside
 that root, so it is never absolute) and `mcp` (`server` and `tool` as Claude
 Code names them, `class`: `send`, `create`, `update` or `delete`, left out for
-reads). Never file contents, MCP input, URLs, search patterns or tool output.
+reads), plus `target_hash` (the first 8 bytes of the SHA-256 of the call's full input, in hex; `paws scan` uses it
+to match transcript calls to these records, and sync never sends it). Never file contents, MCP input, URLs, search
+patterns or tool output.
 
 The `action` key:
 

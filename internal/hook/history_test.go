@@ -133,3 +133,31 @@ func TestTranscriptsFailsOnAnUnreadableLog(t *testing.T) {
 		t.Fatal("an unreadable log must fail the scan")
 	}
 }
+
+// A recent call with no result yet may still be running, so its hook record may come after the scan: it waits.
+// An old call with no result (a session that crashed) never gets one, so it counts.
+func TestTranscriptsSkipCallsStillRunning(t *testing.T) {
+	use := func(id, ts string) string {
+		return `{"type":"assistant","timestamp":"` + ts + `","message":{"content":[{"type":"tool_use","id":"` + id + `","name":"Bash","input":{"command":"ls"}}]}}`
+	}
+	result := func(id string) string {
+		return `{"type":"user","timestamp":"2026-11-19T11:59:00Z","message":{"content":[{"type":"tool_result","tool_use_id":"` + id + `","content":"x"}]}}`
+	}
+	log := strings.Join([]string{use("old", "2026-11-10T10:00:00Z"), use("done", "2026-11-19T11:00:00Z"), result("done"), use("running", "2026-11-19T11:30:00Z")}, "\n") + "\n"
+	projects := t.TempDir()
+	dir := filepath.Join(projects, "p")
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "s.jsonl"), []byte(log), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	var got []string
+	if _, err := (Transcripts{Dir: projects}).Calls(time.Time{}, time.Date(2026, 11, 19, 12, 0, 0, 0, time.UTC), func(c history.Call) { got = append(got, c.ID) }); err != nil {
+		t.Fatal(err)
+	}
+	sort.Strings(got)
+	if strings.Join(got, ",") != "done,old" {
+		t.Errorf("calls %v; want done and old, not running", got)
+	}
+}

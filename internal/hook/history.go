@@ -28,7 +28,15 @@ func (Transcripts) Name() string { return Agent }
 // a call.
 const maxLine = 16 << 20
 
-var toolUseNeedle = []byte(`"tool_use"`)
+var (
+	toolUseNeedle    = []byte(`"tool_use"`)
+	toolResultNeedle = []byte(`"tool_result"`)
+)
+
+// MaxCallTime bounds how long a tool call can run before it finishes (a permission prompt left open, then a long
+// build or test run). A call this recent with no result yet may still be running: its hook record, and the sync that
+// uploads it, may come after the scan.
+const MaxCallTime = 12 * time.Hour
 
 // Calls reads the tool_use blocks of the assistant records only. Prompts, replies, thinking and tool results sit
 // in other records or other blocks and are never decoded.
@@ -84,17 +92,34 @@ func readLog(path, session string, since, until time.Time, fn func(history.Call)
 	defer f.Close()
 	r := bufio.NewReaderSize(f, 1<<20)
 	found := false
+	var recent []history.Call // made within MaxCallTime of until: counted only once their result is in the log
+	finished := map[string]bool{}
 	for {
 		line, err := readLine(r)
 		if len(line) > 0 && bytes.Contains(line, toolUseNeedle) {
 			for _, c := range logCalls(line, session) {
-				if !c.At.Before(since) && c.At.Before(until) {
+				switch {
+				case c.At.Before(since) || !c.At.Before(until):
+				case c.ID != "" && c.At.After(until.Add(-MaxCallTime)):
+					recent = append(recent, c)
+				default:
 					fn(c)
 					found = true
 				}
 			}
 		}
+		if len(line) > 0 && bytes.Contains(line, toolResultNeedle) {
+			for _, id := range resultIDs(line) {
+				finished[id] = true
+			}
+		}
 		if errors.Is(err, io.EOF) {
+			for _, c := range recent {
+				if finished[c.ID] {
+					fn(c)
+					found = true
+				}
+			}
 			return found, nil
 		}
 		if err != nil {
@@ -138,6 +163,33 @@ type toolUse struct {
 
 // logCalls returns an assistant record's tool calls. Request blobs repeat calls already in the log and are not
 // read; user records hold prompts and results.
+// resultIDs are the ids of the calls a user record returns results for. Only the ids are kept, never the results.
+func resultIDs(line []byte) []string {
+	var rec struct {
+		Type    string `json:"type"`
+		Message struct {
+			Content json.RawMessage `json:"content"`
+		} `json:"message"`
+	}
+	if json.Unmarshal(line, &rec) != nil || rec.Type != "user" || len(rec.Message.Content) == 0 || rec.Message.Content[0] != '[' {
+		return nil
+	}
+	var blocks []struct {
+		Type string `json:"type"`
+		ID   string `json:"tool_use_id"`
+	}
+	if json.Unmarshal(rec.Message.Content, &blocks) != nil {
+		return nil
+	}
+	var out []string
+	for _, b := range blocks {
+		if b.Type == "tool_result" && b.ID != "" {
+			out = append(out, b.ID)
+		}
+	}
+	return out
+}
+
 func logCalls(line []byte, session string) []history.Call {
 	var rec logRecord
 	if json.Unmarshal(line, &rec) != nil || rec.Type != "assistant" || len(rec.Message.Content) == 0 || rec.Message.Content[0] != '[' {

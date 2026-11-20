@@ -14,7 +14,8 @@ Every record has `v` (2), `ts`, `agent`, `event` and `session`, plus
 **Rule records** (a rule matched): `rule`, `action`, `skill` (the skill
 the rule requires), `verdict` (`allow` or `deny`), `tool`, `target` (the
 matched command or path, with secrets [redacted](#redaction)), `source` (the rule file),
-and when relevant:
+`at` (`ts` to the nanosecond, so grading can tell a deny at a turn's start from one at the end of the turn before;
+sync never sends it), and when relevant:
 
 | Field | Meaning |
 |---|---|

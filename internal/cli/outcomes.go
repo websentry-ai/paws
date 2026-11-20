@@ -39,8 +39,8 @@ func gradeTurn(in *hook.Input, ev gate.Event, stoppedAt time.Time) {
 		return
 	}
 	defer unlock()
-	// From the turn's own start (to the second, as deny records are): a deny from the turn before isn't this turn's.
-	denies, graded := turnDenies(ev.Session, start.Truncate(time.Second))
+	// From the turn's own start: a deny from the turn before isn't this turn's.
+	denies, graded := turnDenies(ev.Session, start)
 	if len(denies) == 0 {
 		return
 	}
@@ -167,7 +167,7 @@ func readDenies(path, session string, since time.Time, denies *[]auditRecord, gr
 			case rec.Event == "outcome":
 				graded[denyKey(rec.Source, rec.Rule, rec.AgentID, rec.BlockedAt)]++
 			case rec.Verdict == "deny" && rec.Rule != "":
-				if ts, err := time.Parse(time.RFC3339, rec.TS); err == nil && !ts.Before(since) {
+				if denyAfter(rec, since) {
 					*denies = append(*denies, rec)
 				}
 			}
@@ -176,4 +176,14 @@ func readDenies(path, session string, since time.Time, denies *[]auditRecord, gr
 			break
 		}
 	}
+}
+
+// denyAfter reports whether a deny happened at or after since: by its exact time, or, for a record from an older
+// paws without one, by its second (so a deny in the turn's first second still counts).
+func denyAfter(rec auditRecord, since time.Time) bool {
+	if at, err := time.Parse(time.RFC3339Nano, rec.At); err == nil {
+		return !at.Before(since)
+	}
+	ts, err := time.Parse(time.RFC3339, rec.TS)
+	return err == nil && !ts.Before(since.Truncate(time.Second))
 }

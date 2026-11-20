@@ -30,8 +30,12 @@ func logAudit(ev Event, r *rule.Rule, oc outcome) {
 	if path == "" {
 		return
 	}
+	now := time.Now().UTC()
 	rec := map[string]any{
-		"ts":      time.Now().UTC().Format(time.RFC3339),
+		"ts": now.Format(time.RFC3339),
+		// The same moment to the nanosecond, kept locally (sync uploads ts): grading tells a deny at the very start
+		// of a turn from one at the end of the turn before it, in the same second.
+		"at":      now.Format(time.RFC3339Nano),
 		"agent":   ev.Agent,
 		"event":   r.Event,
 		"tool":    ev.Tool,

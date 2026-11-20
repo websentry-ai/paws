@@ -236,3 +236,58 @@ func TestStopGradesADenyFromTheRotatedLog(t *testing.T) {
 		t.Errorf("%d outcomes for a deny in audit.log.1, want 1", n)
 	}
 }
+
+// A deny at the end of the turn before, in the same second as this turn's start, isn't this turn's: it doesn't take
+// this turn's blocked call, so this turn's own deny is graded.
+func TestADenyFromTheTurnBeforeInTheSameSecond(t *testing.T) {
+	home := portalEnv(t, http.NotFoundHandler())
+	cwd, _ := os.Getwd()
+	writeRule(t, filepath.Join(cwd, ".paws", "pre-tool", "rm-gate.md"), rmRule)
+	transcript := filepath.Join(t.TempDir(), "sess-b.jsonl")
+	runGate(t, map[string]any{"hook_event_name": "PreToolUse", "session_id": "sess-b", "transcript_path": transcript, "cwd": cwd,
+		"tool_name": "Bash", "tool_input": map[string]any{"command": "rm -rf build"}})
+	log := filepath.Join(home, "audit.log")
+	var deny map[string]any
+	for _, rec := range auditLines(t, home) {
+		if rec["verdict"] == "deny" {
+			deny = rec
+		}
+	}
+	if deny == nil || deny["at"] == nil {
+		t.Fatalf("no deny with an exact time: %v", deny)
+	}
+	// The turn before: denied at base+0.1s and graded at its Stop. This turn starts at base+0.5s and its own deny
+	// comes at base+1.5s.
+	base := time.Now().Add(-30 * time.Second).UTC().Truncate(time.Second)
+	at := func(d time.Duration) (string, string) {
+		t := base.Add(d)
+		return t.Format(time.RFC3339), t.Format(time.RFC3339Nano)
+	}
+	line := func(rec map[string]any) string { b, _ := json.Marshal(rec); return string(b) }
+	before, this := map[string]any{}, map[string]any{}
+	for k, v := range deny {
+		before[k], this[k] = v, v
+	}
+	before["ts"], before["at"] = at(100 * time.Millisecond)
+	this["ts"], this["at"] = at(1500 * time.Millisecond)
+	graded := map[string]any{"ts": before["ts"], "event": "outcome", "session": "sess-b", "rule": "rm-gate",
+		"source": deny["source"], "outcome": "fixed", "blocked_at": before["ts"]}
+	if err := os.WriteFile(log, []byte(line(before)+"\n"+line(graded)+"\n"+line(this)+"\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	transcriptLines(t, transcript, base.Add(500*time.Millisecond), []struct {
+		cmd    string
+		result string
+		isErr  bool
+	}{{"rm -rf build", "PreToolUse:Bash hook error: paws: load coreutils", true}, {"ls build", "", false}, {"rm -rf build", "", false}})
+	runGate(t, map[string]any{"hook_event_name": "Stop", "session_id": "sess-b", "transcript_path": transcript, "cwd": cwd})
+	var got []string
+	for _, rec := range auditLines(t, home) {
+		if rec["event"] == "outcome" && rec["blocked_at"] == this["ts"] {
+			got = append(got, rec["outcome"].(string))
+		}
+	}
+	if len(got) != 1 || got[0] != "fixed" {
+		t.Errorf("this turn's deny graded %v, want [fixed]", got)
+	}
+}

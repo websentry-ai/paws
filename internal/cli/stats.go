@@ -37,6 +37,7 @@ type Stats struct {
 
 type auditRecord struct {
 	TS          string `json:"ts"`
+	At          string `json:"at"` // ts to the nanosecond, on fired-rule records (local only)
 	Event       string `json:"event"`
 	Rule        string `json:"rule"`
 	Verdict     string `json:"verdict"`

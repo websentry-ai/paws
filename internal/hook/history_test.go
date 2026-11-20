@@ -141,14 +141,17 @@ func TestTranscriptsSkipCallsStillRunning(t *testing.T) {
 		return `{"type":"assistant","timestamp":"` + ts + `","message":{"content":[{"type":"tool_use","id":"` + id + `","name":"Bash","input":{"command":"ls"}}]}}`
 	}
 	result := func(id string) string {
-		return `{"type":"user","timestamp":"2026-11-19T11:59:00Z","message":{"content":[{"type":"tool_result","tool_use_id":"` + id + `","content":"x"}]}}`
+		return `{"type":"user","timestamp":"2026-11-19T11:50:00Z","message":{"content":[{"type":"tool_result","tool_use_id":"` + id + `","content":"x"}]}}`
 	}
 	// A result too long to decode (a large tool output) still marks its call finished.
 	// Two results on one line, the second well past the first megabytes, and an id quoted inside an output.
-	huge := `{"type":"user","timestamp":"2026-11-19T11:59:00Z","message":{"content":[{"tool_use_id":"big","type":"tool_result","content":"` + strings.Repeat("x", maxLine) + `"},` +
+	huge := `{"type":"user","timestamp":"2026-11-19T11:50:00Z","message":{"content":[{"tool_use_id":"big","type":"tool_result","content":"` + strings.Repeat("x", maxLine) + `"},` +
 		`{"tool_use_id":"big2","type":"tool_result","content":"echo \"tool_use_id\": \"running\""}]}}`
+	// A result written 30 seconds before the scan: its async PostToolUse hook may still be writing the record.
+	fresh := `{"type":"user","timestamp":"2026-11-19T11:59:30Z","message":{"content":[{"type":"tool_result","tool_use_id":"fresh","content":"x"}]}}`
 	log := strings.Join([]string{use("old", "2026-11-10T10:00:00Z"), use("done", "2026-11-19T11:00:00Z"), result("done"),
-		use("big", "2026-11-19T11:10:00Z"), use("big2", "2026-11-19T11:10:01Z"), huge, use("running", "2026-11-19T11:30:00Z")}, "\n") + "\n"
+		use("big", "2026-11-19T11:10:00Z"), use("big2", "2026-11-19T11:10:01Z"), huge, use("running", "2026-11-19T11:30:00Z"),
+		use("fresh", "2026-11-19T11:59:00Z"), fresh}, "\n") + "\n"
 	projects := t.TempDir()
 	dir := filepath.Join(projects, "p")
 	if err := os.MkdirAll(dir, 0o755); err != nil {
@@ -163,6 +166,6 @@ func TestTranscriptsSkipCallsStillRunning(t *testing.T) {
 	}
 	sort.Strings(got)
 	if strings.Join(got, ",") != "big,big2,done,old" {
-		t.Errorf("calls %v; want big, big2, done and old, not running", got)
+		t.Errorf("calls %v; want big, big2, done and old, not running or fresh", got)
 	}
 }

@@ -39,6 +39,10 @@ var (
 // uploads it, may come after the scan.
 const MaxCallTime = 12 * time.Hour
 
+// hookSettle is how long after a call's result its PostToolUse hook may still be writing the audit record: the hook
+// runs async, and Claude Code stops it at its 15 second timeout. A result newer than this waits for a later scan.
+const hookSettle = 2 * time.Minute
+
 // Calls reads the tool_use blocks of the assistant records only. Prompts, replies, thinking and tool results sit
 // in other records or other blocks and are never decoded.
 func (t Transcripts) Calls(since, until time.Time, fn func(history.Call)) (int, error) {
@@ -93,10 +97,10 @@ func readLog(path, session string, since, until time.Time, fn func(history.Call)
 	defer f.Close()
 	r := bufio.NewReaderSize(f, 1<<20)
 	found := false
-	var recent []history.Call // made within MaxCallTime of until: counted only once their result is in the log
-	finished := map[string]bool{}
+	var recent []history.Call          // made within MaxCallTime of until: counted only once their result is in the log
+	finished := map[string]time.Time{} // call id: when its result was written
 	for {
-		line, longIDs, err := readLine(r)
+		line, long, err := readLine(r)
 		if len(line) > 0 && bytes.Contains(line, toolUseNeedle) {
 			for _, c := range logCalls(line, session) {
 				switch {
@@ -110,16 +114,18 @@ func readLog(path, session string, since, until time.Time, fn func(history.Call)
 			}
 		}
 		if len(line) > 0 && bytes.Contains(line, toolResultNeedle) {
-			for _, id := range resultIDs(line) {
-				finished[id] = true
+			ids, at := resultIDs(line)
+			for _, id := range ids {
+				finished[id] = at
 			}
 		}
-		for _, id := range longIDs { // results on a line too long to decode
-			finished[id] = true
+		for _, id := range long.ids { // results on a line too long to decode
+			finished[id] = long.at
 		}
 		if errors.Is(err, io.EOF) {
 			for _, c := range recent {
-				if finished[c.ID] {
+				// A result that old has its hook record written; a newer one, or one with no time, may not yet.
+				if at, ok := finished[c.ID]; ok && !at.IsZero() && at.Before(until.Add(-hookSettle)) {
 					fn(c)
 					found = true
 				}
@@ -134,19 +140,24 @@ func readLog(path, session string, since, until time.Time, fn func(history.Call)
 
 // readLine returns the next line, or nil for one longer than maxLine (its rest is skipped). For a long line, ids are
 // the tool_use_ids of the results it carries, found as it streams past, so no result is missed however many there are.
-func readLine(r *bufio.Reader) (line []byte, ids []string, err error) {
+func readLine(r *bufio.Reader) (line []byte, long longLine, err error) {
 	var buf, tail []byte
-	long := false
+	isLong := false
 	for {
 		chunk, err := r.ReadSlice('\n')
-		if !long && len(buf)+len(chunk) > maxLine {
-			long, tail, buf = true, buf, nil
+		if !isLong && len(buf)+len(chunk) > maxLine {
+			isLong, tail, buf = true, buf, nil
 		}
-		if long {
+		if isLong {
 			// tail carries the end of the previous chunk, so an id split across two chunks is still found.
 			window := append(tail, chunk...)
 			for _, m := range resultIDPattern.FindAllSubmatch(window, -1) {
-				ids = append(ids, string(m[1]))
+				long.ids = append(long.ids, string(m[1]))
+			}
+			for _, m := range timestampPattern.FindAllSubmatch(window, -1) {
+				if at, err := time.Parse(time.RFC3339Nano, string(m[1])); err == nil && at.After(long.at) {
+					long.at = at // the latest time on the line, so a result is never taken as older than it is
+				}
 			}
 			if len(window) > idOverlap {
 				window = window[len(window)-idOverlap:]
@@ -156,10 +167,19 @@ func readLine(r *bufio.Reader) (line []byte, ids []string, err error) {
 			buf = append(buf, chunk...)
 		}
 		if !errors.Is(err, bufio.ErrBufferFull) {
-			return buf, ids, err
+			return buf, long, err
 		}
 	}
 }
+
+// longLine is what readLine keeps of a line too long to decode: its result ids and its record time.
+type longLine struct {
+	ids []string
+	at  time.Time
+}
+
+// timestampPattern finds a record's time in a line too long to decode.
+var timestampPattern = regexp.MustCompile(`"timestamp"\s*:\s*"([^"\\]+)"`)
 
 // idOverlap is longer than any `"tool_use_id": "..."` pair, so one split across two chunks is seen whole.
 const idOverlap = 512
@@ -186,23 +206,25 @@ type toolUse struct {
 
 // logCalls returns an assistant record's tool calls. Request blobs repeat calls already in the log and are not
 // read; user records hold prompts and results.
-// resultIDs are the ids of the calls a user record returns results for. Only the ids are kept, never the results.
-func resultIDs(line []byte) []string {
+// resultIDs are the ids of the calls a user record returns results for, and when it was written. Only the ids are
+// kept, never the results.
+func resultIDs(line []byte) ([]string, time.Time) {
 	var rec struct {
-		Type    string `json:"type"`
-		Message struct {
+		Type      string    `json:"type"`
+		Timestamp time.Time `json:"timestamp"`
+		Message   struct {
 			Content json.RawMessage `json:"content"`
 		} `json:"message"`
 	}
 	if json.Unmarshal(line, &rec) != nil || rec.Type != "user" || len(rec.Message.Content) == 0 || rec.Message.Content[0] != '[' {
-		return nil
+		return nil, time.Time{}
 	}
 	var blocks []struct {
 		Type string `json:"type"`
 		ID   string `json:"tool_use_id"`
 	}
 	if json.Unmarshal(rec.Message.Content, &blocks) != nil {
-		return nil
+		return nil, time.Time{}
 	}
 	var out []string
 	for _, b := range blocks {
@@ -210,7 +232,7 @@ func resultIDs(line []byte) []string {
 			out = append(out, b.ID)
 		}
 	}
-	return out
+	return out, rec.Timestamp
 }
 
 func logCalls(line []byte, session string) []history.Call {

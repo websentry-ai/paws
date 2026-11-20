@@ -478,8 +478,10 @@ func managedRuleFile(skill, name string, a portalAction, digest, dir string) ([]
 	}
 	data, r, err := render()
 	if err != nil && len(m.Expect) > 0 {
-		// Checks this paws can't read (a newer catalog's, say) only measure: keep enforcing without them.
-		m.Expect = nil
+		// Checks this paws can't read (a newer catalog's, say) only measure: keep the ones it can, and keep enforcing.
+		if m.Expect = rule.UsableExpect(m.Expect); len(m.Expect) == 0 {
+			m.Expect = nil
+		}
 		data, r, err = render()
 	}
 	if err != nil {

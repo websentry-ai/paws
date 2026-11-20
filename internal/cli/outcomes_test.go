@@ -52,6 +52,8 @@ func TestStopGradesWhatFollowedTheBlock(t *testing.T) {
 	home, srv := syncEnv(t)
 	cwd, _ := os.Getwd()
 	writeRule(t, filepath.Join(cwd, ".paws", "pre-tool", "rm-gate.md"), rmRule)
+	// A second rule on the same call: one deny names both skills, and each rule's block is graded.
+	writeRule(t, filepath.Join(cwd, ".paws", "pre-tool", "rm-audit.md"), "name: rm-audit\nevent: pre-tool\nmatcher:\n  tool: Bash\n  command_regex: '\\brm\\s'\naction:\n  type: require-skill\n  skill: audit-trail\n")
 	transcript := filepath.Join(t.TempDir(), "sess-o.jsonl")
 	event := func(name string, input map[string]any) map[string]any {
 		e := map[string]any{"hook_event_name": name, "session_id": "sess-o", "transcript_path": transcript, "cwd": cwd}
@@ -84,10 +86,17 @@ func TestStopGradesWhatFollowedTheBlock(t *testing.T) {
 			outcomes = append(outcomes, rec)
 		}
 	}
-	if len(outcomes) != 1 {
-		t.Fatalf("%d outcome records, want 1: %v", len(outcomes), outcomes)
+	if len(outcomes) != 2 {
+		t.Fatalf("%d outcome records, want one per rule: %v", len(outcomes), outcomes)
 	}
-	o := outcomes[0]
+	byRule := map[string]map[string]any{}
+	for _, o := range outcomes {
+		byRule[o["rule"].(string)] = o
+	}
+	if byRule["rm-audit"]["outcome"] != "same_retry" {
+		t.Errorf("the second rule's block: %v; want same_retry (no checks, same call retried)", byRule["rm-audit"])
+	}
+	o := byRule["rm-gate"]
 	checks, _ := o["checks"].(map[string]any)
 	if o["outcome"] != "fixed" || o["skill"] != "coreutils" || checks["listed-first"] != true {
 		t.Errorf("outcome record %v; want fixed with listed-first passing", o)
@@ -112,7 +121,7 @@ func TestStopGradesWhatFollowedTheBlock(t *testing.T) {
 			}
 		}
 	}
-	if len(sent) != 1 || sent[0]["outcome"] != "fixed" || sent[0]["skill"] != "coreutils" {
+	if len(sent) != 2 {
 		t.Fatalf("uploaded outcomes %v", sent)
 	}
 }
@@ -124,6 +133,11 @@ func TestManagedRuleKeepsEnforcingWithoutABadCheck(t *testing.T) {
 	data, err := managedRuleFile("coreutils", "coreutils--rm", a, "", t.TempDir())
 	if err != nil || strings.Contains(string(data), "expect") || !strings.Contains(string(data), "command_regex") {
 		t.Fatalf("rule file %q, %v; want the rule without the bad check", data, err)
+	}
+	a.Expect = append(a.Expect, rule.Expect{ID: "good", When: "retry", If: "true"})
+	data, err = managedRuleFile("coreutils", "coreutils--rm", a, "", t.TempDir())
+	if err != nil || !strings.Contains(string(data), "id: good") || strings.Contains(string(data), "id: x") {
+		t.Fatalf("rule file %q, %v; want the good check kept and the bad one dropped", data, err)
 	}
 	a.Expect = []rule.Expect{{ID: "listed", When: "before", If: `call.text matches "^ls"`}}
 	data, err = managedRuleFile("coreutils", "coreutils--rm", a, "", t.TempDir())

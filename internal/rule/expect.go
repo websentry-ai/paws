@@ -82,6 +82,20 @@ func (e *Expect) Eval(call, blocked map[string]any) bool {
 	return err == nil && isBool && ok
 }
 
+// UsableExpect is the checks that compile, in order, first of each id: a portal action keeps its good checks when
+// one can't be read (a newer catalog's syntax, say).
+func UsableExpect(checks []Expect) []Expect {
+	var out []Expect
+	seen := map[string]bool{}
+	for _, c := range checks {
+		if c.compile() == nil && !seen[c.ID] {
+			seen[c.ID] = true
+			out = append(out, c)
+		}
+	}
+	return out
+}
+
 // validateExpect compiles every check and refuses duplicate ids.
 func validateExpect(checks []Expect) error {
 	seen := map[string]bool{}

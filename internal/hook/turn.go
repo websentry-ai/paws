@@ -67,9 +67,18 @@ func readTurnLog(path, agent string, since time.Time) ([]outcome.Call, time.Time
 	var calls []outcome.Call
 	byID := map[string]int{}
 	start := since
+	var launched time.Time // a subagent log's first record: when the subagent started
 	r := bufio.NewReaderSize(f, 1<<20)
 	for {
 		line, err := r.ReadBytes('\n')
+		if agent != "" && launched.IsZero() && len(line) > 0 {
+			var first struct {
+				Timestamp time.Time `json:"timestamp"`
+			}
+			if json.Unmarshal(line, &first) == nil {
+				launched = first.Timestamp
+			}
+		}
 		if len(line) > 0 && (bytes.Contains(line, []byte(`"type":"user"`)) || bytes.Contains(line, []byte(`"type":"assistant"`))) {
 			var rec turnLine
 			if json.Unmarshal(line, &rec) == nil {
@@ -96,6 +105,9 @@ func readTurnLog(path, agent string, since time.Time) ([]outcome.Call, time.Time
 		if err != nil {
 			break
 		}
+	}
+	for i := range calls {
+		calls[i].AgentStart = launched
 	}
 	return calls, start, nil
 }

@@ -21,7 +21,10 @@ type Call struct {
 	MCP    map[string]any // server, tool and class for an MCP call, else nil
 	At     time.Time
 	Agent  string // "" for the main conversation, else the subagent's id
-	Denied bool   // a hook (paws or another) refused it
+	// AgentStart is when the subagent was launched (the first record of its log); zero for the main conversation, or
+	// when unknown, in which case its first call stands in.
+	AgentStart time.Time
+	Denied     bool // a hook (paws or another) refused it
 }
 
 // Env is the call as an expect check sees it.
@@ -123,10 +126,14 @@ func Grade(r *rule.Rule, calls []Call, blocked int) Result {
 // first call came after it.
 func inScope(calls []Call, blocked int) []Call {
 	b := calls[blocked]
-	first := map[string]time.Time{}
+	first := map[string]time.Time{} // when each subagent started
 	for _, c := range calls {
-		if t, ok := first[c.Agent]; !ok || c.At.Before(t) {
-			first[c.Agent] = c.At
+		start := c.At
+		if !c.AgentStart.IsZero() {
+			start = c.AgentStart
+		}
+		if t, ok := first[c.Agent]; !ok || start.Before(t) {
+			first[c.Agent] = start
 		}
 	}
 	var out []Call

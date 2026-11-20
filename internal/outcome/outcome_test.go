@@ -104,6 +104,12 @@ func TestGradeScopesSubagents(t *testing.T) {
 	if got := Grade(r, calls, 1); got.Outcome != Fixed {
 		t.Errorf("a subagent started after the block: %s, want fixed", got.Outcome)
 	}
+	// Launched before the block (its log says so), but its first tool call came after: still a separate task.
+	quiet := []Call{bash(0, "rm -rf build", true, ""), bash(2, "ls build", false, "quiet"), bash(3, "rm -rf build", false, "quiet")}
+	quiet[1].AgentStart, quiet[2].AgentStart = t0.Add(-time.Minute), t0.Add(-time.Minute)
+	if got := Grade(r, quiet, 0); got.Outcome != Stopped {
+		t.Errorf("a subagent launched before the block counted: %s", got.Outcome)
+	}
 }
 
 func TestExpectChecksAreValidated(t *testing.T) {

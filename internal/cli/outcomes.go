@@ -39,21 +39,29 @@ func gradeTurn(in *hook.Input, ev gate.Event) {
 	for _, r := range gate.Collect(in.CWD).Rules {
 		rules[r.SourcePath+"|"+r.Name] = r
 	}
-	used := map[int]bool{}
+	// One call can be denied by several rules (one deny names every skill): each rule claims its own blocked calls.
+	used := map[string]map[int]bool{}
+	seen := map[string]int{}
 	for _, d := range denies {
-		if graded[d.Rule+"|"+d.TS] {
+		key := denyKey(d.Source, d.Rule, d.AgentID, d.TS)
+		// Denies with the same key (the same rule twice in one second): the first graded[key] were graded before.
+		if seen[key]++; seen[key] <= graded[key] {
 			continue
 		}
 		r := rules[d.Source+"|"+d.Rule]
 		if r == nil || r.Action.Type != rule.ActionRequireSkill {
 			continue
 		}
+		ruleKey := d.Source + "|" + d.Rule
+		if used[ruleKey] == nil {
+			used[ruleKey] = map[int]bool{}
+		}
 		at, _ := time.Parse(time.RFC3339, d.TS)
-		i := blockedCall(calls, d, at, used)
+		i := blockedCall(calls, d, at, used[ruleKey])
 		if i < 0 {
 			continue // not in this log (another agent's turn, or the log isn't flushed): left ungraded
 		}
-		used[i] = true
+		used[ruleKey][i] = true
 		res := outcome.Grade(r, calls, i)
 		rec := map[string]any{"session": ev.Session, "agent": ev.Agent, "rule": d.Rule, "skill": r.Action.Skill,
 			"source": d.Source, "tool": d.Tool, "outcome": res.Outcome, "checks": res.Checks, "blocked_at": d.TS}
@@ -62,6 +70,11 @@ func gradeTurn(in *hook.Input, ev gate.Event) {
 		}
 		gate.LogOutcome(rec)
 	}
+}
+
+// denyKey names a deny for "graded already": its rule file and name, agent and second.
+func denyKey(source, name, agent, ts string) string {
+	return source + "|" + name + "|" + agent + "|" + ts
 }
 
 // blockedCall is the first refused call of d's tool and target, made by d's agent no later than the deny.
@@ -77,11 +90,11 @@ func blockedCall(calls []outcome.Call, d auditRecord, at time.Time, used map[int
 	return -1
 }
 
-// turnDenies reads the end of the audit log: the session's require-skill denies since `since`, and the blocks
-// already graded (a Stop that fires twice for one turn grades it once).
-func turnDenies(session string, since time.Time) ([]auditRecord, map[string]bool) {
+// turnDenies reads the end of the audit log: the session's require-skill denies since `since`, and how many blocks
+// per deny key were graded already (a Stop that fires twice for one turn grades it once).
+func turnDenies(session string, since time.Time) ([]auditRecord, map[string]int) {
 	var denies []auditRecord
-	graded := map[string]bool{}
+	graded := map[string]int{}
 	path := gate.AuditPath()
 	f, err := os.Open(path)
 	if err != nil {
@@ -105,7 +118,7 @@ func turnDenies(session string, since time.Time) ([]auditRecord, map[string]bool
 		if len(line) > 0 && json.Unmarshal(line, &rec) == nil && rec.Session == session {
 			switch {
 			case rec.Event == "outcome":
-				graded[rec.Rule+"|"+rec.BlockedAt] = true
+				graded[denyKey(rec.Source, rec.Rule, rec.AgentID, rec.BlockedAt)]++
 			case rec.Verdict == "deny" && rec.Rule != "":
 				if ts, err := time.Parse(time.RFC3339, rec.TS); err == nil && !ts.Before(since) {
 					denies = append(denies, rec)

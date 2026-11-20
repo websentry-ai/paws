@@ -75,7 +75,8 @@ type credentials struct {
 	AccountEmail string `json:"account_email,omitempty"`
 	// SyncFrom is sync's cursor when this login began: this login's syncs upload only the audit records after it.
 	// Empty when nothing had been synced, or for a login from before scan.
-	SyncFrom string `json:"sync_from,omitempty"`
+	SyncFrom  string `json:"sync_from,omitempty"`
+	SyncFromN int    `json:"sync_from_count,omitempty"` // with SyncFrom, sync's cursor: records at that second up to here
 }
 
 func credentialsPath() string {
@@ -258,7 +259,7 @@ func Login(args []string) int {
 	// Sync's cursor outlives a logout, so this login's syncs upload only the records after it: scan needs to know
 	// where that was to tell what this account received.
 	if cur, err := loadSyncCursor(syncStatePath()); err == nil {
-		c.SyncFrom = cur.TS
+		c.SyncFrom, c.SyncFromN = cur.TS, cur.N
 	}
 	if err := writePrivate(path, c); err != nil {
 		fmt.Fprintf(os.Stderr, "paws: saving credentials: %v\n", err)

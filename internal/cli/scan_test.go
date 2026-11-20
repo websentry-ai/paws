@@ -297,3 +297,26 @@ func TestScanFailsOnAnUnreadableAuditLog(t *testing.T) {
 		t.Errorf("exit %d, %d uploads: %s; want a failed scan and nothing sent", code, len(srv.histories), out)
 	}
 }
+
+// Sync's cursor is a second and a count: records in that second past the count went to this login.
+func TestScanCountsSyncsCursorWithinASecond(t *testing.T) {
+	home, srv := syncEnv(t)
+	srv.triggers = scanTriggersJSON
+	fixScanClock(t)
+	writeScanSessions(t)
+	api := strings.TrimSuffix(os.Getenv("PAWS_PORTAL_API"), "/")
+	// Two records share 09:00:01; the cursor at login stood after the first.
+	appendLines(t, filepath.Join(home, "audit.log"),
+		`{"v":2,"ts":"2026-11-03T09:00:01Z","event":"action","session":"other","tool":"Bash","action":"ls","command":"ls"}`,
+		`{"v":2,"ts":"2026-11-03T09:00:01Z","event":"action","session":"sess-1","tool":"mcp__claude_ai_Notion__notion-create-pages","action":"notion create-pages"}`)
+	writePrivate(filepath.Join(home, "credentials.json"), credentials{API: api, Token: "tok-abc", SyncFrom: "2026-11-03T09:00:01Z", SyncFromN: 1})
+	code, dry := captureStdout(t, func() int { return Scan([]string{"--dry-run"}) })
+	if code != 0 {
+		t.Fatalf("exit %d", code)
+	}
+	var got historyUpload
+	json.Unmarshal([]byte(dry), &got)
+	if got.ToolCalls != 6 {
+		t.Errorf("%d calls; want 6: the Notion call (second record in its second) reached this login", got.ToolCalls)
+	}
+}

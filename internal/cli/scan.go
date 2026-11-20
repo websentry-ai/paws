@@ -125,16 +125,18 @@ func fileTool(tool string) bool {
 	return tool == "Read" || tool == "Write" || tool == "Edit" || tool == "NotebookEdit"
 }
 
-// loggedCalls are the audit log's action records after `from` (the ones this login's syncs uploaded), by session, and,
+// loggedCalls are the audit log's action records after the cursor `from` (the ones this login's syncs uploaded, counted
+// exactly as pendingSync counts them), by session, and,
 // when the log has rotated (audit.log.1 exists), the time of the oldest record it kept: anything the hook logged
 // before that may be gone. A log file that doesn't exist is empty; one that exists but can't be read is an error.
-func loggedCalls(from time.Time) (map[string][]*loggedCall, time.Time, error) {
+func loggedCalls(from syncCursor) (map[string][]*loggedCall, time.Time, error) {
 	out := map[string][]*loggedCall{}
 	var kept time.Time
 	log := gate.AuditPath()
 	if log == "" {
 		return out, kept, nil
 	}
+	atTS := map[string]int{} // uploadable records per second, as pendingSync counts them
 	for i, p := range []string{log + ".1", log} {
 		f, err := os.Open(p)
 		if errors.Is(err, fs.ErrNotExist) {
@@ -162,11 +164,11 @@ func loggedCalls(from time.Time) (map[string][]*loggedCall, time.Time, error) {
 					kept, _ = time.Parse(time.RFC3339, first.TS)
 				}
 			}
-			if !bytes.Contains(line, []byte(`"event":"action"`)) {
-				continue
-			}
 			var r struct {
 				TS      string `json:"ts"`
+				Event   string `json:"event"`
+				Rule    string `json:"rule"`
+				Verdict string `json:"verdict"`
 				Session string `json:"session"`
 				Tool    string `json:"tool"`
 				Command string `json:"command"`
@@ -174,10 +176,18 @@ func loggedCalls(from time.Time) (map[string][]*loggedCall, time.Time, error) {
 				Action  string `json:"action"`
 				Hash    string `json:"target_hash"`
 			}
-			if json.Unmarshal(line, &r) != nil || r.Session == "" {
+			if json.Unmarshal(line, &r) != nil || r.TS == "" {
 				continue
 			}
-			if ts, err := time.Parse(time.RFC3339, r.TS); err == nil && ts.After(from) {
+			isRule := r.Rule != "" && (r.Verdict == "allow" || r.Verdict == "deny")
+			if !isRule && (r.Event != "action" || r.Action == "") {
+				continue // pendingSync neither counts nor sends it
+			}
+			atTS[r.TS]++
+			if r.TS < from.TS || r.TS == from.TS && atTS[r.TS] <= from.N || isRule || r.Session == "" {
+				continue // sent before this login, or not a call
+			}
+			if ts, err := time.Parse(time.RFC3339, r.TS); err == nil {
 				out[r.Session] = append(out[r.Session], &loggedCall{tool: r.Tool, command: r.Command, file: r.File, action: r.Action, hash: r.Hash, at: ts})
 			}
 		}
@@ -313,8 +323,9 @@ func buildScan(creds *credentials, days int) ([]byte, history.Summary, error) {
 	if creds != nil {
 		// This login's syncs uploaded only the records after creds.SyncFrom (sync's cursor outlives a logout, so an
 		// earlier account may have received the older ones).
+		cursor := syncCursor{TS: creds.SyncFrom, N: creds.SyncFromN}
 		from, _ := time.Parse(time.RFC3339, creds.SyncFrom)
-		logged, kept, err := loggedCalls(from)
+		logged, kept, err := loggedCalls(cursor)
 		if err != nil {
 			// Without the log the scan can't tell which calls sync uploaded; guessing would count them twice.
 			return nil, history.Summary{}, fmt.Errorf("reading the audit log: %w", err)

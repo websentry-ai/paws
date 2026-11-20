@@ -497,7 +497,7 @@ func TestLoginRecordsWhereSyncStood(t *testing.T) {
 		t.Fatalf("login exit %d: %s", code, out)
 	}
 	c, err := loadCredentials()
-	if err != nil || c == nil || c.SyncFrom != "2026-11-04T00:00:00Z" {
-		t.Fatalf("credentials %+v, %v; want sync_from 2026-11-04T00:00:00Z", c, err)
+	if err != nil || c == nil || c.SyncFrom != "2026-11-04T00:00:00Z" || c.SyncFromN != 3 {
+		t.Fatalf("credentials %+v, %v; want sync_from 2026-11-04T00:00:00Z, count 3", c, err)
 	}
 }

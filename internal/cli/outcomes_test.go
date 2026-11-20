@@ -7,6 +7,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/websentry-ai/paws/internal/rule"
 )
 
 const rmRule = `name: rm-gate
@@ -112,5 +114,20 @@ func TestStopGradesWhatFollowedTheBlock(t *testing.T) {
 	}
 	if len(sent) != 1 || sent[0]["outcome"] != "fixed" || sent[0]["skill"] != "coreutils" {
 		t.Fatalf("uploaded outcomes %v", sent)
+	}
+}
+
+// A catalog check this paws can't compile only drops the check: the rule still enforces.
+func TestManagedRuleKeepsEnforcingWithoutABadCheck(t *testing.T) {
+	a := portalAction{Label: "rm", Event: "pre-tool", Tool: "Bash", CommandRegex: `\brm\b`,
+		Expect: []rule.Expect{{ID: "x", When: "retry", If: "call.text matches"}}}
+	data, err := managedRuleFile("coreutils", "coreutils--rm", a, "", t.TempDir())
+	if err != nil || strings.Contains(string(data), "expect") || !strings.Contains(string(data), "command_regex") {
+		t.Fatalf("rule file %q, %v; want the rule without the bad check", data, err)
+	}
+	a.Expect = []rule.Expect{{ID: "listed", When: "before", If: `call.text matches "^ls"`}}
+	data, err = managedRuleFile("coreutils", "coreutils--rm", a, "", t.TempDir())
+	if err != nil || !strings.Contains(string(data), "listed") {
+		t.Fatalf("rule file %q, %v; want the good check kept", data, err)
 	}
 }

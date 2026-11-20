@@ -466,13 +466,22 @@ func managedRuleFile(skill, name string, a portalAction, digest, dir string) ([]
 	if digest != "" {
 		m.Action.OnMiss, m.Action.Digest = rule.OnMissDigest, digest
 	}
-	fm, err := yaml.Marshal(m)
-	if err != nil {
-		return nil, err
+	render := func() ([]byte, *rule.Rule, error) {
+		fm, err := yaml.Marshal(m)
+		if err != nil {
+			return nil, nil, err
+		}
+		label := strings.Join(strings.Fields(a.Label), " ")
+		data := []byte("---\n# Written by paws from the portal config; the next sync replaces edits.\n" + string(fm) + "---\n" + label + "\n")
+		r, err := rule.Parse(data, filepath.Join(dir, name+".md"))
+		return data, r, err
 	}
-	label := strings.Join(strings.Fields(a.Label), " ")
-	data := []byte("---\n# Written by paws from the portal config; the next sync replaces edits.\n" + string(fm) + "---\n" + label + "\n")
-	r, err := rule.Parse(data, filepath.Join(dir, name+".md"))
+	data, r, err := render()
+	if err != nil && len(m.Expect) > 0 {
+		// Checks this paws can't read (a newer catalog's, say) only measure: keep enforcing without them.
+		m.Expect = nil
+		data, r, err = render()
+	}
 	if err != nil {
 		return nil, err
 	}

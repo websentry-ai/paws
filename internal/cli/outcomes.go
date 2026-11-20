@@ -23,11 +23,12 @@ const denySlack = 3 * time.Second
 // gradeTurn runs in the Stop hook (async: Claude isn't waiting). For each call a require-skill rule denied in the turn
 // that just ended, it reads what followed in Claude Code's log and appends an outcome record: the outcome and each
 // expect check's result. Never the calls themselves. Best effort: anything it can't read, it leaves ungraded.
-func gradeTurn(in *hook.Input, ev gate.Event) {
+func gradeTurn(in *hook.Input, ev gate.Event, stoppedAt time.Time) {
 	if in.TranscriptPath == "" || ev.Session == "" {
 		return
 	}
-	calls, start, err := hook.TurnCalls(in.TranscriptPath)
+	// The turn that stopped: a prompt the user sends while this async hook runs belongs to the next turn.
+	calls, start, err := hook.TurnCalls(in.TranscriptPath, stoppedAt)
 	if err != nil || len(calls) == 0 {
 		return
 	}
@@ -44,10 +45,6 @@ func gradeTurn(in *hook.Input, ev gate.Event) {
 	seen := map[string]int{}
 	for _, d := range denies {
 		key := denyKey(d.Source, d.Rule, d.AgentID, d.TS)
-		// Denies with the same key (the same rule twice in one second): the first graded[key] were graded before.
-		if seen[key]++; seen[key] <= graded[key] {
-			continue
-		}
 		r := rules[d.Source+"|"+d.Rule]
 		if r == nil || r.Action.Type != rule.ActionRequireSkill {
 			continue
@@ -61,7 +58,11 @@ func gradeTurn(in *hook.Input, ev gate.Event) {
 		if i < 0 {
 			continue // not in this log (another agent's turn, or the log isn't flushed): left ungraded
 		}
-		used[ruleKey][i] = true
+		used[ruleKey][i] = true // claimed, graded now or before, so a later deny of this rule takes the next call
+		// Denies with the same key (the same rule twice in one second): the first graded[key] were graded before.
+		if seen[key]++; seen[key] <= graded[key] {
+			continue
+		}
 		res := outcome.Grade(r, calls, i)
 		rec := map[string]any{"session": ev.Session, "agent": ev.Agent, "rule": d.Rule, "skill": r.Action.Skill,
 			"source": d.Source, "tool": d.Tool, "outcome": res.Outcome, "checks": res.Checks, "blocked_at": d.TS}

@@ -2,6 +2,7 @@ package cli
 
 import (
 	"encoding/json"
+	"net/http"
 	"os"
 	"path/filepath"
 	"strings"
@@ -143,5 +144,32 @@ func TestManagedRuleKeepsEnforcingWithoutABadCheck(t *testing.T) {
 	data, err = managedRuleFile("coreutils", "coreutils--rm", a, "", t.TempDir())
 	if err != nil || !strings.Contains(string(data), "listed") {
 		t.Fatalf("rule file %q, %v; want the good check kept", data, err)
+	}
+}
+
+// Outcome records are graded blocks, not rule firings: stats and pack fire counts leave them out.
+func TestOutcomeRecordsAreNotFires(t *testing.T) {
+	home := portalEnv(t, http.NotFoundHandler())
+	appendLines(t, filepath.Join(home, "audit.log"),
+		`{"v":2,"ts":"2026-11-20T10:00:00Z","event":"pre-tool","rule":"rm-gate","verdict":"deny","session":"s","skill":"coreutils"}`,
+		`{"v":2,"ts":"2026-11-20T10:00:09Z","event":"outcome","rule":"rm-gate","outcome":"fixed","session":"s","skill":"coreutils"}`)
+	st := summarize([]string{filepath.Join(home, "audit.log")}, nil)
+	for _, r := range st.Rules {
+		if r.Rule == "rm-gate" && r.Fires != 1 {
+			t.Errorf("rm-gate fires %d, want 1 (the outcome isn't a fire)", r.Fires)
+		}
+	}
+	if n := fireCounts(filepath.Join(home, "audit.log"))["rm-gate"]; n != 1 {
+		t.Errorf("fireCounts %d, want 1", n)
+	}
+}
+
+// A catalog binding's outcome goes up with its action id: the binding's name.
+func TestCatalogOutcomesCarryTheBindingID(t *testing.T) {
+	home := portalEnv(t, http.NotFoundHandler())
+	src := filepath.Join(home, "packs", "writing", "writing", "humanizer-pr.md")
+	up := toOutcomeUpload(auditRecord{Event: "outcome", Rule: "humanizer-pr", Source: src, Skill: "humanizer", Outcome: "fixed"})
+	if up.Action != "humanizer-pr" {
+		t.Errorf("action_id %q, want humanizer-pr", up.Action)
 	}
 }

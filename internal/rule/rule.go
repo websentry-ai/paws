@@ -90,6 +90,7 @@ type Rule struct {
 	Tags       []string   `yaml:"tags"`
 	Expect     []Expect   `yaml:"expect"` // checks of what should follow a block (see Expect); graded after the turn
 
+	ExpectErr  error          `yaml:"-"` // why an expect check was dropped (see Parse); the rule still loads
 	SourcePath string         `yaml:"-"`
 	Body       string         `yaml:"-"` // the markdown after the frontmatter: the rule's README
 	re         *regexp.Regexp `yaml:"-"`
@@ -151,8 +152,10 @@ func Parse(data []byte, path string) (*Rule, error) {
 	if len(r.Expect) > 0 && Kind(r.Event) != KindTool {
 		return nil, fmt.Errorf("expect needs a tool event: a session-start rule blocks no call")
 	}
+	// A check that doesn't compile only measures: drop it and keep enforcing; the loader reports ExpectErr.
 	if err := validateExpect(r.Expect); err != nil {
-		return nil, err
+		r.ExpectErr = err
+		r.Expect = UsableExpect(r.Expect)
 	}
 	if Kind(r.Event) == KindSession {
 		if r.Matcher.Tool != "" || r.Matcher.FileGlob != "" || r.Matcher.MCPAction != "" {

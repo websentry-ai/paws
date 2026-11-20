@@ -172,7 +172,9 @@ it starts after the deny count; one already running doesn't):
 | `after` | a call after the retry matches |
 | `never` | no call after the deny matches |
 
-A rule whose checks all pass is graded `fixed`.
+A rule whose checks all pass is graded `fixed`. A check that doesn't compile is dropped with a warning (`unbound-paws
+explain` shows it): the rule keeps enforcing, since checks only measure. A retried Write or Edit counts as the same
+call only when both the path and the new text match.
 
 ## Test a rule
 

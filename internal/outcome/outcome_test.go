@@ -122,8 +122,10 @@ func TestExpectChecksAreValidated(t *testing.T) {
 	}
 	for name, e := range bad {
 		src := "---\nname: r\nevent: pre-tool\nmatcher: {tool: Bash}\naction: {type: require-skill, skill: s}\n" + e + "\n---\n"
-		if _, err := rule.Parse([]byte(src), "r.md"); err == nil {
-			t.Errorf("%s: parsed", name)
+		// A bad check only measures: the rule still loads and enforces, without it, and says why.
+		r, err := rule.Parse([]byte(src), "r.md")
+		if err != nil || r.ExpectErr == nil {
+			t.Errorf("%s: err %v, ExpectErr %v; want the rule loaded with ExpectErr set", name, err, r.ExpectErr)
 		}
 	}
 	// Any input field is reachable, and a missing one is a plain fail, not an error.
@@ -133,5 +135,19 @@ func TestExpectChecksAreValidated(t *testing.T) {
 	without := Call{Tool: "mcp__notion__create_pages", Input: map[string]any{"title": "x"}}
 	if !r.Expect[0].Eval(with.Env(), without.Env()) || r.Expect[0].Eval(without.Env(), with.Env()) {
 		t.Error("input.parent check")
+	}
+}
+
+// A Write retried to the same file with different content is a changed call, not the same one.
+func TestGradeComparesTheEdit(t *testing.T) {
+	r := parse(t, "---\nname: w\nevent: pre-tool\nmatcher: {tool: Write}\naction: {type: require-skill, skill: s}\n---\n")
+	w := func(sec int, content string, denied bool) Call {
+		return Call{Tool: "Write", Target: "/x/a.go", Text: content, At: t0.Add(time.Duration(sec) * time.Second), Denied: denied}
+	}
+	if got := Grade(r, []Call{w(0, "v1", true), w(1, "v2", false)}, 0); got.Outcome != ChangedUnchecked {
+		t.Errorf("changed content: %s, want changed_unchecked", got.Outcome)
+	}
+	if got := Grade(r, []Call{w(0, "v1", true), w(1, "v1", false)}, 0); got.Outcome != SameRetry {
+		t.Errorf("same content: %s, want same_retry", got.Outcome)
 	}
 }

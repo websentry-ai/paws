@@ -367,15 +367,18 @@ func toActionUpload(r auditRecord) actionUpload {
 	return rec
 }
 
-// toOutcomeUpload passes an outcome record through. A managed rule is named <skill>--<action id>; the action id goes
-// up so the portal can show which trigger the outcome belongs to.
+// toOutcomeUpload passes an outcome record through, with the trigger's action id for catalog and portal rules, so the
+// portal can show which trigger the outcome belongs to.
 func toOutcomeUpload(r auditRecord) outcomeUpload {
 	rec := outcomeUpload{Kind: "outcome", TS: r.TS, BlockedAt: r.BlockedAt, Skill: r.Skill, Tool: r.Tool,
 		Outcome: r.Outcome, Checks: r.Checks}
-	if managed(r.Source) || fromCatalog(r.Source) {
+	switch {
+	case managed(r.Source): // a portal rule is named <skill>--<action id>
 		if _, id, ok := strings.Cut(r.Rule, "--"); ok {
 			rec.Action = id
 		}
+	case fromCatalog(r.Source): // a catalog binding's name is its action id (see index_portal.go)
+		rec.Action = r.Rule
 	}
 	return rec
 }

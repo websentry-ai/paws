@@ -94,6 +94,8 @@ func summarize(paths []string, inScope []string) Stats {
 			case "skill_invoked":
 				st.Skills[r.Skill]++
 				continue
+			case "outcome": // a graded block, not a rule firing
+				continue
 			}
 			if r.Rule == "" {
 				continue

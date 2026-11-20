@@ -18,8 +18,11 @@ import (
 // TurnCalls reads Claude Code's log of the turn that just ended: every tool call since the last prompt, in the main
 // conversation (transcriptPath) and in its subagents' logs, oldest first, with whether a hook refused it. It is the
 // Claude Code adapter for package outcome; another agent would read its own log into the same Calls.
-func TurnCalls(transcriptPath string) ([]outcome.Call, time.Time, error) {
-	main, start, err := readTurnLog(transcriptPath, "", time.Time{})
+//
+// until is when the turn stopped: records after it (a prompt the user sent meanwhile, the next turn's calls) are
+// left out. Zero reads to the end.
+func TurnCalls(transcriptPath string, until time.Time) ([]outcome.Call, time.Time, error) {
+	main, start, err := readTurnLog(transcriptPath, "", time.Time{}, until)
 	if err != nil {
 		return nil, start, err
 	}
@@ -27,7 +30,7 @@ func TurnCalls(transcriptPath string) ([]outcome.Call, time.Time, error) {
 	logs, _ := filepath.Glob(filepath.Join(strings.TrimSuffix(transcriptPath, ".jsonl"), "subagents", "*.jsonl"))
 	for _, p := range logs {
 		agent := strings.TrimPrefix(strings.TrimSuffix(filepath.Base(p), ".jsonl"), "agent-")
-		sub, _, err := readTurnLog(p, agent, start)
+		sub, _, err := readTurnLog(p, agent, start, until)
 		if err == nil {
 			calls = append(calls, sub...)
 		}
@@ -58,7 +61,7 @@ type turnBlock struct {
 
 // readTurnLog reads one log's calls. With a zero since, the turn starts at the log's last prompt (a user record
 // that isn't a tool result or a meta message); a subagent log takes the main conversation's start instead.
-func readTurnLog(path, agent string, since time.Time) ([]outcome.Call, time.Time, error) {
+func readTurnLog(path, agent string, since, until time.Time) ([]outcome.Call, time.Time, error) {
 	f, err := os.Open(path)
 	if err != nil {
 		return nil, since, err
@@ -81,7 +84,7 @@ func readTurnLog(path, agent string, since time.Time) ([]outcome.Call, time.Time
 		}
 		if len(line) > 0 && (bytes.Contains(line, []byte(`"type":"user"`)) || bytes.Contains(line, []byte(`"type":"assistant"`))) {
 			var rec turnLine
-			if json.Unmarshal(line, &rec) == nil {
+			if json.Unmarshal(line, &rec) == nil && (until.IsZero() || !rec.Timestamp.After(until)) {
 				blocks := contentBlocks(rec.Message.Content)
 				switch {
 				case rec.Type == "user" && since.IsZero() && !rec.IsMeta && isPrompt(rec.Message.Content, blocks):

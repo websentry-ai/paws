@@ -112,7 +112,7 @@ func Grade(r *rule.Rule, calls []Call, blocked int) Result {
 	switch {
 	case all:
 		res.Outcome = Fixed
-	case Same(scope[retry].Target, b.Target):
+	case Same(scope[retry].Target, b.Target) && Same(scope[retry].Text, b.Text): // a Write/Edit: the same edit too
 		res.Outcome = SameRetry
 	case len(r.Expect) > 0:
 		res.Outcome = ChangedFailed

@@ -316,9 +316,10 @@ func fireCounts(path string) map[string]int {
 	sc.Buffer(make([]byte, 0, 64*1024), 1<<20)
 	for sc.Scan() {
 		var rec struct {
-			Rule string `json:"rule"`
+			Rule  string `json:"rule"`
+			Event string `json:"event"`
 		}
-		if json.Unmarshal(sc.Bytes(), &rec) == nil && rec.Rule != "" {
+		if json.Unmarshal(sc.Bytes(), &rec) == nil && rec.Rule != "" && rec.Event != "outcome" {
 			counts[rec.Rule]++
 		}
 	}

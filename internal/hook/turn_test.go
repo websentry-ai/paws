@@ -5,6 +5,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 )
 
 func TestTurnCallsReadsTheLastTurn(t *testing.T) {
@@ -28,7 +29,7 @@ func TestTurnCallsReadsTheLastTurn(t *testing.T) {
 		`{"type":"assistant","timestamp":"2026-11-20T10:01:05Z","message":{"content":[{"type":"tool_use","id":"s1","name":"Bash","input":{"command":"go test ./..."}}]}}`,
 	}, "\n")+"\n"), 0o600)
 
-	calls, start, err := TurnCalls(path)
+	calls, start, err := TurnCalls(path, time.Time{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -47,5 +48,20 @@ func TestTurnCallsReadsTheLastTurn(t *testing.T) {
 	}
 	if calls[1].Text != "package a" || calls[2].Text != "p\nT" || calls[2].MCP["server"] != "notion" {
 		t.Errorf("text/mcp: %q %q %v", calls[1].Text, calls[2].Text, calls[2].MCP)
+	}
+}
+
+// A prompt sent while the async Stop hook runs belongs to the next turn: grading stops at the Stop.
+func TestTurnCallsStopsAtTheStop(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "s.jsonl")
+	os.WriteFile(path, []byte(strings.Join([]string{
+		`{"type":"user","timestamp":"2026-11-20T10:00:00Z","message":{"content":"first"}}`,
+		`{"type":"assistant","timestamp":"2026-11-20T10:00:01Z","message":{"content":[{"type":"tool_use","id":"a","name":"Bash","input":{"command":"ls"}}]}}`,
+		`{"type":"user","timestamp":"2026-11-20T10:00:09Z","message":{"content":"next prompt, typed fast"}}`,
+		`{"type":"assistant","timestamp":"2026-11-20T10:00:10Z","message":{"content":[{"type":"tool_use","id":"b","name":"Bash","input":{"command":"pwd"}}]}}`,
+	}, "\n")+"\n"), 0o600)
+	calls, _, err := TurnCalls(path, time.Date(2026, 11, 20, 10, 0, 5, 0, time.UTC))
+	if err != nil || len(calls) != 1 || calls[0].ID != "a" {
+		t.Fatalf("calls %v, %v; want the stopped turn's call a only", calls, err)
 	}
 }

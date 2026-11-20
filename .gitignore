@@ -11,3 +11,4 @@
 /npm/vendor/
 __pycache__/
 /.github/release/node_modules/
+.verify-artifacts/

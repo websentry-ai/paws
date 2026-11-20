@@ -45,12 +45,11 @@ type catalogTriggers struct {
 	} `json:"skills"`
 }
 
-// skipSynced leaves out the calls the hooks have uploaded already: each call made at or after the login that the
-// hook logged, matched one to one against the audit log's action records of the same session. A session the hook
-// joined partway keeps its earlier calls; one it never saw keeps all of them.
+// skipSynced leaves out the calls sync has uploaded already: each call the hook logged, matched one to one against
+// the audit log's action records of the same session. A session the hook joined partway keeps its earlier calls; one
+// it never saw keeps all of them.
 type skipSynced struct {
 	history.Source
-	after  time.Time
 	logged map[string][]*loggedCall // by session, in log order
 }
 
@@ -75,12 +74,12 @@ func (s skipSynced) Calls(since, until time.Time, fn func(history.Call)) (int, e
 	}
 	synced := map[string]bool{}
 	for _, c := range calls {
-		if !c.At.Before(s.after) && s.take(c) && c.ID != "" {
+		if s.take(c) && c.ID != "" {
 			synced[c.ID] = true
 		}
 	}
 	for _, c := range calls {
-		if c.ID != "" && synced[c.ID] || c.ID == "" && !c.At.Before(s.after) && s.take(c) {
+		if c.ID != "" && synced[c.ID] || c.ID == "" && s.take(c) {
 			continue
 		}
 		fn(c)
@@ -100,8 +99,8 @@ func (s skipSynced) take(c history.Call) bool {
 		switch {
 		case c.Tool == "Bash" && r.command != want.Command:
 			continue
-		case fileTool(c.Tool) && r.file != "" && c.Target != r.file && !strings.HasSuffix(c.Target, "/"+r.file):
-			continue
+		case fileTool(c.Tool) && (r.file == "" || c.Target != r.file && !strings.HasSuffix(c.Target, "/"+r.file)):
+			continue // a record without a path (a file outside the repo) can't be told apart from another; it matches none
 		case !fileTool(c.Tool) && c.Tool != "Bash" && r.action != want.Action:
 			continue
 		}
@@ -115,8 +114,8 @@ func fileTool(tool string) bool {
 	return tool == "Read" || tool == "Write" || tool == "Edit" || tool == "NotebookEdit"
 }
 
-// loggedCalls are the audit log's action records at or after `after`, by session.
-func loggedCalls(after time.Time) map[string][]*loggedCall {
+// loggedCalls are the audit log's action records, by session.
+func loggedCalls() map[string][]*loggedCall {
 	out := map[string][]*loggedCall{}
 	log := gate.AuditPath()
 	if log == "" {
@@ -145,7 +144,7 @@ func loggedCalls(after time.Time) map[string][]*loggedCall {
 			if json.Unmarshal(line, &r) != nil || r.Session == "" {
 				continue
 			}
-			if ts, err := time.Parse(time.RFC3339, r.TS); err == nil && !ts.Before(after) {
+			if ts, err := time.Parse(time.RFC3339, r.TS); err == nil {
 				out[r.Session] = append(out[r.Session], &loggedCall{tool: r.Tool, command: r.Command, file: r.File, action: r.Action, at: ts})
 			}
 		}
@@ -275,12 +274,11 @@ func buildScan(creds *credentials, days int) ([]byte, history.Summary, error) {
 	since := until.AddDate(0, 0, -days)
 	transcripts := hook.Transcripts{Dir: filepath.Join(userClaudeDir(), "projects")}
 	var src history.Source = transcripts
-	// Once logged in, the hooks upload the calls they log. Each of those reached the portal already, so it is left
-	// out; a call the hook never logged (paws not registered there, or not yet) still counts.
+	// Once logged in, sync uploads every call the hook logged, from before the login too (the first sync sends the
+	// whole audit log). Each of those reached the portal already, so it is left out; a call the hook never logged (paws
+	// not registered there, or not yet) still counts.
 	if creds != nil {
-		if at, err := time.Parse(time.RFC3339, creds.CreatedAt); err == nil {
-			src = skipSynced{Source: src, after: at, logged: loggedCalls(at)}
-		}
+		src = skipSynced{Source: src, logged: loggedCalls()}
 	}
 	fmt.Fprintf(os.Stderr, "Reading the Claude Code sessions in %s from %s to %s...\n", transcripts.Dir, since.Format(time.DateOnly), until.Format(time.DateOnly))
 	sum, err := history.Summarize(src, since, until, days, catalog)

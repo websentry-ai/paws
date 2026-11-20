@@ -147,24 +147,29 @@ func TestScanLeavesOutWhatTheHooksUploaded(t *testing.T) {
 	if got := scanCalls(); got.Until != "2026-11-19" || got.ToolCalls != 7 {
 		t.Errorf("no hook records: until %s, %d calls; want every call up to now", got.Until, got.ToolCalls)
 	}
-	// The hook joined sess-1 partway: it logged the Notion call (t4) and the git commit (t5), not the terraform
-	// edit (t3, before it) or the later calls (t8, t9). Only the two it logged were uploaded, so only they go.
+	// The hook logged the Notion call (t4) and the git commit (t5) after the login, and terraform apply (t2) before
+	// it; not the terraform edit (t3) or the later calls (t8, t9). Only the three it logged were uploaded, so only
+	// they go.
 	appendLines(t, filepath.Join(home, "audit.log"),
 		`{"v":2,"ts":"2026-11-03T09:00:01Z","agent":"claude-code","event":"action","session":"sess-1","tool":"mcp__claude_ai_Notion__notion-create-pages","action":"notion create-pages"}`,
 		`{"v":2,"ts":"2026-11-03T09:00:02Z","agent":"claude-code","event":"action","session":"sess-1","tool":"Bash","action":"git commit","command":"git commit -m 'acme: rotate ***'"}`,
 		// A Bash record whose command is another call's: it must not take t8.
 		`{"v":2,"ts":"2026-11-04T09:00:01Z","agent":"claude-code","event":"action","session":"sess-1","tool":"Bash","action":"ls","command":"ls"}`,
-		`{"v":2,"ts":"2026-10-30T10:00:00Z","agent":"claude-code","event":"action","session":"sess-other","tool":"Bash","action":"ls"}`)
-	if got := scanCalls(); got.ToolCalls != 5 {
-		t.Errorf("hook logged 2 of sess-1's calls after login: %d calls, want 7-2=5", got.ToolCalls)
+		`{"v":2,"ts":"2026-10-30T10:00:00Z","agent":"claude-code","event":"action","session":"sess-other","tool":"Bash","action":"ls"}`,
+		// The hook logged t2 before the login; the first sync uploaded it with the rest of the log.
+		`{"v":2,"ts":"2026-11-02T09:00:01Z","agent":"claude-code","event":"action","session":"sess-1","tool":"Bash","action":"terraform apply","command":"terraform apply -var db_password=***"}`,
+		// An Edit outside the repo, logged without a path: it can't be told apart, so it takes no call.
+		`{"v":2,"ts":"2026-11-02T09:00:02Z","agent":"claude-code","event":"action","session":"sess-1","tool":"Edit","action":"edit"}`)
+	if got := scanCalls(); got.ToolCalls != 4 {
+		t.Errorf("hook logged 3 of sess-1's calls (one before the login): %d calls, want 7-3=4", got.ToolCalls)
 	}
 	// A fork copies the logged git commit (t5) into sess-3, a session the hook never saw: the copy has the same id,
 	// so it stays out with the original.
 	userHome, _ := os.UserHomeDir()
 	writeFile(t, filepath.Join(userHome, ".claude", "projects", "-Users-alice-acme", "sess-3.jsonl"),
 		`{"type":"assistant","timestamp":"2026-11-03T09:00:01Z","message":{"content":[{"type":"tool_use","id":"t5","name":"Bash","input":{"command":"git commit -m 'acme: rotate ghp_SECRETTOKEN123456'"}}]}}`+"\n")
-	if got := scanCalls(); got.ToolCalls != 5 {
-		t.Errorf("a fork's copy of a logged call came back: %d calls, want 5", got.ToolCalls)
+	if got := scanCalls(); got.ToolCalls != 4 {
+		t.Errorf("a fork's copy of a logged call came back: %d calls, want 4", got.ToolCalls)
 	}
 }
 

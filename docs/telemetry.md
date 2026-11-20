@@ -14,7 +14,8 @@ Every record has `v` (2), `ts`, `agent`, `event` and `session`, plus
 **Rule records** (a rule matched): `rule`, `action`, `skill` (the skill
 the rule requires), `verdict` (`allow` or `deny`), `tool`, `target` (the
 matched command or path, with secrets [redacted](#redaction)), `source` (the rule file),
-and when relevant:
+`at` (`ts` to the nanosecond, so grading can tell a deny at a turn's start from one at the end of the turn before;
+sync never sends it), and when relevant:
 
 | Field | Meaning |
 |---|---|
@@ -25,7 +26,7 @@ and when relevant:
 
 **Action records** (`event: action`, one per PostToolUse, beside its
 `tool_result`): `tool`, `action` (a normalized key, below), and when they
-apply `command` (Bash: the command with secrets redacted, cut to 500 bytes),
+apply `command` (Bash: the command with secrets redacted, cut to 4,096 bytes),
 `file` (Read, Write, Edit, NotebookEdit: the path relative to the repo root,
 or to the working directory outside a repo; left out when the file is outside
 that root, so it is never absolute) and `mcp` (`server` and `tool` as Claude
@@ -44,6 +45,23 @@ The `action` key:
 | Write, Edit, NotebookEdit | the same with `edit` | `edit migrations/**` |
 | `mcp__<server>__<tool>` | `<server> <tool>` in lower case, `claude_ai_` and `plugin_<name>_` dropped from the server, the server's name dropped from the tool, `_` as `-` | `gmail create-draft`, `notion create-pages`, `slack send-message` |
 | anything else | the tool name in lower case | `grep`, `webfetch` |
+
+**Outcome records** (`event: outcome`, written by the Stop hook, at the end of the turn): one per call a
+require-skill rule denied in that turn, saying what Claude did next. paws reads the turn's calls from Claude Code's
+own log (the main conversation, and subagents started after the deny) and keeps only the result: `rule`, `skill`,
+`source`, `tool`, `blocked_at` (the deny's `ts`), `blocked_exact` (the deny's `at`, local only), `outcome` and `checks` (each [`expect`](rules.md#expect) check's
+id and whether it passed). Never the calls' text.
+
+| `outcome` | What Claude did after the deny, in the same turn |
+|---|---|
+| `fixed` | retried (the next call the rule matched went through), and every `expect` check passed |
+| `same_retry` | retried the same call (setup like `cd dir &&` and spacing aside), and a check failed or there are none |
+| `changed_failed` | retried a different call, and a check failed |
+| `changed_unchecked` | retried a different call; the rule has no checks |
+| `other_route` | never retried; other calls ran |
+| `stopped` | never retried, and nothing else ran |
+
+A deny with no outcome record (you interrupted, or the turn never ended) counts as unknown.
 
 **Telemetry records** carry no command or file text:
 
@@ -147,7 +165,7 @@ most 1,000 records and 1 MB. `unbound-paws sync --dry-run` prints the request bo
 | `skill` | the skill the rule requires |
 | `action_label` | rules from the portal only: the action's label |
 | `matcher` | catalog rules (under `~/.paws/packs` or `.paws/packs`) and portal rules: the matcher, e.g. `tool=Bash command_regex=...`. Left out for your own rules |
-| `command` | Bash only: the matched command, secrets redacted, cut to 500 bytes. A path or MCP input is never sent here |
+| `command` | Bash only: the matched command, secrets redacted, cut to 4,096 bytes. A path or MCP input is never sent here |
 | `tool` | the tool name |
 | `verdict` | `allow` or `deny` |
 | `already_loaded` | `true` when allowed via `skill-load` in a session where this rule had not denied first |
@@ -155,6 +173,9 @@ most 1,000 records and 1 MB. `unbound-paws sync --dry-run` prints the request bo
 
 **Action record:** `kind: action`, `ts`, `tool`, `action`, and `command`,
 `file`, `mcp` as in the audit log (above).
+
+**Outcome record:** `kind: outcome`, `ts`, `blocked_at`, `skill`, `action_id` (catalog and portal rules: the
+trigger's id), `tool`, `outcome` and `checks`, as in the audit log (above). No call text.
 
 **Inventory:** the directory names in `~/.claude/skills` and the project's
 `.claude/skills`, and every paws rule in scope with its skill and a display

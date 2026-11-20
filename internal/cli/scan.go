@@ -182,6 +182,8 @@ func loggedCalls(from syncCursor) (map[string][]*loggedCall, time.Time, error) {
 				TS      string `json:"ts"`
 				Event   string `json:"event"`
 				Rule    string `json:"rule"`
+				Outcome string `json:"outcome"`
+				Skill   string `json:"skill"`
 				Verdict string `json:"verdict"`
 				Session string `json:"session"`
 				Tool    string `json:"tool"`
@@ -194,11 +196,12 @@ func loggedCalls(from syncCursor) (map[string][]*loggedCall, time.Time, error) {
 				continue
 			}
 			isRule := r.Rule != "" && (r.Verdict == "allow" || r.Verdict == "deny")
-			if !isRule && (r.Event != "action" || r.Action == "") {
+			isOutcome := r.Event == "outcome" && r.Outcome != "" && r.Skill != ""
+			if !isRule && !isOutcome && (r.Event != "action" || r.Action == "") {
 				continue // pendingSync neither counts nor sends it
 			}
 			atTS[r.TS]++
-			if r.TS < from.TS || r.TS == from.TS && atTS[r.TS] <= from.N || isRule || r.Session == "" {
+			if r.TS < from.TS || r.TS == from.TS && atTS[r.TS] <= from.N || isRule || isOutcome || r.Session == "" {
 				continue // sent before this login, or not a call
 			}
 			if ts, err := time.Parse(time.RFC3339, r.TS); err == nil {

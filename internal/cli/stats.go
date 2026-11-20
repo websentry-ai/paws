@@ -37,6 +37,7 @@ type Stats struct {
 
 type auditRecord struct {
 	TS          string `json:"ts"`
+	At          string `json:"at"` // ts to the nanosecond, on fired-rule records (local only)
 	Event       string `json:"event"`
 	Rule        string `json:"rule"`
 	Verdict     string `json:"verdict"`
@@ -52,6 +53,13 @@ type auditRecord struct {
 	Command string        `json:"command"`
 	File    string        `json:"file"`
 	MCP     *gate.MCPCall `json:"mcp"`
+	AgentID string        `json:"agent_id"`
+	// outcome records (see outcomes.go): what followed a block, graded at the end of its turn.
+	Outcome   string          `json:"outcome"`
+	Checks    map[string]bool `json:"checks"`
+	BlockedAt string          `json:"blocked_at"`
+	// The blocked deny's at, to the nanosecond (local only).
+	BlockedExact string `json:"blocked_exact"`
 }
 
 // summarize reads audit records in order (rotated file first) and counts them.
@@ -88,6 +96,8 @@ func summarize(paths []string, inScope []string) Stats {
 				continue
 			case "skill_invoked":
 				st.Skills[r.Skill]++
+				continue
+			case "outcome": // a graded block, not a rule firing
 				continue
 			}
 			if r.Rule == "" {

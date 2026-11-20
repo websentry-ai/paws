@@ -50,7 +50,8 @@ func buildPortalCatalog(c *catalog.Catalog) map[string]any {
 			bySkill[b.Action.Skill], tags[b.Action.Skill] = s, map[string]bool{}
 		}
 		s.DefaultActions = append(s.DefaultActions, portalAction{ID: b.Name, Label: bindingLabel(b), Event: b.Event,
-			Tool: b.Matcher.Tool, CommandRegex: b.Matcher.CommandRegex, FileGlob: b.Matcher.FileGlob, MCPAction: b.Matcher.MCPAction})
+			Tool: b.Matcher.Tool, CommandRegex: b.Matcher.CommandRegex, FileGlob: b.Matcher.FileGlob, MCPAction: b.Matcher.MCPAction,
+			Expect: portalChecks(b.Expect)})
 		for _, t := range b.Tags {
 			tags[b.Action.Skill][t] = true
 		}

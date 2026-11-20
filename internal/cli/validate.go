@@ -24,6 +24,7 @@ func Validate(args []string) int {
 		return 2
 	}
 	c, probs := catalog.Validate(root)
+	probs = append(probs, catalog.CheckProblems(c)...) // publishing: a dropped check is a problem here
 	for _, p := range probs {
 		fmt.Println(p)
 	}

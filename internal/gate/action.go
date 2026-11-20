@@ -31,10 +31,11 @@ type MCPCall struct {
 	Class  string `json:"class,omitempty"`
 }
 
-// maxCommand bounds an uploaded command.
-const maxCommand = 500
+// maxCommand bounds an uploaded command: 4 KB holds about 98% of real Bash commands and commit commands whole
+// (a commit's trailers sit at the end of a long message, past what 500 bytes kept).
+const maxCommand = 4096
 
-// RedactCommand masks secrets in a command and cuts it to 500 bytes: the form a command
+// RedactCommand masks secrets in a command and cuts it to maxCommand bytes: the form a command
 // leaves the machine in.
 func RedactCommand(s string) string {
 	s = redact(s)

@@ -61,7 +61,7 @@ func TestPostToolUseWritesNormalizedActions(t *testing.T) {
 	repo := t.TempDir()
 	os.MkdirAll(filepath.Join(repo, ".git"), 0o755)
 	userHome := os.Getenv("HOME")
-	long := "echo " + strings.Repeat("x", 2000)
+	long := "echo " + strings.Repeat("x", 6000)
 
 	cases := []struct {
 		tool       string
@@ -92,7 +92,7 @@ func TestPostToolUseWritesNormalizedActions(t *testing.T) {
 		// Redaction: the secret never reaches the log, the key name stays readable.
 		{tool: "Bash", input: map[string]any{"command": "curl --token=s3cr3tvalue -H x https://api.example.com"}, action: "curl", command: "curl --token=*** -H x https://api.example.com", mustNotSee: "s3cr3tvalue"},
 		{tool: "Bash", input: map[string]any{"command": "GITHUB_TOKEN=ghp_abcdefghijkl1234 git push"}, action: "git push", command: "GITHUB_TOKEN=*** git push", mustNotSee: "ghp_abcdefghijkl1234"},
-		{tool: "Bash", input: map[string]any{"command": long}, action: "echo", command: long[:500]},
+		{tool: "Bash", input: map[string]any{"command": long}, action: "echo", command: long[:4096]},
 		// Files: repo-relative, never absolute; outside the repo there is no file at all.
 		{tool: "Read", input: map[string]any{"file_path": filepath.Join(repo, "src", "app", "main.go")}, action: "read src/**", file: "src/app/main.go"},
 		{tool: "Edit", input: map[string]any{"file_path": filepath.Join(repo, "README.md"), "old_string": "SECRET-OLD", "new_string": "SECRET-NEW"}, action: "edit README.md", file: "README.md", mustNotSee: "SECRET-"},

@@ -2,6 +2,7 @@
 package gate
 
 import (
+	"fmt"
 	"io/fs"
 	"os"
 	"path/filepath"
@@ -131,6 +132,9 @@ func loadDir(dir string, res *Result) {
 			return nil
 		}
 		res.Rules = append(res.Rules, r)
+		if r.ExpectErr != nil {
+			res.Warns = append(res.Warns, FileError{path, fmt.Errorf("%v (that check is dropped; the rule still enforces)", r.ExpectErr)})
+		}
 		// Parse ignores unknown keys so a newer rule file still loads; a misspelled matcher key
 		// (comand_regex) would otherwise widen the rule without a word. Load it, but say so.
 		if err := rule.CheckKnownFields(data); err != nil {

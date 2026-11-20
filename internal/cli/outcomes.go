@@ -32,9 +32,21 @@ func gradeTurn(in *hook.Input, ev gate.Event, stoppedAt time.Time) {
 	}
 	defer unlock()
 	// The session's denies up to the Stop, from the audit log's end. Most turns have none left to grade: then the
-	// transcript, which grows with the session, isn't read at all.
+	// transcript, which grows with the session, isn't read at all. Denies before the last Stop graded are settled,
+	// graded or never gradable (an interrupted turn, say), so only newer ones count here.
 	all, graded := turnDenies(ev.Session, time.Time{}, stoppedAt)
-	if !ungraded(all, graded) {
+	settled := gradedThrough(ev.Session)
+	if settled.After(stoppedAt) {
+		settled = time.Time{} // a later Stop already ran: this one may still have its own turn's denies
+	}
+	defer markGraded(ev.Session, stoppedAt)
+	var fresh []auditRecord
+	for _, d := range all {
+		if denyIn(d, settled, stoppedAt) {
+			fresh = append(fresh, d)
+		}
+	}
+	if !ungraded(fresh, graded) {
 		return
 	}
 	// The turn that stopped: a prompt the user sends while this async hook runs belongs to the next turn.
@@ -219,6 +231,43 @@ func denyIn(rec auditRecord, since, until time.Time) bool {
 	}
 	ts, err := time.Parse(time.RFC3339, rec.TS)
 	return err == nil && !ts.Before(since.Truncate(time.Second)) && !ts.After(until)
+}
+
+// gradedThrough is when this session's last Stop was graded (zero if never); markGraded records it, and drops the
+// marks of sessions idle for a week.
+func gradedThrough(session string) time.Time {
+	data, err := os.ReadFile(gradedMark(session))
+	if err != nil {
+		return time.Time{}
+	}
+	t, _ := time.Parse(time.RFC3339Nano, strings.TrimSpace(string(data)))
+	return t
+}
+
+func markGraded(session string, at time.Time) {
+	path := gradedMark(session)
+	if path == "" || gradedThrough(session).After(at) {
+		return
+	}
+	if os.MkdirAll(filepath.Dir(path), 0o700) != nil {
+		return
+	}
+	os.WriteFile(path, []byte(at.UTC().Format(time.RFC3339Nano)), 0o600)
+	if old, _ := filepath.Glob(filepath.Join(filepath.Dir(path), "*")); len(old) > 0 {
+		for _, f := range old {
+			if st, err := os.Stat(f); err == nil && time.Since(st.ModTime()) > 7*24*time.Hour {
+				os.Remove(f)
+			}
+		}
+	}
+}
+
+func gradedMark(session string) string {
+	dir := gate.UserDir()
+	if dir == "" || lockName(session) == "" {
+		return ""
+	}
+	return filepath.Join(dir, "graded", lockName(session))
 }
 
 // ungraded reports whether any deny has no outcome record yet.

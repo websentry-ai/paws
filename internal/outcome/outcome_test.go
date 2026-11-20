@@ -213,6 +213,8 @@ func TestSameKeepsQuotedSpacing(t *testing.T) {
 		{`rm -rf a\  b`, `rm -rf a\ b`, false},                 // an escaped space is part of the name
 		{"echo a\nrm -rf build", "echo a rm -rf build", false}, // a newline ends a command
 		{"echo a\n  rm -rf build", "echo a; rm -rf build", true},
+		{"cat <<EOF > f\na  b\nEOF", "cat <<EOF > f\na b\nEOF", false}, // a heredoc body is input
+		{"cat  <<EOF > f\na  b\nEOF", "cat <<EOF > f\na  b\nEOF", true},
 	}
 	for _, c := range cases {
 		if got := Same(c.a, c.b); got != c.same {

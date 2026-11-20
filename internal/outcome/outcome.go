@@ -195,10 +195,14 @@ func squeeze(s string) string {
 	var b strings.Builder
 	var quote rune
 	space, newline, escaped := false, false, false
-	for _, r := range strings.TrimSpace(s) {
+	s = strings.TrimSpace(s)
+	for i, r := range s {
 		switch {
 		case escaped: // the character after a backslash is literal: an escaped quote or space
 			escaped = false
+		case quote == 0 && r == '<' && !space && !newline && strings.HasSuffix(b.String(), "<"):
+			// A heredoc (<<): its body is the command's input, not shell spacing, so the rest stays as written.
+			return b.String() + s[i:]
 		case r == '\\' && quote != '\'':
 			escaped = true // single quotes have no escapes
 		case quote != 0:

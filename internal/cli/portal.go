@@ -73,6 +73,9 @@ type credentials struct {
 	CreatedAt string          `json:"created_at"`
 	// AccountEmail is the account this machine joined; empty when the portal predates it.
 	AccountEmail string `json:"account_email,omitempty"`
+	// SyncFrom is sync's cursor when this login began: this login's syncs upload only the audit records after it.
+	// Empty when nothing had been synced, or for a login from before scan.
+	SyncFrom string `json:"sync_from,omitempty"`
 }
 
 func credentialsPath() string {
@@ -252,6 +255,11 @@ func Login(args []string) int {
 	}
 	c := credentials{API: api, Token: tok.Token, DeviceID: tok.DeviceID, CreatedAt: time.Now().UTC().Format(time.RFC3339),
 		AccountEmail: strings.TrimSpace(printable(tok.AccountEmail))}
+	// Sync's cursor outlives a logout, so this login's syncs upload only the records after it: scan needs to know
+	// where that was to tell what this account received.
+	if cur, err := loadSyncCursor(syncStatePath()); err == nil {
+		c.SyncFrom = cur.TS
+	}
 	if err := writePrivate(path, c); err != nil {
 		fmt.Fprintf(os.Stderr, "paws: saving credentials: %v\n", err)
 		return 1

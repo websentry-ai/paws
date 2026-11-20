@@ -178,8 +178,15 @@ func TestScanLeavesOutWhatTheHooksUploaded(t *testing.T) {
 	// starts there: only the calls from Nov 3 on are left (t4, t5 logged; t8, t9 not).
 	appendLines(t, filepath.Join(home, "audit.log.1"),
 		`{"v":2,"ts":"2026-11-03T00:00:00Z","agent":"claude-code","event":"turn_end","session":"sess-x"}`)
-	if got := scanCalls(); got.Since != "2026-11-03" || got.ToolCalls != 2 {
-		t.Errorf("after a rotation: since %s, %d calls; want 2026-11-03 and t8, t9", got.Since, got.ToolCalls)
+	if got := scanCalls(); got.ToolCalls != 2 || len(got.Loaded) != 1 {
+		t.Errorf("after a rotation: %d calls, loaded %v; want t8, t9 and the coreutils load (skill loads always count)", got.ToolCalls, got.Loaded)
+	}
+	// A re-login: sync had uploaded up to Nov 4 for an earlier account, so this login received only records after
+	// that. The records before it (t2, t4, t5) went to the other account and don't count as uploaded here; the
+	// rotation cutoff (Nov 3) is before the new login's start, so it no longer applies either.
+	writePrivate(filepath.Join(home, "credentials.json"), credentials{API: api, Token: "tok-abc", CreatedAt: "2026-11-02T12:00:00Z", SyncFrom: "2026-11-04T00:00:00Z"})
+	if got := scanCalls(); got.ToolCalls != 7 {
+		t.Errorf("after a re-login: %d calls, want all 7 (none reached this account through sync)", got.ToolCalls)
 	}
 }
 

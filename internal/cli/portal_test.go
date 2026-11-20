@@ -484,3 +484,20 @@ func TestPortalErrorNamesAFirewallBlock(t *testing.T) {
 		t.Errorf("a portal 403 should keep its own message, got %v", err)
 	}
 }
+
+// Sync's cursor outlives a logout, so a login records where it stood: paws scan treats only later records as uploaded
+// to this account.
+func TestLoginRecordsWhereSyncStood(t *testing.T) {
+	srv := &fakePortal{t: t}
+	home := portalEnv(t, srv)
+	if err := writePrivate(filepath.Join(home, "sync-state.json"), syncCursor{TS: "2026-11-04T00:00:00Z", N: 3}); err != nil {
+		t.Fatal(err)
+	}
+	if code, out := captureStdout(t, func() int { return Login([]string{"--key", "pk_abc"}) }); code != 0 {
+		t.Fatalf("login exit %d: %s", code, out)
+	}
+	c, err := loadCredentials()
+	if err != nil || c == nil || c.SyncFrom != "2026-11-04T00:00:00Z" {
+		t.Fatalf("credentials %+v, %v; want sync_from 2026-11-04T00:00:00Z", c, err)
+	}
+}

@@ -53,6 +53,7 @@ type catalogTriggers struct {
 type skipSynced struct {
 	history.Source
 	logged map[string][]*loggedCall // by session, in log order
+	before time.Time                // tool calls before this may have lost their records to rotation; zero if none
 }
 
 // loggedCall is an action record: what the hook wrote when a call finished.
@@ -84,7 +85,7 @@ func (s skipSynced) Calls(since, until time.Time, fn func(history.Call)) (int, e
 	}
 	for _, c := range calls {
 		// A skill load counts toward `loaded`, which sync doesn't send, so it always goes through.
-		if c.Tool != history.SkillTool && (c.ID != "" && synced[c.ID] || c.ID == "" && s.take(c)) {
+		if c.Tool != history.SkillTool && (c.At.Before(s.before) || c.ID != "" && synced[c.ID] || c.ID == "" && s.take(c)) {
 			continue
 		}
 		fn(c)
@@ -124,10 +125,10 @@ func fileTool(tool string) bool {
 	return tool == "Read" || tool == "Write" || tool == "Edit" || tool == "NotebookEdit"
 }
 
-// loggedCalls are the audit log's action records, by session, and, when the log has rotated (audit.log.1 exists), the
-// time of the oldest record it kept: anything the hook logged before that may be gone. A log file that doesn't exist
-// is empty; one that exists but can't be read is an error.
-func loggedCalls() (map[string][]*loggedCall, time.Time, error) {
+// loggedCalls are the audit log's action records after `from` (the ones this login's syncs uploaded), by session, and,
+// when the log has rotated (audit.log.1 exists), the time of the oldest record it kept: anything the hook logged
+// before that may be gone. A log file that doesn't exist is empty; one that exists but can't be read is an error.
+func loggedCalls(from time.Time) (map[string][]*loggedCall, time.Time, error) {
 	out := map[string][]*loggedCall{}
 	var kept time.Time
 	log := gate.AuditPath()
@@ -176,7 +177,7 @@ func loggedCalls() (map[string][]*loggedCall, time.Time, error) {
 			if json.Unmarshal(line, &r) != nil || r.Session == "" {
 				continue
 			}
-			if ts, err := time.Parse(time.RFC3339, r.TS); err == nil {
+			if ts, err := time.Parse(time.RFC3339, r.TS); err == nil && ts.After(from) {
 				out[r.Session] = append(out[r.Session], &loggedCall{tool: r.Tool, command: r.Command, file: r.File, action: r.Action, hash: r.Hash, at: ts})
 			}
 		}
@@ -310,17 +311,21 @@ func buildScan(creds *credentials, days int) ([]byte, history.Summary, error) {
 	// whole audit log). Each of those reached the portal already, so it is left out; a call the hook never logged (paws
 	// not registered there, or not yet) still counts.
 	if creds != nil {
-		logged, kept, err := loggedCalls()
+		// This login's syncs uploaded only the records after creds.SyncFrom (sync's cursor outlives a logout, so an
+		// earlier account may have received the older ones).
+		from, _ := time.Parse(time.RFC3339, creds.SyncFrom)
+		logged, kept, err := loggedCalls(from)
 		if err != nil {
 			// Without the log the scan can't tell which calls sync uploaded; guessing would count them twice.
 			return nil, history.Summary{}, fmt.Errorf("reading the audit log: %w", err)
 		}
-		src = skipSynced{Source: src, logged: logged}
 		// The audit log keeps two files. Once it has rotated, records older than the kept ones may be gone though
-		// sync uploaded their calls, so the scan starts no earlier than the oldest record left.
-		if !kept.IsZero() && kept.After(since) {
-			since = kept
+		// sync uploaded their calls, so tool calls from before the oldest kept record are left out. Skill loads
+		// still count: sync never sends them.
+		if !kept.IsZero() && kept.Before(from) {
+			kept = time.Time{} // older records went to an earlier login, so their loss can't cause a double count
 		}
+		src = skipSynced{Source: src, logged: logged, before: kept}
 	}
 	fmt.Fprintf(os.Stderr, "Reading the Claude Code sessions in %s from %s to %s...\n", transcripts.Dir, since.Format(time.DateOnly), until.Format(time.DateOnly))
 	sum, err := history.Summarize(src, since, until, days, catalog)

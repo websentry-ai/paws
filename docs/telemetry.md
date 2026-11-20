@@ -175,7 +175,7 @@ the hooks have synced anything.
 
 - `--days 30` (the default) or `--days 90`. Claude Code deletes sessions older than 30 days unless its
   `cleanupPeriodDays` setting was raised, so 90 finds more only then.
-- Once logged in, every call the hook logged (`~/.paws/audit.log`, from before the login too) is left out: sync uploads those. Each call is matched to its own record by session, tool, time and command or file, so calls the hook never logged still count. Once the audit log has rotated, the scan starts at the oldest record it kept, since older records, and what they uploaded, may be gone.
+- Once logged in, every call the hook logged (`~/.paws/audit.log`, from before the login too) is left out: sync uploads those. Each call is matched to its own record by session, tool, time and command or file, so calls the hook never logged still count. Only records this login's syncs uploaded count: `login` notes where sync's cursor stood (`sync_from` in `credentials.json`), so after switching accounts the calls an earlier account received still count for the new one. Once the audit log has rotated, tool calls older than its oldest kept record are left out, since their records, and what they uploaded, may be gone; skill loads still count.
 - Only the `tool_use` blocks of assistant records are decoded. Prompts, replies, thinking and tool results are
   never read. A call copied into a resumed or forked session's log counts once, by its id.
 - `unbound-paws scan --dry-run` prints the body and sends nothing; an upload sends those same bytes. It works

@@ -180,13 +180,18 @@ var (
 		network system prune tag login logout inspect cp kill buildx container image save load`)}
 	terraformWords = cliWords{first: set(`init plan apply destroy validate fmt import state output show refresh workspace
 		providers taint untaint login force-unlock graph console`)}
-	// cloudOps keeps an operation or resource group after a cloud service only when every part of it is a word from
-	// cloudWords: create-bucket, put-public-access-block, instances. A name the user typed there isn't one.
+	// cloudOps keeps an operation or resource group after a cloud service only in an operation's shape: one word from
+	// cloudWords (instances, ls), or a verb from cloudVerbs followed by cloudWords (create-bucket,
+	// put-public-access-block). A name the user typed there, even one made of those words (project-secret), isn't.
 	cloudOps = func(w string) bool {
 		if len(w) > 64 {
 			return false
 		}
-		for _, part := range strings.Split(w, "-") {
+		parts := strings.Split(w, "-")
+		if len(parts) > 1 && !cloudVerbs[parts[0]] {
+			return false
+		}
+		for _, part := range parts {
 			if !cloudWords[part] {
 				return false
 			}
@@ -246,11 +251,12 @@ var subcommands = map[string]cliWords{
 
 // cloudWords are the verbs and resource nouns cloud CLI operations are made of (aws s3api put-bucket-tagging,
 // gcloud compute instances, az vm create).
-var cloudWords = set(`create delete put get describe list update terminate run start stop attach detach modify remove
+var cloudVerbs = set(`create delete put get describe list update terminate run start stop attach detach modify remove
 	add copy invoke publish send receive tag untag reboot restore import export enable disable deploy cancel associate
 	disassociate authorize revoke batch scan query wait set reset rotate upload download sync cp ls rm mb rb mv
-	presign register deregister login logout connect show apply
-	bucket buckets object objects policy policies acl acls public access block encryption tagging tags versioning
+	presign register deregister login logout connect show apply`)
+
+var cloudWords = union(cloudVerbs, set(`bucket buckets object objects policy policies acl acls public access block encryption tagging tags versioning
 	lifecycle website cors notification replication logging ownership controls table tables item items backup
 	backups instance instances image images snapshot snapshots volume volumes security group groups role roles user
 	users key keys function functions stack stacks change cluster clusters service services task tasks repository
@@ -260,7 +266,18 @@ var cloudWords = set(`create delete put get describe list update terminate run s
 	stream streams account accounts project projects member members binding bindings network networks firewall
 	firewalls address addresses disk disks node nodes nodegroup pool pools job jobs workflow workflows credential
 	credentials token tokens certificate certificates domain domains vm vms storage webapp keyvault ip iam
-	permission permissions version versions alias aliases configuration`)
+	permission permissions version versions alias aliases configuration`))
+
+func union(a, b map[string]bool) map[string]bool {
+	m := map[string]bool{}
+	for w := range a {
+		m[w] = true
+	}
+	for w := range b {
+		m[w] = true
+	}
+	return m
+}
 
 // programs are the commands a signature may name.
 var programs = set(`git gh glab docker podman kubectl helm terraform tofu aws gcloud az go cargo pip pip3 uv poetry

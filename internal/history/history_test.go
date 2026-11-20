@@ -84,6 +84,8 @@ func TestSignatureSendsNoArgumentsOrPaths(t *testing.T) {
 		{"Bash", "aws s3 cp x s3://acme"}:                               "bash aws s3 cp",
 		{"Bash", "gcloud compute instances list"}:                       "bash gcloud compute instances",
 		{"Bash", "gcloud compute acme-vm"}:                              "bash gcloud compute",
+		{"Bash", "gcloud compute project-network"}:                      "bash gcloud compute",
+		{"Bash", "aws dynamodb batch-get-item"}:                         "bash aws dynamodb batch-get-item",
 		{"Bash", "az vm create"}:                                        "bash az vm create",
 		{"Bash", "sudo kubectl delete pod web-1"}:                       "bash kubectl delete",
 		{"Bash", "kubectl acme-prod-debug"}:                             "bash kubectl",

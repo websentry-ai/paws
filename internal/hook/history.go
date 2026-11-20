@@ -96,7 +96,7 @@ func readLog(path, session string, since, until time.Time, fn func(history.Call)
 	var recent []history.Call // made within MaxCallTime of until: counted only once their result is in the log
 	finished := map[string]bool{}
 	for {
-		line, head, err := readLine(r)
+		line, longIDs, err := readLine(r)
 		if len(line) > 0 && bytes.Contains(line, toolUseNeedle) {
 			for _, c := range logCalls(line, session) {
 				switch {
@@ -114,8 +114,8 @@ func readLog(path, session string, since, until time.Time, fn func(history.Call)
 				finished[id] = true
 			}
 		}
-		for _, m := range resultIDPattern.FindAllSubmatch(head, -1) { // a result too long to decode
-			finished[string(m[1])] = true
+		for _, id := range longIDs { // results on a line too long to decode
+			finished[id] = true
 		}
 		if errors.Is(err, io.EOF) {
 			for _, c := range recent {
@@ -132,34 +132,40 @@ func readLog(path, session string, since, until time.Time, fn func(history.Call)
 	}
 }
 
-// readLine returns the next line, or nil for one longer than maxLine (its rest is skipped). For a long line, head is
-// its first headSize bytes, enough to find the ids of the results it carries.
-func readLine(r *bufio.Reader) (line, head []byte, err error) {
-	var buf []byte
+// readLine returns the next line, or nil for one longer than maxLine (its rest is skipped). For a long line, ids are
+// the tool_use_ids of the results it carries, found as it streams past, so no result is missed however many there are.
+func readLine(r *bufio.Reader) (line []byte, ids []string, err error) {
+	var buf, tail []byte
 	long := false
 	for {
 		chunk, err := r.ReadSlice('\n')
 		if !long && len(buf)+len(chunk) > maxLine {
-			long = true
-			head = append(buf, chunk...)
-			if len(head) > headSize {
-				head = head[:headSize]
+			long, tail, buf = true, buf, nil
+		}
+		if long {
+			// tail carries the end of the previous chunk, so an id split across two chunks is still found.
+			window := append(tail, chunk...)
+			for _, m := range resultIDPattern.FindAllSubmatch(window, -1) {
+				ids = append(ids, string(m[1]))
 			}
-			head, buf = append([]byte(nil), head...), nil
-		} else if !long {
+			if len(window) > idOverlap {
+				window = window[len(window)-idOverlap:]
+			}
+			tail = append([]byte(nil), window...)
+		} else {
 			buf = append(buf, chunk...)
 		}
 		if !errors.Is(err, bufio.ErrBufferFull) {
-			return buf, head, err
+			return buf, ids, err
 		}
 	}
 }
 
-// headSize bounds the start of an over-long line kept for its result ids: Claude Code writes each result's
-// tool_use_id before its content.
-const headSize = 64 << 10
+// idOverlap is longer than any `"tool_use_id": "..."` pair, so one split across two chunks is seen whole.
+const idOverlap = 512
 
-// resultIDPattern finds a result's id in the start of a line too long to decode (a large tool output).
+// resultIDPattern finds a result's id in a line too long to decode (a large tool output). Inside a JSON string the
+// quotes are escaped, so text in a tool's output never matches.
 var resultIDPattern = regexp.MustCompile(`"tool_use_id"\s*:\s*"([^"\\]+)"`)
 
 // logRecord is the part of an assistant record a call needs.

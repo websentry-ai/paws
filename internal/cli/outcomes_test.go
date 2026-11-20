@@ -60,6 +60,31 @@ func transcriptEvery(t *testing.T, path string, start time.Time, step time.Durat
 	}
 }
 
+// denyAt moves every deny in the audit log (and its rotated file) to at, as if paws denied the call then: live, a
+// deny comes right after its call, and grading only counts what followed the deny.
+func denyAt(t *testing.T, home string, at time.Time) {
+	t.Helper()
+	for _, path := range []string{filepath.Join(home, "audit.log"), filepath.Join(home, "audit.log.1")} {
+		data, err := os.ReadFile(path)
+		if err != nil {
+			continue
+		}
+		var out []string
+		for _, line := range strings.Split(strings.TrimSpace(string(data)), "\n") {
+			var rec map[string]any
+			if json.Unmarshal([]byte(line), &rec) == nil && rec["verdict"] == "deny" {
+				rec["ts"], rec["at"] = at.UTC().Format(time.RFC3339), at.UTC().Format(time.RFC3339Nano)
+				b, _ := json.Marshal(rec)
+				line = string(b)
+			}
+			out = append(out, line)
+		}
+		if err := os.WriteFile(path, []byte(strings.Join(out, "\n")+"\n"), 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+}
+
 func TestStopGradesWhatFollowedTheBlock(t *testing.T) {
 	home, srv := syncEnv(t)
 	cwd, _ := os.Getwd()
@@ -90,6 +115,7 @@ func TestStopGradesWhatFollowedTheBlock(t *testing.T) {
 		{"ls build", "a.o b.o", false},
 		{"rm -rf build", "", false},
 	})
+	denyAt(t, home, start.Add(1100*time.Millisecond)) // just after the call at start+1s
 	runGate(t, event("Stop", nil))
 	runGate(t, event("Stop", nil)) // a second Stop for the same turn grades nothing new
 	var outcomes []map[string]any
@@ -230,11 +256,13 @@ func TestStopGradesADenyFromTheRotatedLog(t *testing.T) {
 	if err := os.Rename(log, log+".1"); err != nil { // the log rotated after the deny
 		t.Fatal(err)
 	}
-	transcriptLines(t, transcript, time.Now().Add(-20*time.Second), []struct {
+	start := time.Now().Add(-20 * time.Second)
+	transcriptLines(t, transcript, start, []struct {
 		cmd    string
 		result string
 		isErr  bool
 	}{{"rm -rf build", "PreToolUse:Bash hook error: paws: load coreutils", true}, {"ls build", "", false}, {"rm -rf build", "", false}})
+	denyAt(t, home, start.Add(1100*time.Millisecond))
 	runGate(t, map[string]any{"hook_event_name": "Stop", "session_id": "sess-r", "transcript_path": transcript, "cwd": cwd})
 	n := 0
 	for _, rec := range auditLines(t, home) {

@@ -153,8 +153,9 @@ func inScope(calls []Call, blocked int) []Call {
 			first[c.Agent] = start
 		}
 	}
-	// A subagent counts when it started after the deny itself: one launched while the call waited on its hooks was
-	// already running.
+	// Only what came after the deny itself: a call in the blocked call's own batch (logged with it, before its hooks
+	// ran) wasn't a response to the block, and a subagent launched while the call waited on its hooks was already
+	// running.
 	denied := b.At
 	if b.DeniedAt.After(denied) {
 		denied = b.DeniedAt
@@ -162,7 +163,7 @@ func inScope(calls []Call, blocked int) []Call {
 	var out []Call
 	for _, c := range calls[blocked+1:] {
 		switch {
-		case c.Agent == b.Agent:
+		case c.Agent == b.Agent && c.At.After(denied):
 			out = append(out, c)
 		case b.Agent == "" && c.Agent != "" && first[c.Agent].After(denied):
 			out = append(out, c)

@@ -101,9 +101,6 @@ func TestValidateProblems(t *testing.T) {
 		{"duplicate binding name", func(t *testing.T, root string) {
 			write(t, filepath.Join(root, "catalog/other/dup.md"), binding("humanizer-pr", "humanizer"))
 		}, `binding name "humanizer-pr" already used`},
-		{"bad expect check", func(t *testing.T, root string) {
-			write(t, filepath.Join(root, "catalog/writing/check.md"), strings.Replace(binding("check", "x"), "---\n", "---\nexpect:\n  - id: c\n    when: never\n    if: 'call.text matches ('\n", 1))
-		}, "expect c: bad if"},
 		{"missing tags", func(t *testing.T, root string) {
 			write(t, filepath.Join(root, "catalog/writing/untagged.md"), "---\nname: untagged\nevent: pre-tool\naction:\n  type: require-skill\n  skill: s\n---\n")
 		}, "at least one tag"},
@@ -205,5 +202,19 @@ func TestPickOneOptionsMayShareABinding(t *testing.T) {
 	write(t, filepath.Join(root, "packs/writing.yaml"), "name: writing\ndescription: x\npick_one:\n  - name: prose\n    default: humanizer\n    options:\n      humanizer: [writing/humanizer-pr.md, writing/shared.md]\n      stop-slop: [writing/stop-slop-pr.md, writing/shared.md]\n")
 	if _, probs := Validate(root); len(probs) != 0 {
 		t.Errorf("options installing separately may share a binding, got %v", probs)
+	}
+}
+
+// A check this paws can't compile: loading keeps the binding (it still enforces, without the check), and publishing
+// reports it.
+func TestABadCheckBlocksPublishingNotLoading(t *testing.T) {
+	root := goodRoot(t)
+	write(t, filepath.Join(root, "catalog/writing/check.md"), strings.Replace(binding("check", "x"), "---\n", "---\nexpect:\n  - id: c\n    when: never\n    if: 'call.text matches ('\n", 1))
+	c, probs := Validate(root)
+	if len(probs) != 0 || c.Bindings["writing/check.md"] == nil {
+		t.Fatalf("loading dropped the binding: %v", probs)
+	}
+	if got := CheckProblems(c); len(got) != 1 || !strings.Contains(got[0].Msg, "expect c: bad if") {
+		t.Errorf("publish problems %v; want the bad check", got)
 	}
 }

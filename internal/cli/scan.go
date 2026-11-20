@@ -74,12 +74,13 @@ func (s skipSynced) Calls(since, until time.Time, fn func(history.Call)) (int, e
 	}
 	synced := map[string]bool{}
 	for _, c := range calls {
-		if s.take(c) && c.ID != "" {
+		if c.ID != "" && c.Tool != history.SkillTool && s.take(c) {
 			synced[c.ID] = true
 		}
 	}
 	for _, c := range calls {
-		if c.ID != "" && synced[c.ID] || c.ID == "" && s.take(c) {
+		// A skill load counts toward `loaded`, which sync doesn't send, so it always goes through.
+		if c.Tool != history.SkillTool && (c.ID != "" && synced[c.ID] || c.ID == "" && s.take(c)) {
 			continue
 		}
 		fn(c)
@@ -114,22 +115,33 @@ func fileTool(tool string) bool {
 	return tool == "Read" || tool == "Write" || tool == "Edit" || tool == "NotebookEdit"
 }
 
-// loggedCalls are the audit log's action records, by session.
-func loggedCalls() map[string][]*loggedCall {
+// loggedCalls are the audit log's action records, by session, and, when the log has rotated (audit.log.1 exists), the
+// time of the oldest record it kept: anything the hook logged before that may be gone.
+func loggedCalls() (map[string][]*loggedCall, time.Time) {
 	out := map[string][]*loggedCall{}
+	var kept time.Time
 	log := gate.AuditPath()
 	if log == "" {
-		return out
+		return out, kept
 	}
-	for _, p := range []string{log + ".1", log} {
+	for i, p := range []string{log + ".1", log} {
 		f, err := os.Open(p)
 		if err != nil {
 			continue
 		}
+		rotated := i == 0
 		sc := bufio.NewScanner(f)
 		sc.Buffer(make([]byte, 0, 64<<10), 4<<20)
 		for sc.Scan() {
 			line := sc.Bytes()
+			if rotated && kept.IsZero() {
+				var first struct {
+					TS string `json:"ts"`
+				}
+				if json.Unmarshal(line, &first) == nil {
+					kept, _ = time.Parse(time.RFC3339, first.TS)
+				}
+			}
 			if !bytes.Contains(line, []byte(`"event":"action"`)) {
 				continue
 			}
@@ -150,7 +162,7 @@ func loggedCalls() map[string][]*loggedCall {
 		}
 		f.Close()
 	}
-	return out
+	return out, kept
 }
 
 // scanStateFile is in the portal folder beside state.json, not in it: the hooks' syncs rewrite state.json in the
@@ -278,7 +290,13 @@ func buildScan(creds *credentials, days int) ([]byte, history.Summary, error) {
 	// whole audit log). Each of those reached the portal already, so it is left out; a call the hook never logged (paws
 	// not registered there, or not yet) still counts.
 	if creds != nil {
-		src = skipSynced{Source: src, logged: loggedCalls()}
+		logged, kept := loggedCalls()
+		src = skipSynced{Source: src, logged: logged}
+		// The audit log keeps two files. Once it has rotated, records older than the kept ones may be gone though
+		// sync uploaded their calls, so the scan starts no earlier than the oldest record left.
+		if !kept.IsZero() && kept.After(since) {
+			since = kept
+		}
 	}
 	fmt.Fprintf(os.Stderr, "Reading the Claude Code sessions in %s from %s to %s...\n", transcripts.Dir, since.Format(time.DateOnly), until.Format(time.DateOnly))
 	sum, err := history.Summarize(src, since, until, days, catalog)

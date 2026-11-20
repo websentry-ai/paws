@@ -171,6 +171,13 @@ func TestScanLeavesOutWhatTheHooksUploaded(t *testing.T) {
 	if got := scanCalls(); got.ToolCalls != 4 {
 		t.Errorf("a fork's copy of a logged call came back: %d calls, want 4", got.ToolCalls)
 	}
+	// Once the log has rotated, records before audit.log.1's first may be gone with their uploads, so the scan
+	// starts there: only the calls from Nov 3 on are left (t4, t5 logged; t8, t9 not).
+	appendLines(t, filepath.Join(home, "audit.log.1"),
+		`{"v":2,"ts":"2026-11-03T00:00:00Z","agent":"claude-code","event":"turn_end","session":"sess-x"}`)
+	if got := scanCalls(); got.Since != "2026-11-03" || got.ToolCalls != 2 {
+		t.Errorf("after a rotation: since %s, %d calls; want 2026-11-03 and t8, t9", got.Since, got.ToolCalls)
+	}
 }
 
 func TestScanFlags(t *testing.T) {

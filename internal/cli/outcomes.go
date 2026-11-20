@@ -25,19 +25,30 @@ func gradeTurn(in *hook.Input, ev gate.Event, stoppedAt time.Time) {
 	if in.TranscriptPath == "" || ev.Session == "" {
 		return
 	}
-	// The turn that stopped: a prompt the user sends while this async hook runs belongs to the next turn.
-	calls, start, err := hook.TurnCalls(in.TranscriptPath, stoppedAt)
-	if err != nil || len(calls) == 0 {
-		return
-	}
 	// Stop hooks run async and can overlap: one grader at a time, so two never grade the same block.
 	unlock, ok := lockGrading(ev.Session)
 	if !ok {
 		return
 	}
 	defer unlock()
-	// From the turn's own start to its Stop: a deny from the turn before, or the next one, isn't this turn's.
-	denies, graded := turnDenies(ev.Session, start, stoppedAt)
+	// The session's denies up to the Stop, from the audit log's end. Most turns have none left to grade: then the
+	// transcript, which grows with the session, isn't read at all.
+	all, graded := turnDenies(ev.Session, time.Time{}, stoppedAt)
+	if !ungraded(all, graded) {
+		return
+	}
+	// The turn that stopped: a prompt the user sends while this async hook runs belongs to the next turn.
+	calls, start, err := hook.TurnCalls(in.TranscriptPath, stoppedAt)
+	if err != nil || len(calls) == 0 {
+		return
+	}
+	// From the turn's own start: a deny from the turn before isn't this turn's.
+	var denies []auditRecord
+	for _, d := range all {
+		if denyIn(d, start, stoppedAt) {
+			denies = append(denies, d)
+		}
+	}
 	if len(denies) == 0 {
 		return
 	}
@@ -206,6 +217,18 @@ func denyIn(rec auditRecord, since, until time.Time) bool {
 	}
 	ts, err := time.Parse(time.RFC3339, rec.TS)
 	return err == nil && !ts.Before(since.Truncate(time.Second)) && !ts.After(until)
+}
+
+// ungraded reports whether any deny has no outcome record yet.
+func ungraded(denies []auditRecord, graded map[string]int) bool {
+	seen := map[string]int{}
+	for _, d := range denies {
+		key := denyKey(d.Source, d.Rule, d.AgentID, blockedWhen(d.At, d.TS))
+		if seen[key]++; seen[key] > graded[key] {
+			return true
+		}
+	}
+	return false
 }
 
 // blockedWhen is a deny's time for "graded already": exact when the records have it, else its second.

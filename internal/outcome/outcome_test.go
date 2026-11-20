@@ -227,3 +227,22 @@ func TestSameCallNeedsTheSameTool(t *testing.T) {
 		t.Error("two MCP tools with one input read as the same call")
 	}
 }
+
+// A rule over every tool matches the Skill call that answers its deny: that load isn't the retry.
+func TestASkillLoadIsNotTheRetry(t *testing.T) {
+	r := parse(t, `---
+name: any
+event: pre-tool
+matcher: {}
+action:
+  type: require-skill
+  skill: coreutils
+---
+`)
+	calls := []Call{bash(1, "rm -rf build", true, ""), {Tool: "Skill", Target: "coreutils", Text: "coreutils", At: t0.Add(2 * time.Second)},
+		bash(3, "rm -rf build", false, "")}
+	res := Grade(r, calls, 0)
+	if res.Retry == nil || res.Retry.Tool != "Bash" || res.Outcome != SameRetry {
+		t.Errorf("graded %+v; want the Bash retry, same_retry", res)
+	}
+}

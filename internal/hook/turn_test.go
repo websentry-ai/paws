@@ -65,3 +65,20 @@ func TestTurnCallsStopsAtTheStop(t *testing.T) {
 		t.Fatalf("calls %v, %v; want the stopped turn's call a only", calls, err)
 	}
 }
+
+// A compaction summary, a task notification or a system reminder mid-turn is not a new prompt.
+func TestTurnCallsKeepsTheTurnAcrossHarnessRecords(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "s.jsonl")
+	os.WriteFile(path, []byte(strings.Join([]string{
+		`{"type":"user","timestamp":"2026-11-20T10:00:00Z","message":{"content":"clean up"}}`,
+		`{"type":"assistant","timestamp":"2026-11-20T10:00:01Z","message":{"content":[{"type":"tool_use","id":"a","name":"Bash","input":{"command":"rm -rf build"}}]}}`,
+		`{"type":"user","isCompactSummary":true,"timestamp":"2026-11-20T10:00:02Z","message":{"content":"This session is being continued..."}}`,
+		`{"type":"user","timestamp":"2026-11-20T10:00:03Z","message":{"content":"<task-notification>done</task-notification>"}}`,
+		`{"type":"user","timestamp":"2026-11-20T10:00:04Z","message":{"content":[{"type":"text","text":"<system-reminder>x</system-reminder>"}]}}`,
+		`{"type":"assistant","timestamp":"2026-11-20T10:00:05Z","message":{"content":[{"type":"tool_use","id":"b","name":"Bash","input":{"command":"ls"}}]}}`,
+	}, "\n")+"\n"), 0o600)
+	calls, start, err := TurnCalls(path, time.Time{})
+	if err != nil || len(calls) != 2 || start.Format("15:04:05") != "10:00:00" {
+		t.Fatalf("calls %d from %v, %v; want both calls of the one turn", len(calls), start, err)
+	}
+}

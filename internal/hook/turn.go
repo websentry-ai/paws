@@ -87,7 +87,7 @@ func readTurnLog(path, agent string, since, until time.Time) ([]outcome.Call, ti
 			if json.Unmarshal(line, &rec) == nil && (until.IsZero() || !rec.Timestamp.After(until)) {
 				blocks := contentBlocks(rec.Message.Content)
 				switch {
-				case rec.Type == "user" && since.IsZero() && !rec.IsMeta && isPrompt(rec.Message.Content, blocks):
+				case rec.Type == "user" && since.IsZero() && gate.IsUserPromptLine(line):
 					start, calls, byID = rec.Timestamp, nil, map[string]int{} // a new turn: forget the last one's calls
 				case rec.Type == "assistant" && !rec.Timestamp.Before(start):
 					for _, b := range blocks {
@@ -122,19 +122,6 @@ func contentBlocks(content json.RawMessage) []turnBlock {
 	var blocks []turnBlock
 	json.Unmarshal(content, &blocks)
 	return blocks
-}
-
-// isPrompt: the user typed something (a string, or text blocks), not a tool result.
-func isPrompt(content json.RawMessage, blocks []turnBlock) bool {
-	if len(content) > 0 && content[0] == '"' {
-		return true
-	}
-	for _, b := range blocks {
-		if b.Type == "tool_result" {
-			return false
-		}
-	}
-	return len(blocks) > 0
 }
 
 // hookDenied: Claude Code reports a call a PreToolUse hook refused as "PreToolUse:<Tool> hook error: <reason>".

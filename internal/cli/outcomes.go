@@ -39,7 +39,8 @@ func gradeTurn(in *hook.Input, ev gate.Event, stoppedAt time.Time) {
 		return
 	}
 	defer unlock()
-	denies, graded := turnDenies(ev.Session, start.Add(-denySlack))
+	// From the turn's own start (to the second, as deny records are): a deny from the turn before isn't this turn's.
+	denies, graded := turnDenies(ev.Session, start.Truncate(time.Second))
 	if len(denies) == 0 {
 		return
 	}
@@ -80,10 +81,10 @@ func gradeTurn(in *hook.Input, ev gate.Event, stoppedAt time.Time) {
 	}
 }
 
-// gradeLockStale is when a grader's lock is taken over: it crashed, or is long past any real turn's grading.
-const gradeLockStale = 30 * time.Second
+// gradeLockStale is when a grader's lock is taken over: past the Stop hook's 15 s timeout its holder is gone.
+const gradeLockStale = 16 * time.Second
 
-// lockGrading takes ~/.paws/outcomes.lock by creating it (portable: no flock on Windows), waiting up to 5 s for
+// lockGrading takes ~/.paws/outcomes.lock by creating it (portable: no flock on Windows), waiting up to 12 s for
 // another grader. ok is false when it couldn't: that turn stays ungraded rather than graded twice.
 func lockGrading() (unlock func(), ok bool) {
 	dir := gate.UserDir()
@@ -91,7 +92,7 @@ func lockGrading() (unlock func(), ok bool) {
 		return nil, false
 	}
 	path := filepath.Join(dir, "outcomes.lock")
-	for i := 0; i < 50; i++ {
+	for i := 0; i < 120; i++ { // up to 12 s: long enough to outlast a lock its killed holder left
 		f, err := os.OpenFile(path, os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0o600)
 		if err == nil {
 			f.Close()
@@ -129,10 +130,22 @@ func blockedCall(calls []outcome.Call, d auditRecord, at time.Time, used map[int
 func turnDenies(session string, since time.Time) ([]auditRecord, map[string]int) {
 	var denies []auditRecord
 	graded := map[string]int{}
-	path := gate.AuditPath()
+	log := gate.AuditPath()
+	if log == "" {
+		return nil, graded
+	}
+	// The log may have rotated mid-turn: the rotated file's end first, then the live one.
+	for _, path := range []string{log + ".1", log} {
+		readDenies(path, session, since, &denies, graded)
+	}
+	return denies, graded
+}
+
+// readDenies reads the end of one audit file into denies and graded (see turnDenies).
+func readDenies(path, session string, since time.Time, denies *[]auditRecord, graded map[string]int) {
 	f, err := os.Open(path)
 	if err != nil {
-		return nil, graded
+		return
 	}
 	defer f.Close()
 	if st, err := f.Stat(); err == nil && st.Size() > outcomeTail {
@@ -155,7 +168,7 @@ func turnDenies(session string, since time.Time) ([]auditRecord, map[string]int)
 				graded[denyKey(rec.Source, rec.Rule, rec.AgentID, rec.BlockedAt)]++
 			case rec.Verdict == "deny" && rec.Rule != "":
 				if ts, err := time.Parse(time.RFC3339, rec.TS); err == nil && !ts.Before(since) {
-					denies = append(denies, rec)
+					*denies = append(*denies, rec)
 				}
 			}
 		}
@@ -163,5 +176,4 @@ func turnDenies(session string, since time.Time) ([]auditRecord, map[string]int)
 			break
 		}
 	}
-	return denies, graded
 }

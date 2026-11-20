@@ -207,3 +207,32 @@ func TestConcurrentGradersGradeOnce(t *testing.T) {
 		t.Errorf("%d outcome records from 4 overlapping graders, want 1", n)
 	}
 }
+
+// A deny that rotated into audit.log.1 before the turn ended is still graded.
+func TestStopGradesADenyFromTheRotatedLog(t *testing.T) {
+	home := portalEnv(t, http.NotFoundHandler())
+	cwd, _ := os.Getwd()
+	writeRule(t, filepath.Join(cwd, ".paws", "pre-tool", "rm-gate.md"), rmRule)
+	transcript := filepath.Join(t.TempDir(), "sess-r.jsonl")
+	runGate(t, map[string]any{"hook_event_name": "PreToolUse", "session_id": "sess-r", "transcript_path": transcript, "cwd": cwd,
+		"tool_name": "Bash", "tool_input": map[string]any{"command": "rm -rf build"}})
+	log := filepath.Join(home, "audit.log")
+	if err := os.Rename(log, log+".1"); err != nil { // the log rotated after the deny
+		t.Fatal(err)
+	}
+	transcriptLines(t, transcript, time.Now().Add(-20*time.Second), []struct {
+		cmd    string
+		result string
+		isErr  bool
+	}{{"rm -rf build", "PreToolUse:Bash hook error: paws: load coreutils", true}, {"ls build", "", false}, {"rm -rf build", "", false}})
+	runGate(t, map[string]any{"hook_event_name": "Stop", "session_id": "sess-r", "transcript_path": transcript, "cwd": cwd})
+	n := 0
+	for _, rec := range auditLines(t, home) {
+		if rec["event"] == "outcome" && rec["outcome"] == "fixed" {
+			n++
+		}
+	}
+	if n != 1 {
+		t.Errorf("%d outcomes for a deny in audit.log.1, want 1", n)
+	}
+}

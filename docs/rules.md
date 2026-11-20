@@ -162,8 +162,10 @@ the call the rule denied. Each has `tool` (`Bash`, `Write`, `Edit`, `mcp__notion
 command, what a Write writes, an Edit's new text, an MCP call's text arguments), `input` (the raw tool input, so
 `call.input.parent != nil` works for any field) and, for MCP calls, `mcp.server`, `mcp.tool` and `mcp.class`.
 
-`when` picks the calls the check looks at. All of them come from the same turn and the blocked agent (subagents
-it starts after the deny count; one already running doesn't):
+`when` picks the calls the check looks at. All of them come from the same turn and the blocked agent; for a deny in
+the main conversation, subagents it starts after the deny count too, and one already running doesn't (a subagent
+can't start subagents of its own in Claude Code). A compaction summary or a task notification mid-turn doesn't end
+the turn; only a prompt you type does:
 
 | `when` | Passes when |
 |---|---|

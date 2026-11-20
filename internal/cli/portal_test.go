@@ -500,4 +500,16 @@ func TestLoginRecordsWhereSyncStood(t *testing.T) {
 	if err != nil || c == nil || c.SyncFrom != "2026-11-04T00:00:00Z" || c.SyncFromN != 3 {
 		t.Fatalf("credentials %+v, %v; want sync_from 2026-11-04T00:00:00Z, count 3", c, err)
 	}
+	// The same account logs in again after more syncs (login --scan, or after a logout): it keeps the first point,
+	// since it received the records synced since then.
+	if err := writePrivate(filepath.Join(home, "sync-state.json"), syncCursor{TS: "2026-11-09T00:00:00Z", N: 1}); err != nil {
+		t.Fatal(err)
+	}
+	os.Remove(filepath.Join(home, "credentials.json"))
+	if code, out := captureStdout(t, func() int { return Login([]string{"--key", "pk_abc"}) }); code != 0 {
+		t.Fatalf("second login exit %d: %s", code, out)
+	}
+	if c, _ := loadCredentials(); c == nil || c.SyncFrom != "2026-11-04T00:00:00Z" {
+		t.Errorf("after logging in again: %+v; want the first sync_from kept", c)
+	}
 }

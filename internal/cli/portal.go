@@ -256,11 +256,9 @@ func Login(args []string) int {
 	}
 	c := credentials{API: api, Token: tok.Token, DeviceID: tok.DeviceID, CreatedAt: time.Now().UTC().Format(time.RFC3339),
 		AccountEmail: strings.TrimSpace(printable(tok.AccountEmail))}
-	// Sync's cursor outlives a logout, so this login's syncs upload only the records after it: scan needs to know
-	// where that was to tell what this account received.
-	if cur, err := loadSyncCursor(syncStatePath()); err == nil {
-		c.SyncFrom, c.SyncFromN = cur.TS, cur.N
-	}
+	// Scan needs to know which audit records this account received through sync.
+	cur := accountSyncFrom(api, c.AccountEmail)
+	c.SyncFrom, c.SyncFromN = cur.TS, cur.N
 	if err := writePrivate(path, c); err != nil {
 		fmt.Fprintf(os.Stderr, "paws: saving credentials: %v\n", err)
 		return 1
@@ -473,4 +471,30 @@ func Logout(args []string) int {
 		fmt.Println("Logged out.")
 	}
 	return 0
+}
+
+// accountSyncFrom is where sync's cursor stood when this account first logged in on this machine. Sync's cursor
+// outlives a logout, so another account's syncs may have uploaded the records before it; from there on, this account
+// may have received any record. It is kept per account in sync-from.json, which a logout leaves alone, so logging in
+// again with the same account keeps the first point: a later point would treat records this account already received
+// as not uploaded, and scan would count those calls twice. (Records another account synced in between are then taken
+// as this account's too, so a scan can only undercount them.)
+func accountSyncFrom(api, account string) syncCursor {
+	state := syncStatePath()
+	cur, err := loadSyncCursor(state)
+	if state == "" || err != nil {
+		return syncCursor{}
+	}
+	path := filepath.Join(filepath.Dir(state), "sync-from.json")
+	first := map[string]syncCursor{}
+	if data, err := os.ReadFile(path); err == nil {
+		_ = json.Unmarshal(data, &first)
+	}
+	key := strings.TrimSuffix(api, "/") + " " + strings.ToLower(account)
+	if seen, ok := first[key]; ok {
+		return seen
+	}
+	first[key] = cur
+	_ = writePrivate(path, first)
+	return cur
 }

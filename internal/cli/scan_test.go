@@ -123,38 +123,36 @@ func TestScanUploadsCountsOnly(t *testing.T) {
 	}
 }
 
-func TestScanStopsWhereTheLoginStarted(t *testing.T) {
+func TestScanLeavesOutWhatTheHooksUploaded(t *testing.T) {
 	home, srv := syncEnv(t)
 	srv.triggers = scanTriggersJSON
 	fixScanClock(t)
 	writeScanSessions(t)
 	api := strings.TrimSuffix(os.Getenv("PAWS_PORTAL_API"), "/")
-	// Logged in on Nov 2 at 12:00: the hooks have uploaded every call since, so the scan covers the 30 days before.
+	// Logged in on Nov 2 at 12:00.
 	if err := writePrivate(filepath.Join(home, "credentials.json"), credentials{API: api, Token: "tok-abc", CreatedAt: "2026-11-02T12:00:00Z"}); err != nil {
 		t.Fatal(err)
 	}
-	// Without paws registered for every project, nothing has uploaded the calls since the login, so the scan keeps them.
-	code, dry := captureStdout(t, func() int { return Scan([]string{"--dry-run", "--days", "90"}) })
-	if code != 0 {
-		t.Fatalf("exit %d", code)
+	scanCalls := func() historyUpload {
+		t.Helper()
+		code, dry := captureStdout(t, func() int { return Scan([]string{"--dry-run"}) })
+		if code != 0 {
+			t.Fatalf("exit %d", code)
+		}
+		var got historyUpload
+		json.Unmarshal([]byte(dry), &got)
+		return got
 	}
-	var got historyUpload
-	json.Unmarshal([]byte(dry), &got)
-	if got.Until != "2026-11-19" || got.ToolCalls != 7 {
-		t.Errorf("no global hook: window %s..%s, %d calls; want every call up to now", got.Since, got.Until, got.ToolCalls)
+	// The hook logged nothing since the login (paws not registered in that session), so every call counts.
+	if got := scanCalls(); got.Until != "2026-11-19" || got.ToolCalls != 7 {
+		t.Errorf("no hook records: until %s, %d calls; want every call up to now", got.Until, got.ToolCalls)
 	}
-	// With the global hook, the hooks have uploaded every call since the login, so the scan covers the 90 days before.
-	if code, out := captureStdout(t, func() int { return Init([]string{"--global"}) }); code != 0 {
-		t.Fatalf("init --global exit %d: %s", code, out)
-	}
-	code, dry = captureStdout(t, func() int { return Scan([]string{"--dry-run", "--days", "90"}) })
-	if code != 0 {
-		t.Fatalf("exit %d", code)
-	}
-	got = historyUpload{}
-	json.Unmarshal([]byte(dry), &got)
-	if got.Until != "2026-11-02" || got.Since != "2026-08-04" || got.WindowDays != 90 || got.ToolCalls != 3 {
-		t.Errorf("window %s..%s (%d days), %d calls; want the calls before the login only", got.Since, got.Until, got.WindowDays, got.ToolCalls)
+	// The hook logged sess-1 after the login, so sync has its later calls: the scan keeps only the ones before.
+	appendLines(t, filepath.Join(home, "audit.log"),
+		`{"v":2,"ts":"2026-11-03T10:00:00Z","agent":"claude-code","event":"action","session":"sess-1","tool":"Bash","action":"ls"}`,
+		`{"v":2,"ts":"2026-10-30T10:00:00Z","agent":"claude-code","event":"action","session":"sess-other","tool":"Bash","action":"ls"}`)
+	if got := scanCalls(); got.ToolCalls != 3 {
+		t.Errorf("hook logged sess-1 after login: %d calls, want the 3 made before the login", got.ToolCalls)
 	}
 }
 

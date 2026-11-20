@@ -173,7 +173,7 @@ the hooks have synced anything.
 
 - `--days 30` (the default) or `--days 90`. Claude Code deletes sessions older than 30 days unless its
   `cleanupPeriodDays` setting was raised, so 90 finds more only then.
-- Once logged in with paws registered for every project (`init --global`), the window ends at the login: the hooks have uploaded every call since. Without the global hook it runs up to now, so calls in projects paws isn't registered in still count.
+- Once logged in, a call made after the login is left out when the hook logged that session's calls (`~/.paws/audit.log`): sync has uploaded those. Sessions the hook never saw still count.
 - Only the `tool_use` blocks of assistant records are decoded. Prompts, replies, thinking and tool results are
   never read. A call copied into a resumed or forked session's log counts once, by its id.
 - `unbound-paws scan --dry-run` prints the body and sends nothing; an upload sends those same bytes. It works
@@ -205,7 +205,7 @@ names.
 The counts answer the catalog's questions, so a scan trusts the catalog the way installing its skills already
 does: a catalog of thousands of narrow triggers could learn about past commands from which ones matched. A scan
 refuses a catalog of more than 500 skills, 1,000 triggers or 20 triggers per skill (the published catalog has 169,
-217 and 3). The scan date and window are kept in `~/.paws/portal/state.json`.
+217 and 3). The scan date and window are kept in `~/.paws/portal/scan.json`.
 
 ## Portal settings
 

@@ -57,7 +57,7 @@ func (t Transcripts) Calls(since, until time.Time, fn func(history.Call)) (int, 
 		if info.ModTime().Before(since) {
 			return nil // nothing in a log last written before the window can be in it
 		}
-		found, err := readLog(path, since, until, fn)
+		found, err := readLog(path, filepath.Base(sessionOf(root, path)), since, until, fn)
 		if found {
 			sessions[sessionOf(root, path)] = true
 		}
@@ -76,7 +76,7 @@ func sessionOf(root, path string) string {
 }
 
 // readLog passes the log's calls in the window to fn and reports whether it had any.
-func readLog(path string, since, until time.Time, fn func(history.Call)) (bool, error) {
+func readLog(path, session string, since, until time.Time, fn func(history.Call)) (bool, error) {
 	f, err := os.Open(path)
 	if err != nil {
 		return false, err
@@ -87,7 +87,7 @@ func readLog(path string, since, until time.Time, fn func(history.Call)) (bool, 
 	for {
 		line, err := readLine(r)
 		if len(line) > 0 && bytes.Contains(line, toolUseNeedle) {
-			for _, c := range logCalls(line) {
+			for _, c := range logCalls(line, session) {
 				if !c.At.Before(since) && c.At.Before(until) {
 					fn(c)
 					found = true
@@ -138,7 +138,7 @@ type toolUse struct {
 
 // logCalls returns an assistant record's tool calls. Request blobs repeat calls already in the log and are not
 // read; user records hold prompts and results.
-func logCalls(line []byte) []history.Call {
+func logCalls(line []byte, session string) []history.Call {
 	var rec logRecord
 	if json.Unmarshal(line, &rec) != nil || rec.Type != "assistant" || len(rec.Message.Content) == 0 || rec.Message.Content[0] != '[' {
 		return nil
@@ -156,7 +156,7 @@ func logCalls(line []byte) []history.Call {
 		if json.Unmarshal(raw, &b) != nil || b.Type != "tool_use" || b.Name == "" {
 			continue
 		}
-		c := history.Call{ID: b.ID, Tool: b.Name, At: rec.Timestamp}
+		c := history.Call{ID: b.ID, Tool: b.Name, At: rec.Timestamp, Session: session}
 		if b.Name == history.SkillTool {
 			c.Target, _ = b.Input["skill"].(string)
 		} else {

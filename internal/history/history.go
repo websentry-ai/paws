@@ -20,6 +20,8 @@ type Call struct {
 	Tool   string
 	Target string // what a matcher runs against: the command, file path or MCP input; the skill name for Skill
 	At     time.Time
+	// Session is the agent's id for the session the call was made in; a subagent's calls carry their parent's.
+	Session string
 }
 
 // Source reads one agent's past sessions.

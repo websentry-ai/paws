@@ -1,6 +1,7 @@
 package cli
 
 import (
+	"bufio"
 	"bytes"
 	"encoding/json"
 	"errors"
@@ -11,6 +12,7 @@ import (
 	"strconv"
 	"time"
 
+	"github.com/websentry-ai/paws/internal/gate"
 	"github.com/websentry-ai/paws/internal/history"
 	"github.com/websentry-ai/paws/internal/hook"
 	"github.com/websentry-ai/paws/internal/rule"
@@ -40,6 +42,59 @@ type catalogTriggers struct {
 		Name    string         `json:"name"`
 		Actions []portalAction `json:"actions"`
 	} `json:"skills"`
+}
+
+// skipSynced leaves out the calls the hooks have uploaded already: made at or after the login, in a session whose
+// calls the hook logged.
+type skipSynced struct {
+	history.Source
+	after    time.Time
+	sessions map[string]bool
+}
+
+func (s skipSynced) Calls(since, until time.Time, fn func(history.Call)) (int, error) {
+	return s.Source.Calls(since, until, func(c history.Call) {
+		if !c.At.Before(s.after) && s.sessions[c.Session] {
+			return
+		}
+		fn(c)
+	})
+}
+
+// hookedSessions are the sessions with an action record in the audit log at or after `after`: the ones the hook ran
+// in, whose calls sync uploads.
+func hookedSessions(after time.Time) map[string]bool {
+	out := map[string]bool{}
+	log := gate.AuditPath()
+	if log == "" {
+		return out
+	}
+	for _, p := range []string{log + ".1", log} {
+		f, err := os.Open(p)
+		if err != nil {
+			continue
+		}
+		sc := bufio.NewScanner(f)
+		sc.Buffer(make([]byte, 0, 64<<10), 4<<20)
+		for sc.Scan() {
+			line := sc.Bytes()
+			if !bytes.Contains(line, []byte(`"event":"action"`)) {
+				continue
+			}
+			var r struct {
+				TS      string `json:"ts"`
+				Session string `json:"session"`
+			}
+			if json.Unmarshal(line, &r) != nil || r.Session == "" {
+				continue
+			}
+			if ts, err := time.Parse(time.RFC3339, r.TS); err == nil && !ts.Before(after) {
+				out[r.Session] = true
+			}
+		}
+		f.Close()
+	}
+	return out
 }
 
 // scanStateFile is in the portal folder beside state.json, not in it: the hooks' syncs rewrite state.json in the
@@ -160,20 +215,21 @@ func buildScan(creds *credentials, days int) ([]byte, history.Summary, error) {
 		return nil, history.Summary{}, err
 	}
 	until := scanNow().UTC()
-	// Once logged in with paws registered for every project, the hooks upload each call as it happens, so the scan
-	// stops where they started and no call counts twice. Without the global hook, calls since login in projects paws
-	// isn't registered in would reach the portal from nowhere, so the scan keeps them.
-	if creds != nil && hasPawsHook(filepath.Join(userClaudeDir(), "settings.json")) {
-		if at, err := time.Parse(time.RFC3339, creds.CreatedAt); err == nil && at.Before(until) {
-			until = at
+	since := until.AddDate(0, 0, -days)
+	transcripts := hook.Transcripts{Dir: filepath.Join(userClaudeDir(), "projects")}
+	var src history.Source = transcripts
+	// Once logged in, the hooks upload the calls they see. A call made after the login in a session whose calls the
+	// hook logged has reached the portal already, so it is left out; a session the hook never saw (paws not
+	// registered there yet) still counts, whenever the hook was set up.
+	if creds != nil {
+		if at, err := time.Parse(time.RFC3339, creds.CreatedAt); err == nil {
+			src = skipSynced{Source: src, after: at, sessions: hookedSessions(at)}
 		}
 	}
-	since := until.AddDate(0, 0, -days)
-	src := hook.Transcripts{Dir: filepath.Join(userClaudeDir(), "projects")}
-	fmt.Fprintf(os.Stderr, "Reading the Claude Code sessions in %s from %s to %s...\n", src.Dir, since.Format(time.DateOnly), until.Format(time.DateOnly))
+	fmt.Fprintf(os.Stderr, "Reading the Claude Code sessions in %s from %s to %s...\n", transcripts.Dir, since.Format(time.DateOnly), until.Format(time.DateOnly))
 	sum, err := history.Summarize(src, since, until, days, catalog)
 	if err != nil {
-		return nil, sum, fmt.Errorf("reading %s: %w", src.Dir, err)
+		return nil, sum, fmt.Errorf("reading %s: %w", transcripts.Dir, err)
 	}
 	body, err := json.MarshalIndent(historyUpload{Summary: sum, CatalogVersion: cat.Version}, "", "  ")
 	return append(body, '\n'), sum, err

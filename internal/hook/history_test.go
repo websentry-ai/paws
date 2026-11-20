@@ -71,6 +71,9 @@ func TestTranscriptsReadsOnlyToolCalls(t *testing.T) {
 	}
 	for i, c := range got {
 		w := want[i]
+		if c.Session != "s1" {
+			t.Errorf("call %d session %q, want s1 (a subagent's calls count toward its parent)", i, c.Session)
+		}
 		if c.ID != w.ID || c.Tool != w.Tool || c.Target != w.Target || c.At.IsZero() {
 			t.Errorf("call %d = %+v, want %+v", i, c, w)
 		}

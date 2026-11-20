@@ -75,6 +75,9 @@ func (s *fakePortal) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		s.histories = append(s.histories, string(b))
 		s.auths = append(s.auths, r.Header.Get("Authorization"))
 		io.WriteString(w, `{"saved":true}`)
+	case "POST /paws/v1/device/logout":
+		s.auths = append(s.auths, r.Header.Get("Authorization"))
+		io.WriteString(w, `{"logged_out":true}`)
 	case "POST /paws/v1/device/key":
 		json.NewDecoder(r.Body).Decode(&s.keyBody)
 		if s.keyBody["key"] == "pk_used" {

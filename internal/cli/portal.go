@@ -240,11 +240,17 @@ func Login(args []string) int {
 			return 1
 		}
 	}
+	// Logging in again on this laptop (step 2 run twice, or another account) replaces its device: the portal retires
+	// the old one, so its history scan and laptop slot stop counting.
+	replaces := ""
+	if old, err := loadCredentials(); err == nil && old != nil && strings.TrimSuffix(old.API, "/") == strings.TrimSuffix(api, "/") {
+		replaces = old.Token
+	}
 	var tok deviceToken
 	if key != "" {
-		tok, err = redeemKey(api, key)
+		tok, err = redeemKey(api, key, replaces)
 	} else {
-		tok, err = deviceLogin(api)
+		tok, err = deviceLogin(api, replaces)
 	}
 	if errors.Is(err, errAccountDeleted) {
 		fmt.Fprintln(os.Stderr, accountDeletedMessage)
@@ -340,7 +346,7 @@ func readKey(r io.Reader) (string, error) {
 }
 
 // deviceLogin shows a code to confirm in the browser and waits for the confirmation.
-func deviceLogin(api string) (deviceToken, error) {
+func deviceLogin(api, replaces string) (deviceToken, error) {
 	dc, err := requestDeviceCode(api)
 	if err != nil {
 		return deviceToken{}, err
@@ -350,13 +356,17 @@ func deviceLogin(api string) (deviceToken, error) {
 		openURL(dc.VerificationURI)
 	}
 	fmt.Println("Waiting for confirmation (Ctrl-C to cancel)...")
-	return pollDeviceToken(api, dc)
+	return pollDeviceToken(api, dc, replaces)
 }
 
-// redeemKey trades a one-time key made in the portal for a device token.
-func redeemKey(api, key string) (deviceToken, error) {
+// redeemKey trades a one-time key made in the portal for a device token. replaces is the token this laptop held
+// before, if any.
+func redeemKey(api, key, replaces string) (deviceToken, error) {
 	body := deviceInfo()
 	body["key"] = key
+	if replaces != "" {
+		body["replaces"] = replaces
+	}
 	var tok deviceToken
 	status, resp, err := postJSON(api+"/paws/v1/device/key", "", body)
 	if err != nil {
@@ -406,7 +416,11 @@ const maxDeviceWait = 15 * time.Minute
 
 // pollDeviceToken asks every interval seconds (default 5, at most 60) until the code is
 // confirmed, denied or expired, giving up once expires_in (at most 15 minutes) has passed.
-func pollDeviceToken(api string, dc deviceCode) (deviceToken, error) {
+func pollDeviceToken(api string, dc deviceCode, replaces string) (deviceToken, error) {
+	body := map[string]string{"device_code": dc.DeviceCode}
+	if replaces != "" {
+		body["replaces"] = replaces
+	}
 	interval := time.Duration(min(dc.Interval, 60)) * time.Second
 	if interval <= 0 {
 		interval = 5 * time.Second
@@ -418,7 +432,7 @@ func pollDeviceToken(api string, dc deviceCode) (deviceToken, error) {
 	for waited := time.Duration(0); waited < limit; waited += interval {
 		sleep(interval)
 		var tok deviceToken
-		status, resp, err := postJSON(api+"/paws/v1/device/token", "", map[string]string{"device_code": dc.DeviceCode})
+		status, resp, err := postJSON(api+"/paws/v1/device/token", "", body)
 		if err != nil {
 			return tok, err
 		}
@@ -455,6 +469,11 @@ func Logout(args []string) int {
 	if path == "" {
 		fmt.Println("Not logged in.")
 		return 0
+	}
+	// Best effort: the portal retires this laptop's device, so its history scan and laptop slot stop counting.
+	// Offline, or a portal from before this endpoint, logs out locally all the same.
+	if c, err := loadCredentials(); err == nil && c != nil && c.Token != "" {
+		postJSON(strings.TrimSuffix(c.API, "/")+"/paws/v1/device/logout", c.Token, map[string]string{})
 	}
 	if err := clearPortal(); err != nil {
 		fmt.Fprintf(os.Stderr, "paws: removing portal rules: %v\n", err)

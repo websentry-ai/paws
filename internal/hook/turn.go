@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"bytes"
 	"encoding/json"
+	"fmt"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -32,9 +33,11 @@ func TurnCalls(transcriptPath string, until time.Time) ([]outcome.Call, time.Tim
 	for _, p := range logs {
 		agent := strings.TrimPrefix(strings.TrimSuffix(filepath.Base(p), ".jsonl"), "agent-")
 		sub, _, err := readTurnLog(p, agent, start, until)
-		if err == nil {
-			calls = append(calls, sub...)
+		if err != nil {
+			// A turn missing a subagent's calls would grade a retry it made as stopped: no turn rather than half.
+			return nil, start, fmt.Errorf("subagent log %s: %w", filepath.Base(p), err)
 		}
+		calls = append(calls, sub...)
 	}
 	sort.SliceStable(calls, func(i, j int) bool { return calls[i].At.Before(calls[j].At) })
 	return calls, start, nil

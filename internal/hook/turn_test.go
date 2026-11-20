@@ -126,3 +126,16 @@ func TestTurnCallsDoesNotReadOutputAsARefusal(t *testing.T) {
 		t.Fatalf("calls %+v, %v; want only b refused", calls, err)
 	}
 }
+
+// A subagent log that can't be read fails the turn: grading half a turn could call a retry made there "stopped".
+func TestTurnCallsFailsOnAnUnreadableSubagentLog(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "s.jsonl")
+	os.WriteFile(path, []byte(`{"type":"user","timestamp":"2026-11-20T10:00:00Z","message":{"content":"go"}}`+"\n"), 0o600)
+	sub := filepath.Join(dir, "s", "subagents", "agent-a.jsonl")
+	os.MkdirAll(filepath.Dir(sub), 0o700)
+	os.WriteFile(sub, []byte("{}\n"), 0o000) // there, but not readable
+	if _, _, err := TurnCalls(path, time.Time{}); err == nil {
+		t.Error("an unreadable subagent log was skipped")
+	}
+}

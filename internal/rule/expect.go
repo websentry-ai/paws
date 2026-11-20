@@ -72,14 +72,29 @@ func (e *Expect) compile() error {
 
 // Eval runs the check's `if` on a call; a runtime error (a missing field compared as a number, say) is a fail.
 func (e *Expect) Eval(call, blocked map[string]any) bool {
+	ok, err := e.run(call, blocked)
+	return err == nil && ok
+}
+
+// Hit is Eval for a `never` check: a runtime error counts as a hit, since it can't show the call didn't happen.
+// Guard fields with the tool first (`call.tool == "Bash" && ...`): && stops before the field is read.
+func (e *Expect) Hit(call, blocked map[string]any) bool {
+	ok, err := e.run(call, blocked)
+	return err != nil || ok
+}
+
+func (e *Expect) run(call, blocked map[string]any) (bool, error) {
 	if e.prog == nil {
-		if e.compile() != nil {
-			return false
+		if err := e.compile(); err != nil {
+			return false, err
 		}
 	}
 	out, err := expr.Run(e.prog, map[string]any{"call": call, "blocked": blocked})
 	ok, isBool := out.(bool)
-	return err == nil && isBool && ok
+	if err == nil && !isBool {
+		err = fmt.Errorf("expect %s: not a bool", e.ID)
+	}
+	return ok, err
 }
 
 // UsableExpect is the checks that compile, in order, first of each id: a portal action keeps its good checks when

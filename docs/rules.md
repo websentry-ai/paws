@@ -176,7 +176,9 @@ the turn; only a prompt you type does:
 
 A rule whose checks all pass is graded `fixed`. A check that doesn't compile is dropped with a warning (`unbound-paws
 explain` shows it): the rule keeps enforcing, since checks only measure. A retried Write or Edit counts as the same
-call only when both the path and the new text match.
+call only when both the path and the new text match. An `if` that fails to run on a call (a string compared as a
+number, say) is no match, except for `never`, where it fails the check: it can't show the call didn't happen. Guard
+fields with the tool first (`call.tool == "Bash" && ...`); `&&` stops before reading them.
 
 ## Test a rule
 

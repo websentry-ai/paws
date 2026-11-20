@@ -291,3 +291,26 @@ func TestADenyFromTheTurnBeforeInTheSameSecond(t *testing.T) {
 		t.Errorf("this turn's deny graded %v, want [fixed]", got)
 	}
 }
+
+// A deny after the Stop belongs to the next turn, even when it names a call this turn's log saw refused.
+func TestADenyAfterTheStopIsTheNextTurns(t *testing.T) {
+	home := portalEnv(t, http.NotFoundHandler())
+	cwd, _ := os.Getwd()
+	writeRule(t, filepath.Join(cwd, ".paws", "pre-tool", "rm-gate.md"), rmRule)
+	transcript := filepath.Join(t.TempDir(), "sess-n.jsonl")
+	transcriptLines(t, transcript, time.Now().Add(-20*time.Second), []struct {
+		cmd    string
+		result string
+		isErr  bool
+	}{{"rm -rf build", "PreToolUse:Bash hook error: another hook refused it", true}, {"rm -rf build", "", false}})
+	stopped := time.Now().Add(-5 * time.Second)
+	runGate(t, map[string]any{"hook_event_name": "PreToolUse", "session_id": "sess-n", "transcript_path": transcript, "cwd": cwd,
+		"tool_name": "Bash", "tool_input": map[string]any{"command": "rm -rf build"}}) // the next turn's deny
+	in := hook.Input{HookEventName: "Stop", SessionID: "sess-n", TranscriptPath: transcript, CWD: cwd}
+	gradeTurn(&in, hook.ToEvent(&in), stopped)
+	for _, rec := range auditLines(t, home) {
+		if rec["event"] == "outcome" {
+			t.Errorf("graded the next turn's deny against this turn: %v", rec)
+		}
+	}
+}

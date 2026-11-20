@@ -51,7 +51,7 @@ func buildPortalCatalog(c *catalog.Catalog) map[string]any {
 		}
 		s.DefaultActions = append(s.DefaultActions, portalAction{ID: b.Name, Label: bindingLabel(b), Event: b.Event,
 			Tool: b.Matcher.Tool, CommandRegex: b.Matcher.CommandRegex, FileGlob: b.Matcher.FileGlob, MCPAction: b.Matcher.MCPAction,
-			Expect: b.Expect})
+			Expect: portalChecks(b.Expect)})
 		for _, t := range b.Tags {
 			tags[b.Action.Skill][t] = true
 		}

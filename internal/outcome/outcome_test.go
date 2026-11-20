@@ -175,3 +175,26 @@ func TestGradeComparesEditsExactly(t *testing.T) {
 		t.Errorf("whitespace change: %s, want changed_unchecked", got.Outcome)
 	}
 }
+
+// A never check whose if fails to run on a call can't show the call didn't happen: it fails.
+func TestNeverFailsWhenItCantRun(t *testing.T) {
+	r := parse(t, `---
+name: rm
+event: pre-tool
+matcher:
+  tool: Bash
+  command_regex: '\brm\s+-\S*r'
+action:
+  type: require-skill
+  skill: coreutils
+expect:
+  - id: small
+    when: never
+    if: call.text > 3
+---
+`)
+	calls := []Call{bash(1, "rm -rf build", true, ""), bash(2, "rm -rf build", false, "")}
+	if res := Grade(r, calls, 0); res.Checks["small"] || res.Outcome == Fixed {
+		t.Errorf("a never check that errors passed: %+v", res)
+	}
+}

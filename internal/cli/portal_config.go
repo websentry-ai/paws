@@ -68,7 +68,27 @@ type portalAction struct {
 	// Example is a call the trigger fires on, from the catalog's reviewed cases; the website shows it.
 	Example string `json:"example,omitempty"`
 	// Expect is what should follow a block (rule.Expect), carried into the rule file so the laptop grades it.
-	Expect []rule.Expect `json:"expect,omitempty"`
+	Expect portalChecks `json:"expect,omitempty"`
+}
+
+// portalChecks decodes an action's checks one by one: a check this paws can't decode (a newer shape, say) is
+// dropped, so it never stops the rest of the config from applying. A check only measures; the rule still enforces.
+type portalChecks []rule.Expect
+
+func (c *portalChecks) UnmarshalJSON(data []byte) error {
+	var raw []json.RawMessage
+	if json.Unmarshal(data, &raw) != nil {
+		*c = nil
+		return nil
+	}
+	*c = nil
+	for _, r := range raw {
+		var e rule.Expect
+		if json.Unmarshal(r, &e) == nil {
+			*c = append(*c, e)
+		}
+	}
+	return nil
 }
 
 // applyResult is what applying one config did.
@@ -462,7 +482,7 @@ func managedRuleFile(skill, name string, a portalAction, digest, dir string) ([]
 	}
 	m.Matcher.Tool, m.Matcher.CommandRegex, m.Matcher.FileGlob, m.Matcher.MCPAction = a.Tool, a.CommandRegex, a.FileGlob, a.MCPAction
 	m.Action.Type, m.Action.Skill = rule.ActionRequireSkill, skill
-	m.Expect = a.Expect
+	m.Expect = []rule.Expect(a.Expect)
 	if digest != "" {
 		m.Action.OnMiss, m.Action.Digest = rule.OnMissDigest, digest
 	}

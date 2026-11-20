@@ -6,6 +6,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"strings"
 	"time"
 
 	"github.com/websentry-ai/paws/internal/gate"
@@ -34,13 +35,13 @@ func gradeTurn(in *hook.Input, ev gate.Event, stoppedAt time.Time) {
 		return
 	}
 	// Stop hooks run async and can overlap: one grader at a time, so two never grade the same block.
-	unlock, ok := lockGrading()
+	unlock, ok := lockGrading(ev.Session)
 	if !ok {
 		return
 	}
 	defer unlock()
-	// From the turn's own start: a deny from the turn before isn't this turn's.
-	denies, graded := turnDenies(ev.Session, start)
+	// From the turn's own start to its Stop: a deny from the turn before, or the next one, isn't this turn's.
+	denies, graded := turnDenies(ev.Session, start, stoppedAt)
 	if len(denies) == 0 {
 		return
 	}
@@ -89,13 +90,15 @@ const gradeLockStale = 16 * time.Second
 
 // lockGrading takes ~/.paws/outcomes.lock by creating it (portable: no flock on Windows), waiting up to 12 s for
 // another grader. ok is false when it couldn't: that turn stays ungraded rather than graded twice.
-func lockGrading() (unlock func(), ok bool) {
+func lockGrading(session string) (unlock func(), ok bool) {
 	dir := gate.UserDir()
 	if dir == "" {
 		return nil, false
 	}
-	path := filepath.Join(dir, "outcomes.lock")
-	for i := 0; i < 120; i++ { // up to 12 s: long enough to outlast a lock its killed holder left
+	// One lock per session: graders of different sessions never touch the same denies, so they never wait on each
+	// other. A grader takes well under a second, so the wait is short and leaves the Stop hook time to sync.
+	path := filepath.Join(dir, "outcomes-"+lockName(session)+".lock")
+	for i := 0; i < 20; i++ { // up to 2 s
 		f, err := os.OpenFile(path, os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0o600)
 		if err == nil {
 			f.Close()
@@ -108,6 +111,16 @@ func lockGrading() (unlock func(), ok bool) {
 		time.Sleep(100 * time.Millisecond)
 	}
 	return nil, false
+}
+
+// lockName keeps a session id's letters, digits and dashes, so it is a safe file name.
+func lockName(session string) string {
+	return strings.Map(func(r rune) rune {
+		if r == '-' || r >= '0' && r <= '9' || r >= 'a' && r <= 'z' || r >= 'A' && r <= 'Z' {
+			return r
+		}
+		return -1
+	}, session)
 }
 
 // denyKey names a deny for "graded already": its rule file and name, agent and second.
@@ -130,7 +143,7 @@ func blockedCall(calls []outcome.Call, d auditRecord, at time.Time, used map[int
 
 // turnDenies reads the end of the audit log: the session's require-skill denies since `since`, and how many blocks
 // per deny key were graded already (a Stop that fires twice for one turn grades it once).
-func turnDenies(session string, since time.Time) ([]auditRecord, map[string]int) {
+func turnDenies(session string, since, until time.Time) ([]auditRecord, map[string]int) {
 	var denies []auditRecord
 	graded := map[string]int{}
 	log := gate.AuditPath()
@@ -139,13 +152,13 @@ func turnDenies(session string, since time.Time) ([]auditRecord, map[string]int)
 	}
 	// The log may have rotated mid-turn: the rotated file's end first, then the live one.
 	for _, path := range []string{log + ".1", log} {
-		readDenies(path, session, since, &denies, graded)
+		readDenies(path, session, since, until, &denies, graded)
 	}
 	return denies, graded
 }
 
 // readDenies reads the end of one audit file into denies and graded (see turnDenies).
-func readDenies(path, session string, since time.Time, denies *[]auditRecord, graded map[string]int) {
+func readDenies(path, session string, since, until time.Time, denies *[]auditRecord, graded map[string]int) {
 	f, err := os.Open(path)
 	if err != nil {
 		return
@@ -170,7 +183,7 @@ func readDenies(path, session string, since time.Time, denies *[]auditRecord, gr
 			case rec.Event == "outcome":
 				graded[denyKey(rec.Source, rec.Rule, rec.AgentID, blockedWhen(rec.BlockedExact, rec.BlockedAt))]++
 			case rec.Verdict == "deny" && rec.Rule != "":
-				if denyAfter(rec, since) {
+				if denyIn(rec, since, until) {
 					*denies = append(*denies, rec)
 				}
 			}
@@ -181,14 +194,14 @@ func readDenies(path, session string, since time.Time, denies *[]auditRecord, gr
 	}
 }
 
-// denyAfter reports whether a deny happened at or after since: by its exact time, or, for a record from an older
-// paws without one, by its second (so a deny in the turn's first second still counts).
-func denyAfter(rec auditRecord, since time.Time) bool {
+// denyIn reports whether a deny happened from since to until: by its exact time, or, for a record from an older
+// paws without one, by its second (so a deny in the turn's first or last second still counts).
+func denyIn(rec auditRecord, since, until time.Time) bool {
 	if at, err := time.Parse(time.RFC3339Nano, rec.At); err == nil {
-		return !at.Before(since)
+		return !at.Before(since) && !at.After(until)
 	}
 	ts, err := time.Parse(time.RFC3339, rec.TS)
-	return err == nil && !ts.Before(since.Truncate(time.Second))
+	return err == nil && !ts.Before(since.Truncate(time.Second)) && !ts.After(until)
 }
 
 // blockedWhen is a deny's time for "graded already": exact when the records have it, else its second.

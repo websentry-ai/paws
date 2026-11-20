@@ -90,7 +90,13 @@ func Grade(r *rule.Rule, calls []Call, blocked int) Result {
 		case rule.ExpectAfter:
 			pass = retry >= 0 && seen(scope[retry+1:], e)
 		case rule.ExpectNever:
-			pass = !seen(scope, e)
+			pass = true
+			for _, c := range scope {
+				if !c.Denied && e.Hit(c.Env(), blockedEnv) {
+					pass = false
+					break
+				}
+			}
 		}
 		res.Checks[e.ID] = pass
 	}

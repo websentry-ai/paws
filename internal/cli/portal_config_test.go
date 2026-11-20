@@ -616,3 +616,16 @@ func TestSyncInstallsACatalogSkillThisBuildDoesNotShip(t *testing.T) {
 		t.Errorf("the rule is not live: deny %q", d)
 	}
 }
+
+// A check in a shape this paws can't decode is dropped; the action and its other checks still apply.
+func TestPortalChecksDropOnlyTheBadCheck(t *testing.T) {
+	var a portalAction
+	body := `{"id":"rm","tool":"Bash","expect":[{"id":"bad","when":"never","if":["not","a","string"]},` +
+		`{"id":"good","when":"before","if":"call.tool == \"Bash\""}]}`
+	if err := json.Unmarshal([]byte(body), &a); err != nil {
+		t.Fatalf("one bad check failed the action: %v", err)
+	}
+	if len(a.Expect) != 1 || a.Expect[0].ID != "good" || a.Tool != "Bash" {
+		t.Errorf("decoded %+v; want the action with only the good check", a)
+	}
+}

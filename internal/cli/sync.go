@@ -42,8 +42,21 @@ type actionUpload struct {
 	MCP     *gate.MCPCall `json:"mcp,omitempty"`
 }
 
+// outcomeUpload is what `paws sync` uploads about one graded block (see outcomes.go): the skill, the rule's action,
+// the outcome and each expect check's result. No call text.
+type outcomeUpload struct {
+	Kind      string          `json:"kind"` // "outcome"
+	TS        string          `json:"ts"`
+	BlockedAt string          `json:"blocked_at"`
+	Skill     string          `json:"skill"`
+	Action    string          `json:"action_id,omitempty"` // the catalog or portal action, from a managed rule's name
+	Tool      string          `json:"tool,omitempty"`
+	Outcome   string          `json:"outcome"`
+	Checks    map[string]bool `json:"checks,omitempty"`
+}
+
 type syncBody struct {
-	Records           []any      `json:"records"` // ruleUpload and actionUpload
+	Records           []any      `json:"records"` // ruleUpload, actionUpload and outcomeUpload
 	AppliedConfigHash *string    `json:"applied_config_hash"`
 	Inventory         *inventory `json:"inventory"`
 }
@@ -290,7 +303,8 @@ func pendingSync(paths []string, cur syncCursor) []pendingRecord {
 				continue
 			}
 			isRule := r.Rule != "" && (r.Verdict == "allow" || r.Verdict == "deny")
-			if !isRule && (r.Event != "action" || r.Action == "") {
+			isOutcome := r.Event == "outcome" && r.Outcome != "" && r.Skill != ""
+			if !isRule && !isOutcome && (r.Event != "action" || r.Action == "") {
 				continue
 			}
 			key := r.Rule + "|" + r.Session
@@ -303,7 +317,9 @@ func pendingSync(paths []string, cur syncCursor) []pendingRecord {
 			if after.TS < cur.TS || after.TS == cur.TS && after.N <= cur.N {
 				continue
 			}
-			if !isRule {
+			if isOutcome {
+				out = append(out, pendingRecord{rec: toOutcomeUpload(r), after: after})
+			} else if !isRule {
 				out = append(out, pendingRecord{rec: toActionUpload(r), after: after})
 			} else if rec, ok := toRuleUpload(r, already, rules); ok {
 				out = append(out, pendingRecord{rec: rec, after: after})
@@ -347,6 +363,19 @@ func toActionUpload(r auditRecord) actionUpload {
 	}
 	if filepath.IsAbs(rec.File) || rec.File == ".." || strings.HasPrefix(rec.File, "../") {
 		rec.File = ""
+	}
+	return rec
+}
+
+// toOutcomeUpload passes an outcome record through. A managed rule is named <skill>--<action id>; the action id goes
+// up so the portal can show which trigger the outcome belongs to.
+func toOutcomeUpload(r auditRecord) outcomeUpload {
+	rec := outcomeUpload{Kind: "outcome", TS: r.TS, BlockedAt: r.BlockedAt, Skill: r.Skill, Tool: r.Tool,
+		Outcome: r.Outcome, Checks: r.Checks}
+	if managed(r.Source) || fromCatalog(r.Source) {
+		if _, id, ok := strings.Cut(r.Rule, "--"); ok {
+			rec.Action = id
+		}
 	}
 	return rec
 }

@@ -140,6 +140,40 @@ Delivery is keyed by rule name: two rules with the same name share it.
 When several rules match one call, one deny names every skill still missing,
 so a single retry clears them all.
 
+## expect
+
+Optional checks of what should follow when the rule blocks a call. paws grades them at the end of the turn, on
+the turn's own tool calls, and keeps only pass or fail (see [outcome records](telemetry.md#records-schema-v2)):
+
+```yaml
+expect:
+  - id: listed-first
+    label: Listed what it would delete first
+    when: before
+    if: call.tool == "Bash" && call.text matches "^(ls|du|stat)\\b"
+  - id: not-home
+    label: Never deleted the home directory
+    when: never
+    if: call.text matches "rm\\s+-\\S*r\\S*\\s+(~|\\$HOME)/?(\\s|$)"
+```
+
+`if` is an [expr](https://expr-lang.org) expression over two calls: `call`, the one being checked, and `blocked`,
+the call the rule denied. Each has `tool` (`Bash`, `Write`, `Edit`, `mcp__notion__create_pages` …), `text` (a Bash
+command, what a Write writes, an Edit's new text, an MCP call's text arguments), `input` (the raw tool input, so
+`call.input.parent != nil` works for any field) and, for MCP calls, `mcp.server`, `mcp.tool` and `mcp.class`.
+
+`when` picks the calls the check looks at. All of them come from the same turn and the blocked agent (subagents
+it starts after the deny count; one already running doesn't):
+
+| `when` | Passes when |
+|---|---|
+| `before` | a call from the deny up to the retry, the retry included, matches |
+| `retry` | the retry (the next call the rule matches that goes through) matches |
+| `after` | a call after the retry matches |
+| `never` | no call after the deny matches |
+
+A rule whose checks all pass is graded `fixed`.
+
 ## Test a rule
 
 ```

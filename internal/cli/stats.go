@@ -52,6 +52,11 @@ type auditRecord struct {
 	Command string        `json:"command"`
 	File    string        `json:"file"`
 	MCP     *gate.MCPCall `json:"mcp"`
+	AgentID string        `json:"agent_id"`
+	// outcome records (see outcomes.go): what followed a block, graded at the end of its turn.
+	Outcome   string          `json:"outcome"`
+	Checks    map[string]bool `json:"checks"`
+	BlockedAt string          `json:"blocked_at"`
 }
 
 // summarize reads audit records in order (rotated file first) and counts them.

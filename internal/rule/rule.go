@@ -88,6 +88,7 @@ type Rule struct {
 	Provenance Provenance `yaml:"provenance"`
 	Summary    string     `yaml:"summary"` // what the skill teaches, for the portal; the runner never reads it
 	Tags       []string   `yaml:"tags"`
+	Expect     []Expect   `yaml:"expect"` // checks of what should follow a block (see Expect); graded after the turn
 
 	SourcePath string         `yaml:"-"`
 	Body       string         `yaml:"-"` // the markdown after the frontmatter: the rule's README
@@ -146,6 +147,12 @@ func Parse(data []byte, path string) (*Rule, error) {
 		if err := RelativeInside(r.Action.Digest); err != nil {
 			return nil, fmt.Errorf("digest %w", err)
 		}
+	}
+	if len(r.Expect) > 0 && Kind(r.Event) != KindTool {
+		return nil, fmt.Errorf("expect needs a tool event: a session-start rule blocks no call")
+	}
+	if err := validateExpect(r.Expect); err != nil {
+		return nil, err
 	}
 	if Kind(r.Event) == KindSession {
 		if r.Matcher.Tool != "" || r.Matcher.FileGlob != "" || r.Matcher.MCPAction != "" {

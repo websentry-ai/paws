@@ -67,6 +67,8 @@ type portalAction struct {
 	MCPAction    string `json:"mcp_action,omitempty"`
 	// Example is a call the trigger fires on, from the catalog's reviewed cases; the website shows it.
 	Example string `json:"example,omitempty"`
+	// Expect is what should follow a block (rule.Expect), carried into the rule file so the laptop grades it.
+	Expect []rule.Expect `json:"expect,omitempty"`
 }
 
 // applyResult is what applying one config did.
@@ -447,6 +449,7 @@ type managedRule struct {
 		OnMiss string `yaml:"on_miss,omitempty"`
 		Digest string `yaml:"digest,omitempty"`
 	} `yaml:"action"`
+	Expect []rule.Expect `yaml:"expect,omitempty"`
 }
 
 // managedRuleFile renders one action as a require-skill rule, the label as its body, and checks
@@ -459,6 +462,7 @@ func managedRuleFile(skill, name string, a portalAction, digest, dir string) ([]
 	}
 	m.Matcher.Tool, m.Matcher.CommandRegex, m.Matcher.FileGlob, m.Matcher.MCPAction = a.Tool, a.CommandRegex, a.FileGlob, a.MCPAction
 	m.Action.Type, m.Action.Skill = rule.ActionRequireSkill, skill
+	m.Expect = a.Expect
 	if digest != "" {
 		m.Action.OnMiss, m.Action.Digest = rule.OnMissDigest, digest
 	}

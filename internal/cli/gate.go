@@ -42,6 +42,7 @@ func Gate() (code int) {
 		gate.LogTelemetry("turn_end", ev, nil)
 		allow()
 		wrote = true       // a panic below must not print a second decision
+		gradeTurn(&in, ev) // what followed each block this turn; before the sync, so it goes up with it
 		syncInHook(in.CWD) // the async UserPromptSubmit and Stop hooks are the only hooks that use the network
 		return 0
 	case "UserPromptSubmit":

@@ -209,8 +209,10 @@ func TestSameKeepsQuotedSpacing(t *testing.T) {
 		{"cd x && rm -rf build", "rm -rf build", true},
 		{"rm -rf 'a  b'", "rm -rf 'a b'", false},
 		{`rm -rf "a  b"`, `rm  -rf "a  b"`, true},
-		{`rm -rf "x\" a  b"`, `rm -rf "x\" a b"`, false}, // an escaped quote doesn't end the string
-		{`rm -rf a\  b`, `rm -rf a\ b`, false},           // an escaped space is part of the name
+		{`rm -rf "x\" a  b"`, `rm -rf "x\" a b"`, false},       // an escaped quote doesn't end the string
+		{`rm -rf a\  b`, `rm -rf a\ b`, false},                 // an escaped space is part of the name
+		{"echo a\nrm -rf build", "echo a rm -rf build", false}, // a newline ends a command
+		{"echo a\n  rm -rf build", "echo a; rm -rf build", true},
 	}
 	for _, c := range cases {
 		if got := Same(c.a, c.b); got != c.same {
@@ -244,5 +246,18 @@ action:
 	res := Grade(r, calls, 0)
 	if res.Retry == nil || res.Retry.Tool != "Bash" || res.Outcome != SameRetry {
 		t.Errorf("graded %+v; want the Bash retry, same_retry", res)
+	}
+}
+
+// An Edit retried with the same new text but another old_string changes a different part of the file.
+func TestSameCallComparesTheWholeEdit(t *testing.T) {
+	edit := func(old string) Call {
+		return Call{Tool: "Edit", Target: "/x/a.go", Text: "b", Input: map[string]any{"file_path": "/x/a.go", "old_string": old, "new_string": "b"}}
+	}
+	if sameCall(edit("a"), edit("c")) {
+		t.Error("two edits with different old_string read as the same call")
+	}
+	if !sameCall(edit("a"), edit("a")) {
+		t.Error("the same edit read as a change")
 	}
 }

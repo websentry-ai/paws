@@ -4,6 +4,7 @@
 package outcome
 
 import (
+	"reflect"
 	"regexp"
 	"strings"
 	"time"
@@ -156,13 +157,16 @@ func inScope(calls []Call, blocked int) []Call {
 }
 
 // sameCall: the same tool, and for Bash the same command once setup in front and spacing are ignored; any other
-// call is the same only when its target and text match exactly (a Write's content, an Edit's new text: spacing counts there).
+// call is the same only when its whole input matches exactly (a Write's content, an Edit's new text: spacing counts there).
 func sameCall(a, b Call) bool {
 	if a.Tool != b.Tool {
 		return false // a rule over several tools: another tool is a change, whatever its input
 	}
 	if a.Tool == "Bash" {
 		return Same(a.Target, b.Target)
+	}
+	if a.Input != nil && b.Input != nil {
+		return reflect.DeepEqual(a.Input, b.Input) // the whole input: an Edit's old_string, replace_all, too
 	}
 	return a.Target == b.Target && a.Text == b.Text
 }
@@ -185,12 +189,12 @@ func Same(a, b string) bool {
 	return norm(a) == norm(b)
 }
 
-// squeeze trims a command and turns each run of whitespace outside quotes into one space, reading quotes and
-// backslash escapes as a shell does.
+// squeeze trims a command and turns each run of whitespace outside quotes into one space, and each unquoted newline
+// or ';' (both end a command) into one ';', reading quotes and backslash escapes as a shell does.
 func squeeze(s string) string {
 	var b strings.Builder
 	var quote rune
-	space, escaped := false, false
+	space, newline, escaped := false, false, false
 	for _, r := range strings.TrimSpace(s) {
 		switch {
 		case escaped: // the character after a backslash is literal: an escaped quote or space
@@ -203,14 +207,21 @@ func squeeze(s string) string {
 			}
 		case r == '\'' || r == '"':
 			quote = r
-		case r == ' ' || r == '\t' || r == '\n' || r == '\r':
+		case r == '\n' || r == ';':
+			newline = true // separates commands: kept, as one ';', with the spacing around it dropped
+			space = false
+			continue
+		case r == ' ' || r == '\t' || r == '\r':
 			space = true
 			continue
 		}
-		if space {
+		switch {
+		case newline:
+			b.WriteByte(';')
+		case space && b.Len() > 0:
 			b.WriteByte(' ')
-			space = false
 		}
+		newline, space = false, false
 		b.WriteRune(r)
 	}
 	return b.String()

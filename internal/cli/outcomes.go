@@ -34,7 +34,7 @@ func gradeTurn(in *hook.Input, ev gate.Event, stoppedAt time.Time) {
 	// The session's denies up to the Stop, from the audit log's end. Most turns have none left to grade: then the
 	// transcript, which grows with the session, isn't read at all. Denies before the last Stop graded are settled,
 	// graded or never gradable (an interrupted turn, say), so only newer ones count here.
-	all, graded := turnDenies(ev.Session, time.Time{}, stoppedAt)
+	all, allows, graded := turnDenies(ev.Session, time.Time{}, stoppedAt)
 	settled := gradedThrough(ev.Session)
 	if settled.After(stoppedAt) {
 		settled = time.Time{} // a later Stop already ran: this one may still have its own turn's denies
@@ -97,7 +97,12 @@ func gradeTurn(in *hook.Input, ev gate.Event, stoppedAt time.Time) {
 		if seen[key]++; seen[key] <= graded[key] {
 			continue
 		}
-		res := outcome.Grade(r, calls, i)
+		var applied func(outcome.Call) bool
+		if len(r.When) > 0 {
+			ids := appliedCalls(calls, allows, ruleKey)
+			applied = func(c outcome.Call) bool { return ids[c.ID] }
+		}
+		res := outcome.GradeWhere(r, calls, i, applied)
 		rec := map[string]any{"session": ev.Session, "agent": ev.Agent, "rule": d.Rule, "skill": r.Action.Skill,
 			"source": d.Source, "tool": d.Tool, "outcome": res.Outcome, "checks": res.Checks, "blocked_at": d.TS}
 		if d.AgentID != "" {
@@ -170,24 +175,61 @@ func blockedCall(calls []outcome.Call, d auditRecord, at time.Time, used map[int
 	return best
 }
 
-// turnDenies reads the end of the audit log: the session's require-skill denies since `since`, and how many blocks
-// per deny key were graded already (a Stop that fires twice for one turn grades it once).
-func turnDenies(session string, since, until time.Time) ([]auditRecord, map[string]int) {
-	var denies []auditRecord
-	graded := map[string]int{}
+// turnDenies reads the end of the audit log: the session's require-skill denies and allows since `since`, and how
+// many blocks per deny key were graded already (a Stop that fires twice for one turn grades it once).
+func turnDenies(session string, since, until time.Time) (denies, allows []auditRecord, graded map[string]int) {
+	var fired []auditRecord
+	graded = map[string]int{}
 	log := gate.AuditPath()
 	if log == "" {
-		return nil, graded
+		return nil, nil, graded
 	}
 	// The log may have rotated mid-turn: the rotated file's end first, then the live one.
 	for _, path := range []string{log + ".1", log} {
-		readDenies(path, session, since, until, &denies, graded)
+		readDenies(path, session, since, until, &fired, graded)
 	}
-	return denies, graded
+	for _, rec := range fired {
+		if rec.Verdict == "deny" {
+			denies = append(denies, rec)
+		} else {
+			allows = append(allows, rec)
+		}
+	}
+	return denies, allows, graded
 }
 
-// readDenies reads the end of one audit file into denies and graded (see turnDenies).
-func readDenies(path, session string, since, until time.Time, denies *[]auditRecord, graded map[string]int) {
+// appliedCalls is the calls a rule applied to and let through, by tool_use id: for each allow it logged, the latest
+// call that ran with its tool, agent and target at or before it.
+func appliedCalls(calls []outcome.Call, allows []auditRecord, ruleKey string) map[string]bool {
+	ids := map[string]bool{}
+	for _, a := range allows {
+		if a.Source+"|"+a.Rule != ruleKey {
+			continue
+		}
+		at, err := time.Parse(time.RFC3339Nano, a.At)
+		if err != nil {
+			at, _ = time.Parse(time.RFC3339, a.TS)
+			at = at.Add(time.Second - time.Nanosecond)
+		}
+		best := -1
+		for i, c := range calls {
+			if c.Denied || ids[c.ID] || c.Tool != a.Tool || c.Agent != a.AgentID || c.At.After(at) ||
+				gate.AuditTarget(c.Target) != a.Target {
+				continue
+			}
+			if best < 0 || !c.At.Before(calls[best].At) {
+				best = i
+			}
+		}
+		if best >= 0 {
+			ids[calls[best].ID] = true
+		}
+	}
+	return ids
+}
+
+// readDenies reads the end of one audit file: its fired-rule records into fired, outcomes into graded.
+func readDenies(path, session string, since, until time.Time, fired *[]auditRecord, graded map[string]int) {
 	f, err := os.Open(path)
 	if err != nil {
 		return
@@ -211,9 +253,9 @@ func readDenies(path, session string, since, until time.Time, denies *[]auditRec
 			switch {
 			case rec.Event == "outcome":
 				graded[denyKey(rec.Source, rec.Rule, rec.AgentID, blockedWhen(rec.BlockedExact, rec.BlockedAt))]++
-			case rec.Verdict == "deny" && rec.Rule != "":
+			case rec.Verdict != "" && rec.Rule != "": // a fired rule: a deny, or an allow
 				if denyIn(rec, since, until) {
-					*denies = append(*denies, rec)
+					*fired = append(*fired, rec)
 				}
 			}
 		}

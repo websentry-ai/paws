@@ -61,12 +61,19 @@ type Result struct {
 // together. Only the blocked agent's later calls count, plus, for a block in the main conversation, subagents it
 // started after the block: a subagent already running is a separate task.
 func Grade(r *rule.Rule, calls []Call, blocked int) Result {
+	return GradeWhere(r, calls, blocked, nil)
+}
+
+// GradeWhere is Grade where applied, when set, also decides which calls the rule applied to. A rule's `when`
+// conditions depend on the moment of the call (whether the file existed, say), so they can't be checked afterwards:
+// the caller answers from what the gate logged.
+func GradeWhere(r *rule.Rule, calls []Call, blocked int, applied func(Call) bool) Result {
 	b := calls[blocked]
 	scope := inScope(calls, blocked)
 	retry := -1
 	for i, c := range scope {
 		// A Skill call is how Claude answers the deny (the gate never holds one), not a retry of the blocked call.
-		if !c.Denied && c.Tool != "Skill" && r.Matches(c.Tool, c.Target) {
+		if !c.Denied && c.Tool != "Skill" && r.Matches(c.Tool, c.Target) && (applied == nil || applied(c)) {
 			retry = i
 			break
 		}

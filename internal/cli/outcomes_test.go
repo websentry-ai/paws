@@ -394,3 +394,61 @@ func TestARuleRebindingSinceTheDenyLeavesItUngraded(t *testing.T) {
 		}
 	}
 }
+
+// A rule with a when condition: a later call it matches but didn't apply to (a Write to a file that existed, under
+// new-file) isn't the retry. The retry is the call the gate logged it allowing.
+func TestARuleWithWhenRetriesOnlyWhereItApplied(t *testing.T) {
+	home := portalEnv(t, http.NotFoundHandler())
+	cwd, _ := os.Getwd()
+	writeRule(t, filepath.Join(cwd, ".paws", "pre-tool", "new-go.md"),
+		"name: new-go\nevent: pre-tool\nmatcher:\n  tool: Write\nwhen: new-file\naction:\n  type: require-skill\n  skill: go-style\n")
+	dir := t.TempDir()
+	fresh, existing := filepath.Join(dir, "new.go"), filepath.Join(dir, "old.go")
+	os.WriteFile(existing, []byte("package x\n"), 0o600)
+	transcript := filepath.Join(t.TempDir(), "sess-w.jsonl")
+	write := func(path string) map[string]any {
+		return map[string]any{"hook_event_name": "PreToolUse", "session_id": "sess-w", "transcript_path": transcript, "cwd": cwd,
+			"tool_name": "Write", "tool_input": map[string]any{"file_path": path, "content": "package x\n"}}
+	}
+	start := time.Now().Add(-20 * time.Second)
+	at := func(s int) string { return start.Add(time.Duration(s) * time.Second).UTC().Format(time.RFC3339Nano) }
+	call := func(s int, id, path string, refused bool) string {
+		in, _ := json.Marshal(map[string]any{"file_path": path, "content": "package x\n"})
+		res := map[bool]string{true: `"PreToolUse:Write hook error: paws: load go-style"`, false: `"ok"`}[refused]
+		return `{"type":"assistant","timestamp":"` + at(s) + `","message":{"content":[{"type":"tool_use","id":"` + id + `","name":"Write","input":` + string(in) + `}]}}` + "\n" +
+			`{"type":"user","timestamp":"` + at(s+1) + `","message":{"content":[{"type":"tool_result","tool_use_id":"` + id + `","is_error":` + map[bool]string{true: "true", false: "false"}[refused] + `,"content":` + res + `}]}}`
+	}
+	os.WriteFile(transcript, []byte(strings.Join([]string{
+		`{"type":"user","timestamp":"` + at(0) + `","message":{"role":"user","content":"add new.go"}}`,
+		call(1, "w1", fresh, true), call(3, "w2", existing, false), call(5, "w3", fresh, false)}, "\n")+"\n"), 0o600)
+	runGate(t, write(fresh)) // the deny of w1
+	// The gate's records as they happened: the deny just after w1, and an allow just after w3 (the skill loaded).
+	var lines []string
+	for _, rec := range auditLines(t, home) {
+		if rec["verdict"] == "deny" {
+			deny := rec
+			deny["ts"], deny["at"] = at(1)[:19]+"Z", start.Add(1100*time.Millisecond).UTC().Format(time.RFC3339Nano)
+			allow := map[string]any{}
+			for k, v := range rec {
+				allow[k] = v
+			}
+			allow["verdict"], allow["satisfied_by"] = "allow", "skill-load"
+			allow["ts"], allow["at"] = at(5)[:19]+"Z", start.Add(5100*time.Millisecond).UTC().Format(time.RFC3339Nano)
+			for _, r := range []map[string]any{deny, allow} {
+				b, _ := json.Marshal(r)
+				lines = append(lines, string(b))
+			}
+		}
+	}
+	os.WriteFile(filepath.Join(home, "audit.log"), []byte(strings.Join(lines, "\n")+"\n"), 0o600)
+	runGate(t, map[string]any{"hook_event_name": "Stop", "session_id": "sess-w", "transcript_path": transcript, "cwd": cwd})
+	var got []any
+	for _, rec := range auditLines(t, home) {
+		if rec["event"] == "outcome" {
+			got = append(got, rec["outcome"])
+		}
+	}
+	if len(got) != 1 || got[0] != "same_retry" {
+		t.Errorf("outcomes %v; want [same_retry]: the write to old.go isn't one new-file applied to", got)
+	}
+}

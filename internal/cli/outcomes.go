@@ -102,6 +102,7 @@ func gradeTurn(in *hook.Input, ev gate.Event, stoppedAt time.Time) {
 			ids := appliedCalls(calls, allows, ruleKey)
 			applied = func(c outcome.Call) bool { return ids[c.ID] }
 		}
+		calls[i].DeniedAt = at
 		res := outcome.GradeWhere(r, calls, i, applied)
 		rec := map[string]any{"session": ev.Session, "agent": ev.Agent, "rule": d.Rule, "skill": r.Action.Skill,
 			"source": d.Source, "tool": d.Tool, "outcome": res.Outcome, "checks": res.Checks, "blocked_at": d.TS}

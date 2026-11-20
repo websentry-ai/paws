@@ -263,3 +263,15 @@ func TestSameCallComparesTheWholeEdit(t *testing.T) {
 		t.Error("the same edit read as a change")
 	}
 }
+
+// A subagent launched while the blocked call waited on its hooks was already running at the deny: not in scope.
+func TestASubagentStartedBeforeTheDenyIsOutOfScope(t *testing.T) {
+	r := parse(t, ruleWithChecks)
+	blocked := bash(1, "rm -rf build", true, "")
+	blocked.DeniedAt = t0.Add(1500 * time.Millisecond)
+	sub := bash(3, "rm -rf build", false, "agent-1")
+	sub.AgentStart = t0.Add(1200 * time.Millisecond) // after the call was logged, before paws denied it
+	if res := Grade(r, []Call{blocked, sub}, 0); res.Outcome != Stopped {
+		t.Errorf("graded %s; want stopped: the subagent was running before the deny", res.Outcome)
+	}
+}

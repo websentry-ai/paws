@@ -26,6 +26,8 @@ type Call struct {
 	// when unknown, in which case its first call stands in.
 	AgentStart time.Time
 	Denied     bool // it never ran: a hook (paws or another) refused it, or the user rejected it
+	// DeniedAt is when paws denied the call, if known: a little after At, since a call is logged before its hooks run.
+	DeniedAt time.Time
 }
 
 // Env is the call as an expect check sees it.
@@ -151,12 +153,18 @@ func inScope(calls []Call, blocked int) []Call {
 			first[c.Agent] = start
 		}
 	}
+	// A subagent counts when it started after the deny itself: one launched while the call waited on its hooks was
+	// already running.
+	denied := b.At
+	if b.DeniedAt.After(denied) {
+		denied = b.DeniedAt
+	}
 	var out []Call
 	for _, c := range calls[blocked+1:] {
 		switch {
 		case c.Agent == b.Agent:
 			out = append(out, c)
-		case b.Agent == "" && c.Agent != "" && first[c.Agent].After(b.At):
+		case b.Agent == "" && c.Agent != "" && first[c.Agent].After(denied):
 			out = append(out, c)
 		}
 	}

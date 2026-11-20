@@ -154,9 +154,12 @@ func inScope(calls []Call, blocked int) []Call {
 	return out
 }
 
-// sameCall: a Bash retry is the same command once setup in front and spacing are ignored; any other call is the
-// same only when its target and text match exactly (a Write's content, an Edit's new text: spacing counts there).
+// sameCall: the same tool, and for Bash the same command once setup in front and spacing are ignored; any other
+// call is the same only when its target and text match exactly (a Write's content, an Edit's new text: spacing counts there).
 func sameCall(a, b Call) bool {
+	if a.Tool != b.Tool {
+		return false // a rule over several tools: another tool is a change, whatever its input
+	}
 	if a.Tool == "Bash" {
 		return Same(a.Target, b.Target)
 	}

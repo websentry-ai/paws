@@ -218,3 +218,12 @@ func TestSameKeepsQuotedSpacing(t *testing.T) {
 		}
 	}
 }
+
+// Another tool with the same input is a changed call, not the same one.
+func TestSameCallNeedsTheSameTool(t *testing.T) {
+	a := Call{Tool: "mcp__fs__move_file", Target: `{"path":"x"}`, Text: "x"}
+	b := Call{Tool: "mcp__fs__delete_file", Target: `{"path":"x"}`, Text: "x"}
+	if sameCall(a, b) {
+		t.Error("two MCP tools with one input read as the same call")
+	}
+}

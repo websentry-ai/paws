@@ -110,3 +110,19 @@ func TestTurnCallsMarksRejectedCallsAsNotRun(t *testing.T) {
 		t.Fatalf("calls %+v, %v; want the rejected call marked as not run", calls, err)
 	}
 }
+
+// A command that ran and failed, printing a refusal's words, isn't a refused call.
+func TestTurnCallsDoesNotReadOutputAsARefusal(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "s.jsonl")
+	os.WriteFile(path, []byte(strings.Join([]string{
+		`{"type":"user","timestamp":"2026-11-20T10:00:00Z","message":{"content":"run the tests"}}`,
+		`{"type":"assistant","timestamp":"2026-11-20T10:00:01Z","message":{"content":[{"type":"tool_use","id":"a","name":"Bash","input":{"command":"go test ./..."}}]}}`,
+		`{"type":"user","timestamp":"2026-11-20T10:00:02Z","message":{"content":[{"type":"tool_result","tool_use_id":"a","is_error":true,"content":"Exit code 1\n--- FAIL: want PreToolUse:Bash hook error: paws"}]}}`,
+		`{"type":"assistant","timestamp":"2026-11-20T10:00:03Z","message":{"content":[{"type":"tool_use","id":"b","name":"Bash","input":{"command":"rm -rf build"}}]}}`,
+		`{"type":"user","timestamp":"2026-11-20T10:00:04Z","message":{"content":[{"type":"tool_result","tool_use_id":"b","is_error":true,"content":"<tool_use_error>PreToolUse:Bash hook error: paws: load coreutils</tool_use_error>"}]}}`,
+	}, "\n")+"\n"), 0o600)
+	calls, _, err := TurnCalls(path, time.Time{})
+	if err != nil || len(calls) != 2 || calls[0].Denied || !calls[1].Denied {
+		t.Fatalf("calls %+v, %v; want only b refused", calls, err)
+	}
+}

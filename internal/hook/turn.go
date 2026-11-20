@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"regexp"
 	"sort"
 	"strings"
 	"time"
@@ -140,10 +141,14 @@ func hookDenied(content json.RawMessage) bool {
 			s += p.Text
 		}
 	}
-	// Refused by a hook, or rejected by the user at the permission prompt: either way the call never ran.
-	return strings.Contains(s, "PreToolUse:") && strings.Contains(s, " hook error: ") ||
-		strings.Contains(s, "The user doesn't want to proceed with this tool use")
+	// Refused by a hook, or rejected by the user at the permission prompt: either way the call never ran. Anchored
+	// at the start, so a command that ran and printed these words isn't read as one that didn't.
+	s = strings.TrimPrefix(s, "<tool_use_error>")
+	return refusedPrefix.MatchString(s) || strings.HasPrefix(s, "The user doesn't want to proceed with this tool use")
 }
+
+// refusedPrefix opens a refused call's result, as Claude Code writes it (gate.blobDenyPrefix).
+var refusedPrefix = regexp.MustCompile(`^PreToolUse:\S+ hook error: `)
 
 func toCall(b turnBlock, at time.Time, agent string) outcome.Call {
 	in := Input{HookEventName: "PreToolUse", ToolName: b.Name, ToolInput: b.Input}

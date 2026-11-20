@@ -10,6 +10,7 @@ import (
 	"os"
 	"path/filepath"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/websentry-ai/paws/internal/gate"
@@ -45,8 +46,8 @@ type catalogTriggers struct {
 }
 
 // skipSynced leaves out the calls the hooks have uploaded already: each call made at or after the login that the
-// hook logged, matched one to one against the audit log's action records of that session and tool. A session the
-// hook joined partway counts its earlier calls; one it never saw counts all of them.
+// hook logged, matched one to one against the audit log's action records of the same session. A session the hook
+// joined partway keeps its earlier calls; one it never saw keeps all of them.
 type skipSynced struct {
 	history.Source
 	after  time.Time
@@ -55,33 +56,63 @@ type skipSynced struct {
 
 // loggedCall is an action record: what the hook wrote when a call finished.
 type loggedCall struct {
-	tool string
-	at   time.Time
-	used bool
+	tool, command, file, action string
+	at                          time.Time
+	used                        bool
 }
 
 // maxCallTime bounds how long after a call starts the hook may log it (a long build or test run).
 const maxCallTime = 30 * time.Minute
 
+// Calls reads every call first: a resumed or forked session copies calls into another log under the same id, and
+// a call uploaded through one copy must not count through another. A call whose any copy the hook logged is left out
+// with all its copies.
 func (s skipSynced) Calls(since, until time.Time, fn func(history.Call)) (int, error) {
-	return s.Source.Calls(since, until, func(c history.Call) {
-		if !c.At.Before(s.after) && s.take(c) {
-			return
-		}
-		fn(c)
-	})
-}
-
-// take marks and reports the first unused record of c's session and tool written while c could have been running.
-// The log has whole seconds, so a record may read up to a second before the call.
-func (s skipSynced) take(c history.Call) bool {
-	for _, r := range s.logged[c.Session] {
-		if !r.used && r.tool == c.Tool && !r.at.Before(c.At.Add(-time.Second)) && r.at.Before(c.At.Add(maxCallTime)) {
-			r.used = true
-			return true
+	var calls []history.Call
+	sessions, err := s.Source.Calls(since, until, func(c history.Call) { calls = append(calls, c) })
+	if err != nil {
+		return sessions, err
+	}
+	synced := map[string]bool{}
+	for _, c := range calls {
+		if !c.At.Before(s.after) && s.take(c) && c.ID != "" {
+			synced[c.ID] = true
 		}
 	}
+	for _, c := range calls {
+		if c.ID != "" && synced[c.ID] || c.ID == "" && !c.At.Before(s.after) && s.take(c) {
+			continue
+		}
+		fn(c)
+	}
+	return sessions, nil
+}
+
+// take marks and reports the earliest unused record of c's session that is c: same tool, the same command (Bash,
+// as the hook redacts it), file (as the hook keeps it, relative to the repo) or action key, written while c could
+// have been running. The log has whole seconds, so a record may read up to a second before the call.
+func (s skipSynced) take(c history.Call) bool {
+	want := gate.DescribeAction(gate.Event{Tool: c.Tool, Target: c.Target})
+	for _, r := range s.logged[c.Session] {
+		if r.used || r.tool != c.Tool || r.at.Before(c.At.Add(-time.Second)) || !r.at.Before(c.At.Add(maxCallTime)) {
+			continue
+		}
+		switch {
+		case c.Tool == "Bash" && r.command != want.Command:
+			continue
+		case fileTool(c.Tool) && r.file != "" && c.Target != r.file && !strings.HasSuffix(c.Target, "/"+r.file):
+			continue
+		case !fileTool(c.Tool) && c.Tool != "Bash" && r.action != want.Action:
+			continue
+		}
+		r.used = true
+		return true
+	}
 	return false
+}
+
+func fileTool(tool string) bool {
+	return tool == "Read" || tool == "Write" || tool == "Edit" || tool == "NotebookEdit"
 }
 
 // loggedCalls are the audit log's action records at or after `after`, by session.
@@ -107,12 +138,15 @@ func loggedCalls(after time.Time) map[string][]*loggedCall {
 				TS      string `json:"ts"`
 				Session string `json:"session"`
 				Tool    string `json:"tool"`
+				Command string `json:"command"`
+				File    string `json:"file"`
+				Action  string `json:"action"`
 			}
 			if json.Unmarshal(line, &r) != nil || r.Session == "" {
 				continue
 			}
 			if ts, err := time.Parse(time.RFC3339, r.TS); err == nil && !ts.Before(after) {
-				out[r.Session] = append(out[r.Session], &loggedCall{tool: r.Tool, at: ts})
+				out[r.Session] = append(out[r.Session], &loggedCall{tool: r.Tool, command: r.Command, file: r.File, action: r.Action, at: ts})
 			}
 		}
 		f.Close()

@@ -60,8 +60,10 @@ type loggedCall struct {
 	used                        bool
 }
 
-// maxCallTime bounds how long after a call starts the hook may log it (a long build or test run).
-const maxCallTime = 30 * time.Minute
+// maxCallTime bounds how long after a call starts the hook may log it: a permission prompt left open, then a long
+// build or test run. A record must also carry the call's own command, file or action, so a long window can't pair
+// two different calls.
+const maxCallTime = 12 * time.Hour
 
 // Calls reads every call first: a resumed or forked session copies calls into another log under the same id, and
 // a call uploaded through one copy must not count through another. A call whose any copy the hook logged is left out
@@ -74,7 +76,7 @@ func (s skipSynced) Calls(since, until time.Time, fn func(history.Call)) (int, e
 	}
 	synced := map[string]bool{}
 	for _, c := range calls {
-		if c.ID != "" && c.Tool != history.SkillTool && s.take(c) {
+		if c.ID != "" && !synced[c.ID] && c.Tool != history.SkillTool && s.take(c) { // one record per call, not per copy
 			synced[c.ID] = true
 		}
 	}

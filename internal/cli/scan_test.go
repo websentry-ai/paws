@@ -152,7 +152,8 @@ func TestScanLeavesOutWhatTheHooksUploaded(t *testing.T) {
 	// they go.
 	appendLines(t, filepath.Join(home, "audit.log"),
 		`{"v":2,"ts":"2026-11-03T09:00:01Z","agent":"claude-code","event":"action","session":"sess-1","tool":"mcp__claude_ai_Notion__notion-create-pages","action":"notion create-pages"}`,
-		`{"v":2,"ts":"2026-11-03T09:00:02Z","agent":"claude-code","event":"action","session":"sess-1","tool":"Bash","action":"git commit","command":"git commit -m 'acme: rotate ***'"}`,
+		// Logged two hours after the call began: a permission prompt was left open.
+		`{"v":2,"ts":"2026-11-03T11:00:01Z","agent":"claude-code","event":"action","session":"sess-1","tool":"Bash","action":"git commit","command":"git commit -m 'acme: rotate ***'"}`,
 		// A Bash record whose command is another call's: it must not take t8.
 		`{"v":2,"ts":"2026-11-04T09:00:01Z","agent":"claude-code","event":"action","session":"sess-1","tool":"Bash","action":"ls","command":"ls"}`,
 		`{"v":2,"ts":"2026-10-30T10:00:00Z","agent":"claude-code","event":"action","session":"sess-other","tool":"Bash","action":"ls"}`,

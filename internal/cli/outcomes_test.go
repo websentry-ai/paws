@@ -9,6 +9,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/websentry-ai/paws/internal/hook"
 	"github.com/websentry-ai/paws/internal/rule"
 )
 
@@ -171,5 +172,38 @@ func TestCatalogOutcomesCarryTheBindingID(t *testing.T) {
 	up := toOutcomeUpload(auditRecord{Event: "outcome", Rule: "humanizer-pr", Source: src, Skill: "humanizer", Outcome: "fixed"})
 	if up.Action != "humanizer-pr" {
 		t.Errorf("action_id %q, want humanizer-pr", up.Action)
+	}
+}
+
+// Two graders for one turn (overlapping async Stop hooks) write each outcome once.
+func TestConcurrentGradersGradeOnce(t *testing.T) {
+	home := portalEnv(t, http.NotFoundHandler())
+	cwd, _ := os.Getwd()
+	writeRule(t, filepath.Join(cwd, ".paws", "pre-tool", "rm-gate.md"), rmRule)
+	transcript := filepath.Join(t.TempDir(), "sess-c.jsonl")
+	runGate(t, map[string]any{"hook_event_name": "PreToolUse", "session_id": "sess-c", "transcript_path": transcript, "cwd": cwd,
+		"tool_name": "Bash", "tool_input": map[string]any{"command": "rm -rf build"}})
+	transcriptLines(t, transcript, time.Now().Add(-20*time.Second), []struct {
+		cmd    string
+		result string
+		isErr  bool
+	}{{"rm -rf build", "PreToolUse:Bash hook error: paws: load coreutils", true}, {"rm -rf build", "", false}})
+	in := hook.Input{HookEventName: "Stop", SessionID: "sess-c", TranscriptPath: transcript, CWD: cwd}
+	ev := hook.ToEvent(&in)
+	done := make(chan bool)
+	for i := 0; i < 4; i++ {
+		go func() { gradeTurn(&in, ev, time.Now()); done <- true }()
+	}
+	for i := 0; i < 4; i++ {
+		<-done
+	}
+	n := 0
+	for _, rec := range auditLines(t, home) {
+		if rec["event"] == "outcome" {
+			n++
+		}
+	}
+	if n != 1 {
+		t.Errorf("%d outcome records from 4 overlapping graders, want 1", n)
 	}
 }

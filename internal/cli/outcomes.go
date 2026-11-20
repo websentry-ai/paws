@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"io"
 	"os"
+	"path/filepath"
 	"time"
 
 	"github.com/websentry-ai/paws/internal/gate"
@@ -32,6 +33,12 @@ func gradeTurn(in *hook.Input, ev gate.Event, stoppedAt time.Time) {
 	if err != nil || len(calls) == 0 {
 		return
 	}
+	// Stop hooks run async and can overlap: one grader at a time, so two never grade the same block.
+	unlock, ok := lockGrading()
+	if !ok {
+		return
+	}
+	defer unlock()
 	denies, graded := turnDenies(ev.Session, start.Add(-denySlack))
 	if len(denies) == 0 {
 		return
@@ -71,6 +78,32 @@ func gradeTurn(in *hook.Input, ev gate.Event, stoppedAt time.Time) {
 		}
 		gate.LogOutcome(rec)
 	}
+}
+
+// gradeLockStale is when a grader's lock is taken over: it crashed, or is long past any real turn's grading.
+const gradeLockStale = 30 * time.Second
+
+// lockGrading takes ~/.paws/outcomes.lock by creating it (portable: no flock on Windows), waiting up to 5 s for
+// another grader. ok is false when it couldn't: that turn stays ungraded rather than graded twice.
+func lockGrading() (unlock func(), ok bool) {
+	dir := gate.UserDir()
+	if dir == "" {
+		return nil, false
+	}
+	path := filepath.Join(dir, "outcomes.lock")
+	for i := 0; i < 50; i++ {
+		f, err := os.OpenFile(path, os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0o600)
+		if err == nil {
+			f.Close()
+			return func() { os.Remove(path) }, true
+		}
+		if st, err := os.Stat(path); err == nil && time.Since(st.ModTime()) > gradeLockStale {
+			os.Remove(path)
+			continue
+		}
+		time.Sleep(100 * time.Millisecond)
+	}
+	return nil, false
 }
 
 // denyKey names a deny for "graded already": its rule file and name, agent and second.

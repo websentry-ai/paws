@@ -151,3 +151,27 @@ func TestGradeComparesTheEdit(t *testing.T) {
 		t.Errorf("same content: %s, want same_retry", got.Outcome)
 	}
 }
+
+// A malformed expect block, or one on a session-start rule, only measures: the rule loads without it.
+func TestBadExpectNeverDropsTheRule(t *testing.T) {
+	for name, src := range map[string]string{
+		"if of the wrong type": "---\nname: r\nevent: pre-tool\nmatcher: {tool: Bash}\naction: {type: require-skill, skill: s}\nexpect: [{id: x, when: retry, if: [bad]}]\n---\n",
+		"on session start":     "---\nname: r\nevent: session-start\naction: {type: require-skill, skill: s}\nexpect: [{id: x, when: retry, if: \"true\"}]\n---\n",
+	} {
+		r, err := rule.Parse([]byte(src), "r.md")
+		if err != nil || r.ExpectErr == nil || len(r.Expect) != 0 || r.Action.Skill != "s" {
+			t.Errorf("%s: rule %v, err %v; want it loaded, without checks, ExpectErr set", name, r, err)
+		}
+	}
+}
+
+// Edits compare exactly: a whitespace change is a change.
+func TestGradeComparesEditsExactly(t *testing.T) {
+	r := parse(t, "---\nname: w\nevent: pre-tool\nmatcher: {tool: Write}\naction: {type: require-skill, skill: s}\n---\n")
+	w := func(sec int, content string, denied bool) Call {
+		return Call{Tool: "Write", Target: "/x/a.go", Text: content, At: t0.Add(time.Duration(sec) * time.Second), Denied: denied}
+	}
+	if got := Grade(r, []Call{w(0, "a  b", true), w(1, "a b", false)}, 0); got.Outcome != ChangedUnchecked {
+		t.Errorf("whitespace change: %s, want changed_unchecked", got.Outcome)
+	}
+}

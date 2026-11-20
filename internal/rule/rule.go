@@ -116,7 +116,12 @@ func Parse(data []byte, path string) (*Rule, error) {
 	}
 	var r Rule
 	if err := yaml.Unmarshal(fm, &r); err != nil {
-		return nil, fmt.Errorf("bad frontmatter: %w", err)
+		// An expect block of the wrong shape only measures: load the rule without it rather than not at all.
+		stripped, ok := withoutExpect(fm)
+		if !ok || yaml.Unmarshal(stripped, &r) != nil {
+			return nil, fmt.Errorf("bad frontmatter: %w", err)
+		}
+		r.Expect, r.ExpectErr = nil, fmt.Errorf("expect: %v", err)
 	}
 	r.SourcePath = path
 	r.Body = body(data)
@@ -150,7 +155,7 @@ func Parse(data []byte, path string) (*Rule, error) {
 		}
 	}
 	if len(r.Expect) > 0 && Kind(r.Event) != KindTool {
-		return nil, fmt.Errorf("expect needs a tool event: a session-start rule blocks no call")
+		r.Expect, r.ExpectErr = nil, fmt.Errorf("expect needs a tool event: a session-start rule blocks no call")
 	}
 	// A check that doesn't compile only measures: drop it and keep enforcing; the loader reports ExpectErr.
 	if err := validateExpect(r.Expect); err != nil {
@@ -267,4 +272,21 @@ func frontmatter(data []byte) ([]byte, error) {
 		return s[:i], nil
 	}
 	return nil, fmt.Errorf("unterminated frontmatter")
+}
+
+// withoutExpect is the frontmatter with its top-level expect key removed; ok is false when it has none.
+func withoutExpect(fm []byte) ([]byte, bool) {
+	var doc yaml.Node
+	if yaml.Unmarshal(fm, &doc) != nil || len(doc.Content) == 0 || doc.Content[0].Kind != yaml.MappingNode {
+		return nil, false
+	}
+	m := doc.Content[0]
+	for i := 0; i+1 < len(m.Content); i += 2 {
+		if m.Content[i].Value == "expect" {
+			m.Content = append(m.Content[:i], m.Content[i+2:]...)
+			out, err := yaml.Marshal(&doc)
+			return out, err == nil
+		}
+	}
+	return nil, false
 }

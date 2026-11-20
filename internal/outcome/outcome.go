@@ -112,7 +112,7 @@ func Grade(r *rule.Rule, calls []Call, blocked int) Result {
 	switch {
 	case all:
 		res.Outcome = Fixed
-	case Same(scope[retry].Target, b.Target) && Same(scope[retry].Text, b.Text): // a Write/Edit: the same edit too
+	case sameCall(scope[retry], b):
 		res.Outcome = SameRetry
 	case len(r.Expect) > 0:
 		res.Outcome = ChangedFailed
@@ -146,6 +146,15 @@ func inScope(calls []Call, blocked int) []Call {
 		}
 	}
 	return out
+}
+
+// sameCall: a Bash retry is the same command once setup in front and spacing are ignored; any other call is the
+// same only when its target and text match exactly (a Write's content, an Edit's new text: spacing counts there).
+func sameCall(a, b Call) bool {
+	if a.Tool == "Bash" {
+		return Same(a.Target, b.Target)
+	}
+	return a.Target == b.Target && a.Text == b.Text
 }
 
 // lead is setup in front of the real command: a `cd dir &&`, an env assignment, a `(` opening a subshell.

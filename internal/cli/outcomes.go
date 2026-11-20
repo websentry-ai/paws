@@ -62,7 +62,9 @@ func gradeTurn(in *hook.Input, ev gate.Event, stoppedAt time.Time) {
 	for _, d := range denies {
 		key := denyKey(d.Source, d.Rule, d.AgentID, blockedWhen(d.At, d.TS))
 		r := rules[d.Source+"|"+d.Rule]
-		if r == nil || r.Action.Type != rule.ActionRequireSkill {
+		// The rule as it is now: a portal sync may have replaced it since the deny. Gone, or bound to another skill,
+		// it can't grade this block (left ungraded); new checks still grade what followed.
+		if r == nil || r.Action.Type != rule.ActionRequireSkill || d.Skill != "" && r.Action.Skill != d.Skill {
 			continue
 		}
 		ruleKey := d.Source + "|" + d.Rule

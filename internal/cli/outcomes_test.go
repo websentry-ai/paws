@@ -371,3 +371,26 @@ func TestAnEarlierRefusalByAnotherHookIsNotTheBlock(t *testing.T) {
 		t.Errorf("outcomes %v; want [same_retry]: no listing between paws's block and the retry", got)
 	}
 }
+
+// A rule that a sync bound to another skill since the deny doesn't grade it: the outcome would name the wrong skill.
+func TestARuleRebindingSinceTheDenyLeavesItUngraded(t *testing.T) {
+	home := portalEnv(t, http.NotFoundHandler())
+	cwd, _ := os.Getwd()
+	path := filepath.Join(cwd, ".paws", "pre-tool", "rm-gate.md")
+	writeRule(t, path, rmRule)
+	transcript := filepath.Join(t.TempDir(), "sess-k.jsonl")
+	runGate(t, map[string]any{"hook_event_name": "PreToolUse", "session_id": "sess-k", "transcript_path": transcript, "cwd": cwd,
+		"tool_name": "Bash", "tool_input": map[string]any{"command": "rm -rf build"}})
+	writeRule(t, path, strings.Replace(rmRule, "skill: coreutils", "skill: other", 1))
+	transcriptLines(t, transcript, time.Now().Add(-20*time.Second), []struct {
+		cmd    string
+		result string
+		isErr  bool
+	}{{"rm -rf build", "PreToolUse:Bash hook error: paws: load coreutils", true}, {"rm -rf build", "", false}})
+	runGate(t, map[string]any{"hook_event_name": "Stop", "session_id": "sess-k", "transcript_path": transcript, "cwd": cwd})
+	for _, rec := range auditLines(t, home) {
+		if rec["event"] == "outcome" {
+			t.Errorf("graded with a rule now bound to another skill: %v", rec)
+		}
+	}
+}

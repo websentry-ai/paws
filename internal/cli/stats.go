@@ -58,6 +58,8 @@ type auditRecord struct {
 	Outcome   string          `json:"outcome"`
 	Checks    map[string]bool `json:"checks"`
 	BlockedAt string          `json:"blocked_at"`
+	// The blocked deny's at, to the nanosecond (local only).
+	BlockedExact string `json:"blocked_exact"`
 }
 
 // summarize reads audit records in order (rotated file first) and counts them.

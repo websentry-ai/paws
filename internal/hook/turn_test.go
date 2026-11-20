@@ -82,3 +82,17 @@ func TestTurnCallsKeepsTheTurnAcrossHarnessRecords(t *testing.T) {
 		t.Fatalf("calls %d from %v, %v; want both calls of the one turn", len(calls), start, err)
 	}
 }
+
+// A sidechain record in the main log is a subagent's call, not the main agent's.
+func TestTurnCallsSkipsSidechainRecordsInTheMainLog(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "s.jsonl")
+	os.WriteFile(path, []byte(strings.Join([]string{
+		`{"type":"user","timestamp":"2026-11-20T10:00:00Z","message":{"content":"clean up"}}`,
+		`{"type":"assistant","timestamp":"2026-11-20T10:00:01Z","message":{"content":[{"type":"tool_use","id":"a","name":"Bash","input":{"command":"rm -rf build"}}]}}`,
+		`{"type":"assistant","isSidechain":true,"timestamp":"2026-11-20T10:00:02Z","message":{"content":[{"type":"tool_use","id":"s","name":"Bash","input":{"command":"ls build"}}]}}`,
+	}, "\n")+"\n"), 0o600)
+	calls, _, err := TurnCalls(path, time.Time{})
+	if err != nil || len(calls) != 1 || calls[0].ID != "a" {
+		t.Fatalf("calls %v, %v; want the main agent's call a only", calls, err)
+	}
+}

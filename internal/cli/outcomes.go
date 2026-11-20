@@ -52,7 +52,7 @@ func gradeTurn(in *hook.Input, ev gate.Event, stoppedAt time.Time) {
 	used := map[string]map[int]bool{}
 	seen := map[string]int{}
 	for _, d := range denies {
-		key := denyKey(d.Source, d.Rule, d.AgentID, d.TS)
+		key := denyKey(d.Source, d.Rule, d.AgentID, blockedWhen(d.At, d.TS))
 		r := rules[d.Source+"|"+d.Rule]
 		if r == nil || r.Action.Type != rule.ActionRequireSkill {
 			continue
@@ -76,6 +76,9 @@ func gradeTurn(in *hook.Input, ev gate.Event, stoppedAt time.Time) {
 			"source": d.Source, "tool": d.Tool, "outcome": res.Outcome, "checks": res.Checks, "blocked_at": d.TS}
 		if d.AgentID != "" {
 			rec["agent_id"] = d.AgentID
+		}
+		if d.At != "" {
+			rec["blocked_exact"] = d.At // local, like the deny's at: "graded already" tells same-second denies apart
 		}
 		gate.LogOutcome(rec)
 	}
@@ -165,7 +168,7 @@ func readDenies(path, session string, since time.Time, denies *[]auditRecord, gr
 		if len(line) > 0 && json.Unmarshal(line, &rec) == nil && rec.Session == session {
 			switch {
 			case rec.Event == "outcome":
-				graded[denyKey(rec.Source, rec.Rule, rec.AgentID, rec.BlockedAt)]++
+				graded[denyKey(rec.Source, rec.Rule, rec.AgentID, blockedWhen(rec.BlockedExact, rec.BlockedAt))]++
 			case rec.Verdict == "deny" && rec.Rule != "":
 				if denyAfter(rec, since) {
 					*denies = append(*denies, rec)
@@ -186,4 +189,12 @@ func denyAfter(rec auditRecord, since time.Time) bool {
 	}
 	ts, err := time.Parse(time.RFC3339, rec.TS)
 	return err == nil && !ts.Before(since.Truncate(time.Second))
+}
+
+// blockedWhen is a deny's time for "graded already": exact when the records have it, else its second.
+func blockedWhen(exact, ts string) string {
+	if exact != "" {
+		return exact
+	}
+	return ts
 }

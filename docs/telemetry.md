@@ -49,7 +49,7 @@ The `action` key:
 **Outcome records** (`event: outcome`, written by the Stop hook, at the end of the turn): one per call a
 require-skill rule denied in that turn, saying what Claude did next. paws reads the turn's calls from Claude Code's
 own log (the main conversation, and subagents started after the deny) and keeps only the result: `rule`, `skill`,
-`source`, `tool`, `blocked_at` (the deny's `ts`), `outcome` and `checks` (each [`expect`](rules.md#expect) check's
+`source`, `tool`, `blocked_at` (the deny's `ts`), `blocked_exact` (the deny's `at`, local only), `outcome` and `checks` (each [`expect`](rules.md#expect) check's
 id and whether it passed). Never the calls' text.
 
 | `outcome` | What Claude did after the deny, in the same turn |

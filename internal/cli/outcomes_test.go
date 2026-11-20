@@ -256,8 +256,8 @@ func TestADenyFromTheTurnBeforeInTheSameSecond(t *testing.T) {
 	if deny == nil || deny["at"] == nil {
 		t.Fatalf("no deny with an exact time: %v", deny)
 	}
-	// The turn before: denied at base+0.1s and graded at its Stop. This turn starts at base+0.5s and its own deny
-	// comes at base+1.5s.
+	// The turn before: denied at base+0.1s and graded at its Stop. This turn starts at base+0.2s and its own deny
+	// comes at base+0.9s: the same second, so only the exact times tell the two denies apart.
 	base := time.Now().Add(-30 * time.Second).UTC().Truncate(time.Second)
 	at := func(d time.Duration) (string, string) {
 		t := base.Add(d)
@@ -269,13 +269,13 @@ func TestADenyFromTheTurnBeforeInTheSameSecond(t *testing.T) {
 		before[k], this[k] = v, v
 	}
 	before["ts"], before["at"] = at(100 * time.Millisecond)
-	this["ts"], this["at"] = at(1500 * time.Millisecond)
+	this["ts"], this["at"] = at(900 * time.Millisecond)
 	graded := map[string]any{"ts": before["ts"], "event": "outcome", "session": "sess-b", "rule": "rm-gate",
-		"source": deny["source"], "outcome": "fixed", "blocked_at": before["ts"]}
+		"source": deny["source"], "outcome": "fixed", "blocked_at": before["ts"], "blocked_exact": before["at"]}
 	if err := os.WriteFile(log, []byte(line(before)+"\n"+line(graded)+"\n"+line(this)+"\n"), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	transcriptLines(t, transcript, base.Add(500*time.Millisecond), []struct {
+	transcriptLines(t, transcript, base.Add(200*time.Millisecond), []struct {
 		cmd    string
 		result string
 		isErr  bool
@@ -283,7 +283,7 @@ func TestADenyFromTheTurnBeforeInTheSameSecond(t *testing.T) {
 	runGate(t, map[string]any{"hook_event_name": "Stop", "session_id": "sess-b", "transcript_path": transcript, "cwd": cwd})
 	var got []string
 	for _, rec := range auditLines(t, home) {
-		if rec["event"] == "outcome" && rec["blocked_at"] == this["ts"] {
+		if rec["event"] == "outcome" && rec["blocked_exact"] == this["at"] {
 			got = append(got, rec["outcome"].(string))
 		}
 	}

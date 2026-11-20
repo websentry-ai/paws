@@ -43,6 +43,7 @@ func TurnCalls(transcriptPath string, until time.Time) ([]outcome.Call, time.Tim
 type turnLine struct {
 	Type      string    `json:"type"`
 	IsMeta    bool      `json:"isMeta"`
+	Sidechain bool      `json:"isSidechain"`
 	Timestamp time.Time `json:"timestamp"`
 	Message   struct {
 		Content json.RawMessage `json:"content"`
@@ -84,7 +85,8 @@ func readTurnLog(path, agent string, since, until time.Time) ([]outcome.Call, ti
 		}
 		if len(line) > 0 && (bytes.Contains(line, []byte(`"type":"user"`)) || bytes.Contains(line, []byte(`"type":"assistant"`))) {
 			var rec turnLine
-			if json.Unmarshal(line, &rec) == nil && (until.IsZero() || !rec.Timestamp.After(until)) {
+			// A sidechain record in the main log is a subagent's (see gate.foreign): its own log is read as that agent's.
+			if json.Unmarshal(line, &rec) == nil && (until.IsZero() || !rec.Timestamp.After(until)) && !(agent == "" && rec.Sidechain) {
 				blocks := contentBlocks(rec.Message.Content)
 				switch {
 				case rec.Type == "user" && since.IsZero() && gate.IsUserPromptLine(line):

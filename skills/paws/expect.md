@@ -12,9 +12,11 @@ format, a flag that must or mustn't appear, a command that must run first, a
 field an MCP call must fill. Skip rules about thinking, wording to the user, or
 anything no call carries.
 
-- Write **one check per rule a call can show**. A skill with one such rule gets one
-  check, and one with six gets six. Don't pad, and don't drop a measurable rule to
-  hit a number.
+- Write a check for each rule **the skill stresses** that a call can show: its
+  "must", "never" and "always" rules, not every style preference. A block is
+  graded fixed only when every check that applies passes, so ten checks on one
+  rule make "fixed" almost never true: a test with ten git checks fell from 42%
+  fixed to 5%. Two to five checks is usual. A skill with one such rule gets one.
 - Every check must fail on a real call that breaks the skill and pass on one that
   follows it. If you can't name both calls, drop the check.
 - Use the values the user's copy of the skill uses. A skill can leave

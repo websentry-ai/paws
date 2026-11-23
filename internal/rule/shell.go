@@ -487,3 +487,20 @@ func source(n syntax.Node) string {
 	syntax.NewPrinter().Print(&b, n)
 	return b.String()
 }
+
+// Commands is what a Bash line runs, one simple command each, as an expect check sees them (call.commands): the
+// words with quotes removed and wrappers (sudo, env, ...) dropped, joined by spaces. Text a command only reads is
+// not a command: a heredoc into cat or python, a commit message, an echo's quoted argument. A script a shell runs is
+// (bash -c '...', a heredoc into sh, eval). A line that doesn't parse is one command, the line itself.
+func Commands(line string) []string {
+	var out []string
+	for _, c := range parseLine(line) {
+		if len(c.words) > 0 {
+			out = append(out, strings.Join(c.words, " "))
+		}
+	}
+	if len(out) == 0 && strings.TrimSpace(line) != "" {
+		return []string{line}
+	}
+	return out
+}

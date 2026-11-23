@@ -33,6 +33,9 @@ type Call struct {
 // Env is the call as an expect check sees it.
 func (c Call) Env() map[string]any {
 	m := map[string]any{"tool": c.Tool, "text": c.Text, "input": c.Input}
+	if c.Tool == "Bash" {
+		m["commands"] = rule.Commands(c.Text)
+	}
 	if c.Input == nil {
 		m["input"] = map[string]any{}
 	}
@@ -47,7 +50,7 @@ const (
 	Fixed            = "fixed"             // retried, and every check passed
 	SameRetry        = "same_retry"        // retried the same call (checks failed or none)
 	ChangedFailed    = "changed_failed"    // retried a changed call, and a check failed
-	ChangedUnchecked = "changed_unchecked" // retried a changed call; the rule has no checks
+	ChangedUnchecked = "changed_unchecked" // retried a changed call; no check applied
 	OtherRoute       = "other_route"       // never retried; other calls ran
 	Stopped          = "stopped"           // never retried; nothing else ran
 )
@@ -55,7 +58,7 @@ const (
 // Result is one graded block.
 type Result struct {
 	Outcome string
-	Checks  map[string]bool // expect id → passed
+	Checks  map[string]bool // expect id → passed; a check none of whose cases fits the call is left out
 	Retry   *Call
 }
 
@@ -90,8 +93,15 @@ func GradeWhere(r *rule.Rule, calls []Call, blocked int, applied func(Call) bool
 		}
 		return false
 	}
+	subject := blockedEnv // what a check's cases are matched on: the retry, else the blocked call
+	if retry >= 0 {
+		subject = scope[retry].Env()
+	}
 	for i := range r.Expect {
-		e := &r.Expect[i]
+		e, applies := r.Expect[i].For(subject, blockedEnv)
+		if !applies {
+			continue
+		}
 		var pass bool
 		switch e.When {
 		case rule.ExpectBefore:
@@ -122,7 +132,7 @@ func GradeWhere(r *rule.Rule, calls []Call, blocked int, applied func(Call) bool
 		return res
 	}
 	res.Retry = &scope[retry]
-	all := len(r.Expect) > 0
+	all := len(res.Checks) > 0
 	for _, ok := range res.Checks {
 		all = all && ok
 	}
@@ -131,7 +141,7 @@ func GradeWhere(r *rule.Rule, calls []Call, blocked int, applied func(Call) bool
 		res.Outcome = Fixed
 	case sameCall(scope[retry], b):
 		res.Outcome = SameRetry
-	case len(r.Expect) > 0:
+	case len(res.Checks) > 0:
 		res.Outcome = ChangedFailed
 	default:
 		res.Outcome = ChangedUnchecked

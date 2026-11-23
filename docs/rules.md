@@ -162,6 +162,30 @@ the call the rule denied. Each has `tool` (`Bash`, `Write`, `Edit`, `mcp__notion
 command, what a Write writes, an Edit's new text, an MCP call's text arguments), `input` (the raw tool input, so
 `call.input.parent != nil` works for any field) and, for MCP calls, `mcp.server`, `mcp.tool` and `mcp.class`.
 
+For a Bash call, `commands` is each command the line runs, with quotes removed and `sudo`/`env` dropped:
+`cd web && sudo git push -f` holds `cd web` and `git push -f`. Text a command only reads isn't a command: a heredoc
+into `cat` or `python`, a commit message, an `echo`'s argument. A script a shell runs is (`bash -c '...'`, a heredoc
+into `sh`). To ask "did it run X", match `commands`, not `text`: `any(call.commands, # matches "^git push\\b.* -f")`
+ignores a Python script that only prints `git push -f`. A line that doesn't parse is one command, itself.
+
+A check can have `cases` instead of an `if`, one per way of doing the thing, for a rule that covers several (git and
+the gh CLI, or a command and an MCP tool). The first case whose `match` holds on the retry, or on the blocked call
+when there's no retry, gives the `if`. When no case matches, the check doesn't apply to that block: it's left out of
+the grade instead of passing, so a commit-message check isn't counted on a `gh pr create`.
+
+```yaml
+  - id: pr-described
+    label: The pull request has a description
+    when: retry
+    cases:
+      - match: 'call.tool == "Bash" && any(call.commands, # matches "^gh pr (create|edit)\\b")'
+        if: 'any(call.commands, # matches "^gh pr (create|edit)\\b.* (--body|-b|--body-file|-F) \\S")'
+      - match: 'call.tool endsWith "create_pull_request"'
+        if: 'len(trim(call.input.body ?? "")) >= 20'
+```
+
+Quote an expression that holds `#` or `: ` in single quotes, as above: unquoted, YAML reads ` #` as a comment.
+
 `when` picks the calls the check looks at. All of them come from the same turn and the blocked agent; for a deny in
 the main conversation, subagents it starts after the deny count too, and one already running doesn't (a subagent
 can't start subagents of its own in Claude Code). A compaction summary or a task notification mid-turn doesn't end
@@ -174,7 +198,7 @@ the turn; only a prompt you type does:
 | `after` | a call after the retry matches |
 | `never` | no call after the deny matches |
 
-A rule whose checks all pass is graded `fixed`. A check that doesn't compile is dropped with a warning (`unbound-paws
+A rule whose checks all pass (the ones that apply; at least one) is graded `fixed`. A check that doesn't compile is dropped with a warning (`unbound-paws
 explain` shows it): the rule keeps enforcing, since checks only measure. A retried Write or Edit counts as the same
 call only when both the path and the new text match. An `if` that fails to run on a call (a string compared as a
 number, say) is no match, except for `never`, where it fails the check: it can't show the call didn't happen. Guard

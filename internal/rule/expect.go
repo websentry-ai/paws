@@ -19,8 +19,21 @@ import (
 //
 // `if` is an expr expression (https://expr-lang.org) over two calls, `call` (the one being checked) and `blocked`
 // (the call the rule blocked), each a map: tool (Bash, Write, Edit, Read, mcp__…), text (the call's main text: a
-// Bash command, what a Write writes, an Edit's new text, an MCP call's text arguments), input (the raw tool input,
-// any field by path: call.input.parent) and, for MCP calls, mcp.server, mcp.tool and mcp.class.
+// Bash command, what a Write writes, an Edit's new text, an MCP call's text arguments), commands (for Bash, each
+// command the line runs: see Commands), input (the raw tool input, any field by path: call.input.parent) and, for
+// MCP calls, mcp.server, mcp.tool and mcp.class.
+//
+// A check can instead have cases, one per way of doing the thing (git, the gh CLI, an MCP tool): the first case
+// whose `match` holds on the retry (on the blocked call when there is none) gives the `if`. When no case matches,
+// the check doesn't apply to this block and is left out of its grade, rather than passing.
+//
+//   - id: described
+//     when: retry
+//     cases:
+//   - match: call.tool == "Bash" && any(call.commands, # matches "^gh pr create")
+//     if: call.text matches "--body"
+//   - match: call.tool endsWith "create_pull_request"
+//     if: len(trim(call.input.body ?? "")) >= 20
 //
 // `when` says which calls the check looks at, all within the turn and the blocked agent:
 //
@@ -29,12 +42,21 @@ import (
 //	after   a call after the retry passes
 //	never   no call after the block passes (the check holds when nothing matches)
 type Expect struct {
-	ID    string `yaml:"id" json:"id"`
-	Label string `yaml:"label" json:"label"`
-	When  string `yaml:"when" json:"when"`
-	If    string `yaml:"if" json:"if"`
+	ID    string       `yaml:"id" json:"id"`
+	Label string       `yaml:"label" json:"label"`
+	When  string       `yaml:"when" json:"when"`
+	If    string       `yaml:"if,omitempty" json:"if,omitempty"`
+	Cases []ExpectCase `yaml:"cases,omitempty" json:"cases,omitempty"`
 
 	prog *vm.Program
+}
+
+// ExpectCase is one way a check can be met: its `if` applies to calls its `match` holds on.
+type ExpectCase struct {
+	Match string `yaml:"match" json:"match"`
+	If    string `yaml:"if" json:"if"`
+
+	match, prog *vm.Program
 }
 
 // The positions an expect check can take.
@@ -59,15 +81,56 @@ func (e *Expect) compile() error {
 	default:
 		return fmt.Errorf("expect %s: unknown when %q (want before, retry, after or never)", e.ID, e.When)
 	}
-	if e.If == "" {
-		return fmt.Errorf("expect %s: needs an if", e.ID)
+	if (e.If == "") == (len(e.Cases) == 0) {
+		return fmt.Errorf("expect %s: needs an if, or cases", e.ID)
 	}
-	prog, err := expr.Compile(e.If, expr.Env(expectEnv), expr.AsBool(), expr.AllowUndefinedVariables())
-	if err != nil {
-		return fmt.Errorf("expect %s: bad if: %v", e.ID, err)
+	if e.If != "" {
+		prog, err := compileExpr(e.If)
+		if err != nil {
+			return fmt.Errorf("expect %s: bad if: %v", e.ID, err)
+		}
+		e.prog = prog
+		return nil
 	}
-	e.prog = prog
+	for i := range e.Cases {
+		c := &e.Cases[i]
+		if c.Match == "" || c.If == "" {
+			return fmt.Errorf("expect %s: case %d needs a match and an if", e.ID, i+1)
+		}
+		var err error
+		if c.match, err = compileExpr(c.Match); err != nil {
+			return fmt.Errorf("expect %s: case %d: bad match: %v", e.ID, i+1, err)
+		}
+		if c.prog, err = compileExpr(c.If); err != nil {
+			return fmt.Errorf("expect %s: case %d: bad if: %v", e.ID, i+1, err)
+		}
+	}
 	return nil
+}
+
+func compileExpr(src string) (*vm.Program, error) {
+	return expr.Compile(src, expr.Env(expectEnv), expr.AsBool(), expr.AllowUndefinedVariables())
+}
+
+// For is the check as it applies to a block whose retry (or, with none, blocked call) is subject: the check itself,
+// or for a check with cases, the first case whose match holds. ok is false when no case matches: the check doesn't
+// apply. A match that fails to run doesn't hold.
+func (e *Expect) For(subject, blocked map[string]any) (_ *Expect, ok bool) {
+	if e.prog == nil && (len(e.Cases) == 0 || e.Cases[0].prog == nil) {
+		if e.compile() != nil {
+			return e, true // runs as a fail, as before
+		}
+	}
+	if len(e.Cases) == 0 {
+		return e, true
+	}
+	env := map[string]any{"call": subject, "blocked": blocked}
+	for _, c := range e.Cases {
+		if out, err := expr.Run(c.match, env); err == nil && out == true {
+			return &Expect{ID: e.ID, Label: e.Label, When: e.When, If: c.If, prog: c.prog}, true
+		}
+	}
+	return nil, false
 }
 
 // Eval runs the check's `if` on a call; a runtime error (a missing field compared as a number, say) is a fail.
@@ -87,6 +150,9 @@ func (e *Expect) run(call, blocked map[string]any) (bool, error) {
 	if e.prog == nil {
 		if err := e.compile(); err != nil {
 			return false, err
+		}
+		if e.prog == nil {
+			return false, fmt.Errorf("expect %s: has cases; run the one For picks", e.ID)
 		}
 	}
 	out, err := expr.Run(e.prog, map[string]any{"call": call, "blocked": blocked})

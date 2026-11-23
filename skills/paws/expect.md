@@ -57,7 +57,8 @@ checked) and `blocked` (the call paws denied):
 **Use `commands` to ask "did it run X".** Text inside a heredoc, a commit
 message, or an `echo` is not a command, so `any(call.commands, # matches "^git push\\b")`
 ignores a Python script that only prints `git push`. A shell that runs text
-(`bash -c '...'`, a heredoc into `sh`) is followed. Anchor with `^`: each entry
+(`bash -c '...'`, a heredoc into `sh`) is followed. A command counts whether or not it
+ran: paws can't see which side of `&&` or `||` ran. Anchor with `^`: each entry
 starts with the program.
 
 **Use `text` to read content**, such as a commit message (which may be in a

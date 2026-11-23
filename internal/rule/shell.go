@@ -491,7 +491,8 @@ func source(n syntax.Node) string {
 // Commands is what a Bash line runs, one simple command each, as an expect check sees them (call.commands): the
 // words with quotes removed and wrappers (sudo, env, ...) dropped, joined by spaces. Text a command only reads is
 // not a command: a heredoc into cat or python, a commit message, an echo's quoted argument. A script a shell runs is
-// (bash -c '...', a heredoc into sh, eval), and so is a function's body where the line calls it. A line that doesn't
+// (bash -c '...', a heredoc into sh, eval), and so is a function's body where the line calls it.
+// Each command is one the line may run: which side of && or || ran isn't known here. A line that doesn't
 // parse (one cut short mid-heredoc, say) is split at &&, ||, ;, | and newlines instead, as written.
 func Commands(line string) []string {
 	var out []string

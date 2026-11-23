@@ -199,6 +199,10 @@ the turn; only a prompt you type does:
 | `after` | a call after the retry matches |
 | `never` | no call after the deny matches |
 
+`unbound-paws explain '<command>'` lists each check's result with that call as the retry (pass, FAIL, or doesn't
+apply), so a check can be tried on calls that should pass and fail before it ships. The paws skill's `expect.md`
+walks through writing checks.
+
 A rule whose checks all pass (the ones that apply; at least one) is graded `fixed`. A check that doesn't compile is dropped with a warning (`unbound-paws
 explain` shows it): the rule keeps enforcing, since checks only measure. A retried Write or Edit counts as the same
 call only when both the path and the new text match. An `if` that fails to run on a call (a string compared as a

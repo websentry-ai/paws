@@ -9,6 +9,7 @@ import (
 
 	"github.com/websentry-ai/paws/internal/gate"
 	"github.com/websentry-ai/paws/internal/hook"
+	"github.com/websentry-ai/paws/internal/rule"
 )
 
 // Explain is the local dry-run: show which .paws rules are in scope, which match, and the resulting decision.
@@ -103,6 +104,9 @@ func Explain(args []string) int {
 			if p := gate.DigestProblem(r); p != "" {
 				fmt.Printf("      ! digest not used, the deny names the skill instead: %s\n", p)
 			}
+			if ev.Tool != "" && len(r.Expect) > 0 {
+				printChecks(r.Expect, hook.CallOf(in.ToolName, in.ToolInput).Env())
+			}
 		}
 	}
 	if len(res.Rules) == 0 {
@@ -111,6 +115,34 @@ func Explain(args []string) int {
 
 	printDecision(gate.Decide(ev, res.Rules))
 	return 0
+}
+
+// printChecks shows what each expect check makes of this call, as if it were the retry: a retry check passes or
+// fails on it, a never check is broken by it or not, and a before or after check counts it or not (the rest of the
+// turn is unknown here). A check none of whose cases fits doesn't apply.
+func printChecks(checks []rule.Expect, call map[string]any) {
+	fmt.Println("      checks, with this call as the retry:")
+	for i := range checks {
+		e, ok := checks[i].For(call, call)
+		var got string
+		switch {
+		case !ok:
+			got = "doesn't apply (no case fits this call)"
+		case e.When == rule.ExpectRetry && e.Eval(call, call):
+			got = "pass"
+		case e.When == rule.ExpectRetry:
+			got = "FAIL"
+		case e.When == rule.ExpectNever && e.Hit(call, call):
+			got = "FAIL (this call breaks it)"
+		case e.When == rule.ExpectNever:
+			got = "pass (this call doesn't break it)"
+		case e.Eval(call, call):
+			got = "this call counts (" + e.When + ")"
+		default:
+			got = "this call doesn't count (" + e.When + ")"
+		}
+		fmt.Printf("        %-20s %s\n", checks[i].ID, got)
+	}
 }
 
 // oneLine flattens a multi-line YAML error ("unmarshal errors:\n  line 6: field x not found").

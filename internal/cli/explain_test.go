@@ -3,6 +3,7 @@ package cli
 import (
 	"os"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"testing"
 
@@ -55,5 +56,39 @@ func TestExplainWithNoInputShowsUsage(t *testing.T) {
 	resetDryRun(t)
 	if code := Explain(nil); code != 2 {
 		t.Errorf("explain with no input: exit %d, want 2", code)
+	}
+}
+
+// explain shows what each check makes of the call: a retry check passes or fails, a never check is broken or not, and
+// a check no case fits doesn't apply.
+func TestExplainShowsChecksOnTheCall(t *testing.T) {
+	resetDryRun(t)
+	repo := t.TempDir()
+	os.MkdirAll(filepath.Join(repo, ".git"), 0o755)
+	t.Setenv("PAWS_HOME", filepath.Join(repo, "paws-home"))
+	t.Chdir(repo)
+	putRule(t, filepath.Join(repo, ".paws"), "git.md", `---
+name: git
+event: pre-tool
+matcher: {tool: Bash, command_regex: '\bgit\s+(commit|push)\b'}
+action: {type: require-skill, skill: git}
+expect:
+  - id: format
+    when: retry
+    cases:
+      - match: 'any(call.commands, # matches "^git commit\\b")'
+        if: 'call.text matches "fix: "'
+  - id: no-force
+    when: never
+    if: 'any(call.commands, # matches "^git push\\b.* -f( |$)")'
+---
+`)
+	_, out := captureStdout(t, func() int { return Explain([]string{`git commit -m "fix: x"`}) })
+	if !regexp.MustCompile(`format\s+pass\n`).MatchString(out) || !regexp.MustCompile(`no-force\s+pass`).MatchString(out) {
+		t.Errorf("commit: %q", out)
+	}
+	_, out = captureStdout(t, func() int { return Explain([]string{"git push -f"}) })
+	if !regexp.MustCompile(`format\s+doesn't apply`).MatchString(out) || !regexp.MustCompile(`no-force\s+FAIL`).MatchString(out) {
+		t.Errorf("force push: %q", out)
 	}
 }

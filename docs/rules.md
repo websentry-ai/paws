@@ -166,7 +166,8 @@ For a Bash call, `commands` is each command the line runs, with quotes removed a
 `cd web && sudo git push -f` holds `cd web` and `git push -f`. Text a command only reads isn't a command: a heredoc
 into `cat` or `python`, a commit message, an `echo`'s argument. A script a shell runs is (`bash -c '...'`, a heredoc
 into `sh`). To ask "did it run X", match `commands`, not `text`: `any(call.commands, # matches "^git push\\b.* -f")`
-ignores a Python script that only prints `git push -f`. A line that doesn't parse is one command, itself.
+ignores a Python script that only prints `git push -f`. A line that doesn't parse (cut short inside a heredoc, say)
+is split at `&&`, `||`, `;`, `|` and newlines instead.
 
 A check can have `cases` instead of an `if`, one per way of doing the thing, for a rule that covers several (git and
 the gh CLI, or a command and an MCP tool). The first case whose `match` holds on the retry, or on the blocked call

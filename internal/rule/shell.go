@@ -491,7 +491,8 @@ func source(n syntax.Node) string {
 // Commands is what a Bash line runs, one simple command each, as an expect check sees them (call.commands): the
 // words with quotes removed and wrappers (sudo, env, ...) dropped, joined by spaces. Text a command only reads is
 // not a command: a heredoc into cat or python, a commit message, an echo's quoted argument. A script a shell runs is
-// (bash -c '...', a heredoc into sh, eval). A line that doesn't parse is one command, the line itself.
+// (bash -c '...', a heredoc into sh, eval). A line that doesn't parse (one cut short mid-heredoc, say) is split at
+// &&, ||, ;, | and newlines instead, as written.
 func Commands(line string) []string {
 	var out []string
 	for _, c := range parseLine(line) {
@@ -499,8 +500,15 @@ func Commands(line string) []string {
 			out = append(out, strings.Join(c.words, " "))
 		}
 	}
-	if len(out) == 0 && strings.TrimSpace(line) != "" {
-		return []string{line}
+	if len(out) > 0 {
+		return out
+	}
+	for _, part := range roughSplit.Split(line, -1) {
+		if part = strings.TrimLeft(strings.TrimSpace(part), "( "); part != "" {
+			out = append(out, part)
+		}
 	}
 	return out
 }
+
+var roughSplit = regexp.MustCompile(`&&|\|\||[;|\n]`)

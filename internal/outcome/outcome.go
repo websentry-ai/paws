@@ -75,9 +75,9 @@ func Grade(r *rule.Rule, calls []Call, blocked int) Result {
 func GradeWhere(r *rule.Rule, calls []Call, blocked int, applied func(Call) bool) Result {
 	b := calls[blocked]
 	scope := inScope(calls, blocked)
-	var earlier []Call // the blocked agent's calls before the block
+	var earlier []Call // the blocked agent's calls before the block; its own batch ran alongside it, not before
 	for _, c := range calls[:blocked] {
-		if c.Agent == b.Agent {
+		if c.Agent == b.Agent && c.At.Before(b.At) {
 			earlier = append(earlier, c)
 		}
 	}

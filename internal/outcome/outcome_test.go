@@ -375,6 +375,10 @@ func TestBeforeCountsEarlierInTheTurn(t *testing.T) {
 	if g := Grade(r, calls, 2); !g.Checks["listed-first"] || g.Outcome != Fixed {
 		t.Errorf("a listing before the block didn't count: %s %v", g.Outcome, g.Checks)
 	}
+	batch := []Call{bash(0, "ls build", false, ""), bash(0, "rm -rf build", true, ""), bash(3, "rm -rf build", false, "")}
+	if g := Grade(r, batch, 1); g.Checks["listed-first"] {
+		t.Error("a listing in the blocked call's own batch counted: it ran alongside, not first")
+	}
 	calls[0].Agent = "other" // another agent's listing doesn't
 	if g := Grade(r, calls, 2); g.Checks["listed-first"] {
 		t.Error("another agent's listing counted")

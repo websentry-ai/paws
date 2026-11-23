@@ -43,6 +43,10 @@ func TestCommands(t *testing.T) {
 		`bash -c "git push -f"`:                                   {"git push -f", "bash -c git push -f"},
 		"bash <<'EOF'\ngit push -f\nEOF":                          {"git push -f", "bash"},
 		`echo "unterminated`:                                      {`echo "unterminated`},
+		"f() { git push -f; }":                                    nil,
+		"f() { git push -f; }; f":                                 {"git push -f", "f"},
+		// Cut short inside a heredoc: split roughly, so the commit is still seen as one.
+		"cd x && git commit -F - <<'EOF'\nfix: y": {"cd x", "git commit -F - <<'EOF'", "fix: y"},
 	}
 	for line, want := range cases {
 		if got := Commands(line); !slices.Equal(got, want) {

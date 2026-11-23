@@ -37,7 +37,7 @@ import (
 //
 // `when` says which calls the check looks at, all within the turn and the blocked agent:
 //
-//	before  a call between the block and the retry, the retry included, passes
+//	before  a call earlier in the turn than the retry, the retry included, passes
 //	retry   the retried call (the next call the rule matches and lets through) passes
 //	after   a call after the retry passes
 //	never   no call after the block passes (the check holds when nothing matches)

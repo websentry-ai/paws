@@ -194,7 +194,7 @@ the turn; only a prompt you type does:
 
 | `when` | Passes when |
 |---|---|
-| `before` | a call from the deny up to the retry, the retry included, matches |
+| `before` | a call earlier in the turn than the retry, the retry included, matches (before the deny counts) |
 | `retry` | the retry (the next call the rule matches that goes through) matches |
 | `after` | a call after the retry matches |
 | `never` | no call after the deny matches |

@@ -75,6 +75,12 @@ func Grade(r *rule.Rule, calls []Call, blocked int) Result {
 func GradeWhere(r *rule.Rule, calls []Call, blocked int, applied func(Call) bool) Result {
 	b := calls[blocked]
 	scope := inScope(calls, blocked)
+	var earlier []Call // the blocked agent's calls before the block
+	for _, c := range calls[:blocked] {
+		if c.Agent == b.Agent {
+			earlier = append(earlier, c)
+		}
+	}
 	retry := -1
 	for i, c := range scope {
 		// A Skill call is how Claude answers the deny (the gate never holds one), not a retry of the blocked call.
@@ -105,7 +111,8 @@ func GradeWhere(r *rule.Rule, calls []Call, blocked int, applied func(Call) bool
 		var pass bool
 		switch e.When {
 		case rule.ExpectBefore:
-			pass = retry >= 0 && seen(scope[:retry+1], e)
+			// Earlier in the turn counts too: tests run, or files listed, before the blocked call still came first.
+			pass = retry >= 0 && (seen(earlier, e) || seen(scope[:retry+1], e))
 		case rule.ExpectRetry:
 			pass = retry >= 0 && e.Eval(scope[retry].Env(), blockedEnv)
 		case rule.ExpectAfter:

@@ -367,3 +367,16 @@ expect:
 		t.Errorf("no check applied: got %s %v, want %s and no checks", g.Outcome, g.Checks, ChangedUnchecked)
 	}
 }
+
+// A before check counts what the blocked agent did earlier in the turn: tests run before the blocked commit.
+func TestBeforeCountsEarlierInTheTurn(t *testing.T) {
+	r := parse(t, ruleWithChecks)
+	calls := []Call{bash(-30, "ls build", false, ""), bash(-20, "ls other", false, "sub"), bash(0, "rm -rf build", true, ""), bash(3, "rm -rf build", false, "")}
+	if g := Grade(r, calls, 2); !g.Checks["listed-first"] || g.Outcome != Fixed {
+		t.Errorf("a listing before the block didn't count: %s %v", g.Outcome, g.Checks)
+	}
+	calls[0].Agent = "other" // another agent's listing doesn't
+	if g := Grade(r, calls, 2); g.Checks["listed-first"] {
+		t.Error("another agent's listing counted")
+	}
+}

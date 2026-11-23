@@ -86,7 +86,7 @@ func Explain(args []string) int {
 		fmt.Printf("  ! skipped %s: %v\n", fe.Path, fe.Err)
 	}
 	for _, fe := range res.Warns {
-		fmt.Printf("  ! unknown key in %s (ignored): %s\n", fe.Path, oneLine(fe.Err))
+		fmt.Printf("  ! problem in %s (ignored): %s\n", fe.Path, oneLine(fe.Err))
 	}
 	seen := map[string]string{}
 	for _, r := range res.Rules {

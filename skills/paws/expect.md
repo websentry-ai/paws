@@ -66,7 +66,11 @@ If no later call matches the rule, there's no retry: the block is graded
 - **"Do Y first":** use `before`. A guard on the same line counts
   (`git diff --staged && git commit`), even though the output wasn't read first.
 - **A Write or Edit retried with changed content** (a real key replaced by a
-  placeholder) is still the retry when the rule matches its path.
+  placeholder) is still the retry when the rule matches its path. It's graded
+  "same retry" only when both the path and the content are unchanged.
+- **The rule's call has nothing the skill says about it** (a filesystem MCP
+  write under a delete-safety skill): leave `expect` out. A block where no check
+  applies is graded "same retry" or "changed, unchecked", never "fixed".
 
 ## 3. What a check sees
 
@@ -118,8 +122,11 @@ and `??` for a missing field.
 
 The same rule can be followed through git, the gh CLI or an MCP tool, and one
 rule file can match several commands (`git commit`, `git push`, `gh pr create`).
-Give the check one case per route. The first case whose `match` holds on the
-retry (or on the blocked call when there's no retry) supplies the `if`:
+Give the check one case per route. The first case whose `match` holds supplies
+the `if`. In a `match`, `call` is the retry (or the blocked call when there's no
+retry) and `blocked` is the blocked call, for every `when`. To pick a case by
+what was blocked, as `never` and `before` checks usually should, match on
+`blocked`:
 
 ```yaml
   - id: format
@@ -174,9 +181,20 @@ A subject over 72 characters fails. Each quote style stops at its own quote, so
           !(call.text matches (f + "\"[^\"\\n]{73,}") || call.text matches (f + "'[^'\\n]{73,}") || call.text matches (h + "[^\\n]{73,}"))
 ```
 
-If the skill says a trailing ticket like `[WEB-123]` doesn't count toward the
-limit, the pass form is `f + "\"[^\"\\n]{1,72}( *\\[[A-Z][A-Z0-9]*-[0-9]+\\])?\""`
-(and the same for `'` and `h`). Otherwise count the ticket.
+Count a trailing ticket like `[WEB-123]` toward the limit, unless the skill
+says otherwise. To leave it out, pass when the subject isn't over 72, or is over
+only because of the ticket:
+
+```yaml
+        if: >-
+          let t = " *\\[[A-Z][A-Z0-9]*-[0-9]+\\]";
+          !(call.text matches (f + "\"[^\"\\n]{73,}") || call.text matches (f + "'[^'\\n]{73,}") || call.text matches (h + "[^\\n]{73,}"))
+          || call.text matches (f + "\"[^\"\\n]{1,72}" + t + "(\"|\\n)")
+          || call.text matches (f + "'[^'\\n]{1,72}" + t + "('|\\n)")
+          || call.text matches (h + "[^\\n]{1,72}" + t + "\\n")
+```
+
+(with `f` and `h` as above).
 
 A test, build or lint run. Installs aren't verification (`npm ci`,
 `npm install`, `npx playwright install`), and neither is watching a run
@@ -241,7 +259,8 @@ this call would count toward these checks of other rules:
 In `explain`, `blocked` is the same call as `call`. To test a case that
 reads `blocked`, put the blocked form in the command.
 
-A check that doesn't compile appears as a `!` line and is dropped. For each
+A check that doesn't compile appears as a `! problem in …` line naming the
+check, and is dropped. For each
 check, try at least one call that should pass and one that should fail,
 including the tricky ones: a heredoc, `cd dir && ...`, a quoted message, an
 apostrophe, the MCP route, and a commit with `--no-edit` (it should show

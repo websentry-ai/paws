@@ -106,3 +106,24 @@ func TestExplainAfterCheckIsNotTheRetry(t *testing.T) {
 		t.Errorf("after check: %q", out)
 	}
 }
+
+// A call another rule's before check counts shows under "would count toward", and a Write takes its input as JSON.
+func TestExplainCountsTowardOtherRulesAndTakesJSON(t *testing.T) {
+	resetDryRun(t)
+	repo := t.TempDir()
+	os.MkdirAll(filepath.Join(repo, ".git"), 0o755)
+	t.Setenv("PAWS_HOME", filepath.Join(repo, "paws-home"))
+	t.Chdir(repo)
+	putRule(t, filepath.Join(repo, ".paws"), "verify.md", "---\nname: verify\nevent: pre-commit\naction: {type: require-skill, skill: v}\nexpect:\n  - id: tested\n    when: before\n    if: 'call.tool == \"Bash\" && any(call.commands, # matches \"^npm test\\\\b\")'\n---\n")
+	putRule(t, filepath.Join(repo, ".paws"), "env.md", "---\nname: env\nevent: pre-tool\nmatcher: {tool: Write, file_glob: '**/.env'}\naction: {type: require-skill, skill: s}\nexpect:\n  - id: no-key\n    when: retry\n    if: '!(call.text matches \"AKIA[0-9A-Z]{16}\")'\n---\n")
+	_, out := captureStdout(t, func() int { return Explain([]string{"cd web && npm test"}) })
+	if !strings.Contains(out, "would count toward") || !strings.Contains(out, "verify / tested (before)") {
+		t.Errorf("npm test: %q", out)
+	}
+	_, out = captureStdout(t, func() int {
+		return Explain([]string{"--tool", "Write", `{"file_path":"app/.env","content":"KEY=AKIAABCDEFGHIJKLMNOP"}`})
+	})
+	if !regexp.MustCompile(`no-key\s+FAIL`).MatchString(out) {
+		t.Errorf("Write JSON: %q", out)
+	}
+}

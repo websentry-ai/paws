@@ -57,9 +57,13 @@ func Explain(args []string) int {
 			in.ToolName, in.Source = "", text
 		default:
 			in.ToolInput = map[string]any{}
-			if field := hook.InputField(in.ToolName); field != "" {
-				in.ToolInput[field] = text
-			} else if json.Unmarshal([]byte(text), &in.ToolInput) != nil {
+			// Any tool but Bash can take its whole input as JSON: a Write's file_path and content, to try checks on.
+			asJSON := in.ToolName != "Bash" && strings.HasPrefix(strings.TrimSpace(text), "{") && json.Unmarshal([]byte(text), &in.ToolInput) == nil
+			switch field := hook.InputField(in.ToolName); {
+			case asJSON:
+			case field != "":
+				in.ToolInput = map[string]any{field: text}
+			case json.Unmarshal([]byte(text), &in.ToolInput) != nil:
 				// An MCP tool matches on its whole input: pass it as JSON, or this text stands in for it.
 				in.ToolInput = map[string]any{"input": text}
 			}
@@ -112,6 +116,9 @@ func Explain(args []string) int {
 	if len(res.Rules) == 0 {
 		fmt.Println("  (no rules loaded)")
 	}
+	if ev.Tool != "" {
+		printCountsToward(res.Rules, ev, hook.CallOf(in.ToolName, in.ToolInput).Env())
+	}
 
 	printDecision(gate.Decide(ev, res.Rules))
 	return 0
@@ -147,6 +154,27 @@ func printChecks(checks []rule.Expect, call map[string]any) {
 			got = "this call doesn't count (before)"
 		}
 		fmt.Printf("        %-20s %s\n", checks[i].ID, got)
+	}
+}
+
+// printCountsToward lists the before and after checks of rules this call doesn't match that it would count toward:
+// `npm test` counts toward a commit rule's "ran the tests first", though only the commit is blocked.
+func printCountsToward(rules []*rule.Rule, ev gate.Event, call map[string]any) {
+	var lines []string
+	for _, r := range rules {
+		if gate.Applies(r, ev) {
+			continue // its checks are listed under it
+		}
+		for i := range r.Expect {
+			e, ok := r.Expect[i].For(call, call)
+			if ok && (e.When == rule.ExpectBefore || e.When == rule.ExpectAfter) && e.Eval(call, call) {
+				lines = append(lines, fmt.Sprintf("  %s / %s (%s)", r.Name, e.ID, e.When))
+			}
+		}
+	}
+	if len(lines) > 0 {
+		fmt.Println("\nthis call would count toward these checks of other rules:")
+		fmt.Println(strings.Join(lines, "\n"))
 	}
 }
 

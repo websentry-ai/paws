@@ -12,59 +12,107 @@ format, a flag that must or mustn't appear, a command that must run first, a
 field an MCP call must fill. Skip rules about thinking, wording to the user, or
 anything no call carries.
 
-- Write one check per rule, and two to four per rule file. A check nobody can
-  fail measures nothing.
-- Every check should fail on a real call that breaks the skill and pass on one
-  that follows it. If you can't name both calls, drop the check.
+- Write **one check per rule a call can show**. A skill with one such rule gets one
+  check, and one with six gets six. Don't pad, and don't drop a measurable rule to
+  hit a number.
+- Every check must fail on a real call that breaks the skill and pass on one that
+  follows it. If you can't name both calls, drop the check.
+- Use the values the user's copy of the skill uses. A skill can leave
+  placeholders like `{{COMMIT_TYPES}}` or `{{PROTECTED_BRANCHES}}`. Read the
+  installed skill (or its `config.yaml`) for the filled values. If they're unset,
+  use the skill's stated default, and say which values you assumed.
 - `label` says the rule in plain words, as a person would read it on a
   dashboard: `Ran tests, a build or a linter first`.
+- A check looks at one call at a time, plus `blocked`. It can't say "the delete
+  used the exact expression that was listed" or "the tests ran after the last
+  edit". Leave such rules out.
 
-## 2. Shape
+## 2. Shape and `when`
 
 ```yaml
 expect:
   - id: format                      # lower-case letters, digits, -
     label: 'Commit message is <type>(<scope>): <summary>'
     when: retry                     # before | retry | after | never
-    if: '...'                       # or cases:, below
+    if: >-
+      call.text matches "..."
 ```
 
-`when`, all within the blocked agent's turn:
+All `when` values look only at the blocked agent's turn:
 
 | `when` | Passes when |
 |---|---|
 | `retry` | the retry (the next call the rule matches that goes through) matches |
-| `before` | a call earlier in the turn than the retry, the retry included, matches. Calls before the block count; the blocked call's own parallel batch doesn't |
+| `before` | a call earlier in the turn than the retry matches, or the retry itself does. Calls before the block count. Calls sent in the same parallel batch as the blocked call or the retry don't |
 | `after` | a call after the retry matches |
 | `never` | no call after the block matches |
 
-Use `retry` for "the call itself must look like X", `before` for "do Y first",
-and `never` for "don't ever do Z".
+If no later call matches the rule, there's no retry: the block is graded
+"other route" or "stopped", and `retry`, `before` and `after` checks fail.
+**Choose `when` by where the compliant call goes:**
+
+- **The compliant call still matches the rule** (a fixed commit message, a PR
+  with a body): use `retry`.
+- **Following the skill means a different call the rule doesn't match**
+  (`rm -rf` → `trash`, `tar -xPf` → `tar -xzf … -C dir`): a `retry` check on that
+  can never pass. Use `never` for the bad form ("never extracted with
+  `-P`"), and limit it to the blocks it's about with `match` on `blocked` (§4).
+- **The compliant next call matches the rule but is a different action** (a
+  GitHub write to `main` is blocked, and Claude then calls `create_branch`): it
+  becomes the retry. Give each action its own case (§4), so the branch check
+  applies only to file writes.
+- **"Do Y first":** use `before`. A guard on the same line counts
+  (`git diff --staged && git commit`), even though the output wasn't read first.
+- **A Write or Edit retried with changed content** (a real key replaced by a
+  placeholder) is still the retry when the rule matches its path.
 
 ## 3. What a check sees
 
 `if` is an [expr](https://expr-lang.org) expression over `call` (the call
-checked) and `blocked` (the call paws denied):
+checked) and `blocked` (the call paws denied). Both have:
 
 | Field | What it is |
 |---|---|
-| `call.tool` | `Bash`, `Write`, `Edit`, `Glob`, `mcp__github__create_pull_request` … |
-| `call.commands` | Bash only: each command the line runs, quotes removed, `sudo`/`env`/`timeout` dropped. `cd x && sudo git push -f` → `["cd x", "git push -f"]` |
-| `call.text` | the whole Bash line, what a Write writes, an Edit's new text, an MCP call's text values joined |
-| `call.input.<field>` | the raw tool input: `call.input.message`, `call.input.body` |
-| `call.mcp.server`, `.tool`, `.class` | the parts of an MCP tool name |
+| `tool` | `Bash`, `Write`, `Edit`, `Read`, `Glob`, `mcp__github__create_pull_request` … |
+| `commands` | Bash only: each command the line may run, quotes removed, `sudo`/`env`/`timeout` dropped. `cd x && sudo git push -f` → `["cd x", "git push -f"]` |
+| `text` | Bash: the whole line. Write: the content. Edit: the new text. MCP: the input's text values joined. Read/Glob/Grep/LS: the path or pattern |
+| `input.<field>` | the raw tool input: `input.message`, `input.body`, `input.file_path`, `input.pattern` |
+| `mcp.server`, `mcp.tool`, `mcp.class` | the parts of an MCP tool name |
 
 **Use `commands` to ask "did it run X".** Text inside a heredoc, a commit
-message, or an `echo` is not a command, so `any(call.commands, # matches "^git push\\b")`
-ignores a Python script that only prints `git push`. A shell that runs text
-(`bash -c '...'`, a heredoc into `sh`) is followed. A command counts whether or not it
-ran: paws can't see which side of `&&` or `||` ran. Anchor with `^`: each entry
-starts with the program.
+message or an `echo` is not a command, so
+`any(call.commands, # matches "^git push\\b")` ignores a script that only prints
+`git push`. A shell that runs text (`bash -c '...'`, a heredoc into `sh`) is
+followed. Anchor with `^`, because each entry starts with the program.
 
-**Use `text` to read content**, such as a commit message (which may be in a
-heredoc: `git commit -F - <<'EOF'`) or a PR body.
+A command counts whether or not it ran, because paws can't see which side of
+`&&`/`||` ran. `npm test || true` counts as running the tests. To refuse a
+masked exit code, add `&& !(call.text matches "\\|\\| *true\\b")`.
 
-## 4. One skill, several routes: `cases`
+**Use `text` to read content**: a commit message or a PR body. Where the message
+sits depends on how the commit is written:
+
+| Form | Message is in |
+|---|---|
+| `git commit -m "msg"` | `text`, and the `git commit` entry of `commands` (quotes removed) |
+| `git commit -m "$(cat <<'EOF' … EOF)"` | `text`, and the `git commit` entry of `commands` |
+| `git commit -F - <<'EOF' … EOF` | `text` only. A heredoc into a command isn't part of that command |
+
+`blocked` lets a check depend on what was blocked, or compare the two calls:
+
+```yaml
+    cases:
+      - match: >-
+          any(blocked.commands ?? [], # matches "^tar\\b.* -[a-zA-Z]*P")   # only tar -P blocks
+        if: >-
+          call.tool == "Bash" && any(call.commands, # matches "^tar\\b.* -[a-zA-Z]*P")
+```
+
+expr also has `let x = …;`, `in [...]`, `len`, `trim`, `lower`, `contains`,
+`startsWith`, `endsWith`, `indexOf`, `lastIndexOf`, slicing `s[a:b]`, `split`,
+and `??` for a missing field.
+
+## 4. Several routes, or several actions: `cases`
 
 The same rule can be followed through git, the gh CLI or an MCP tool, and one
 rule file can match several commands (`git commit`, `git push`, `gh pr create`).
@@ -76,61 +124,106 @@ retry (or on the blocked call when there's no retry) supplies the `if`:
     label: 'Commit message (or PR title) is <type>(<scope>): <summary>'
     when: retry
     cases:
-      - match: 'call.tool == "Bash" && any(call.commands, # matches "^git( -C \\S+)* commit\\b")'
-        if: 'call.text matches "\\b(feat|fix|chore|docs|refactor|test)(\\([^)]*\\))?!?: \\S"'
-      - match: 'call.tool == "Bash" && any(call.commands, # matches "^gh pr create\\b")'
-        if: 'any(call.commands, # matches "^gh pr create\\b.* (--title|-t)[ =][\"'']?(feat|fix|chore|docs|refactor|test)(\\([^)]*\\))?!?: \\S")'
-      - match: 'call.tool matches "__(create_or_update_file|push_files)$"'
-        if: '(call.input.message ?? "") matches "^(feat|fix|chore|docs|refactor|test)(\\([^)]*\\))?!?: \\S"'
+      - match: >-
+          call.tool == "Bash" && any(call.commands, # matches "^git( -[Cc] \\S+)* commit\\b")
+          && call.text matches "commit\\b[^\\n]*( (-[a-zA-Z]*m|--message)|<<)"
+        if: >-
+          let m = "commit( +(-[a-ln-zA-Z]+|--[a-z][a-z-]*(=\\S+)?))* +(-[a-zA-Z]*m|--message)[ =]?[\"']";
+          let h = "commit\\b[^\\n]*<<-? *[\"']?\\w+[\"']?[^\\n]*\\n";
+          call.text matches ("(" + m + "|" + h + ")(feat|fix|chore|docs|refactor|test)(\\([^)\\n]*\\))?!?: \\S")
+      - match: >-
+          call.tool == "Bash" && any(call.commands, # matches "^gh pr create\\b")
+        if: >-
+          call.text matches "(--title|-t)[ =][\"']?(feat|fix|chore|docs|refactor|test)(\\([^)]*\\))?!?: \\S"
+      - match: >-
+          call.tool matches "__(create_or_update_file|push_files)$"
+        if: >-
+          (call.input.message ?? "") matches "^(feat|fix|chore|docs|refactor|test)(\\([^)]*\\))?!?: \\S"
 ```
 
 When no case matches (a `git push` for a commit check), the check **doesn't
 apply** and is left out of the grade. Never write `!isCommit || ...`, which
 makes the check pass on every call it isn't about and inflates the pass rate.
-Use cases instead. Leave a call out with `match` when it can't be graded, too:
-a commit whose message isn't on the command line (`--no-edit`, `-F file`,
-`--fixup`) can't be checked for format.
 
-## 5. Patterns that work
+- **Leave out calls that can't be graded.** A commit whose message isn't on the
+  command line (`--no-edit`, `-F file`, `--fixup`) is filtered out by the first
+  `match` above, which requires `-m` or a heredoc.
+- **Scope `never` checks the same way.** "No push to main" on a block of a
+  `git tag` passes trivially. Give it a case with `match` on `blocked` (the
+  push), so it counts only on the blocks it's about.
+
+## 5. Patterns that work (tested)
 
 | Need | Expression |
 |---|---|
 | A git subcommand, with `-C dir` or `-c k=v` before it | `any(call.commands, # matches "^git( -[Cc] \\S+)* commit\\b")` |
+| The commit **subject**, not any line | the `m` and `h` prefixes in §4's first case, then the subject pattern |
 | A command that isn't one thing | `any(call.commands, # matches "^find\\b" && !(# matches " -delete\\b"))` |
-| A test runner, with a path or wrapper in front | `any(call.commands, # matches "^(\\S*/)?(npm (run )?test|npx (jest\|vitest)\|go test\|(python3? -m )?pytest\|cargo test)\\b")` |
 | An MCP field that may be missing | `(call.input.body ?? "") != ""`, `len(trim(call.input.body ?? "")) >= 20` |
-| Any of several MCP servers' tool | `call.tool matches "__(create_pull_request)$"` (works for `mcp__github__…` and `mcp__plugin_github_github__…`) |
-| A length limit on part of a line | Regex can't measure a captured group. Bound each alternative: `feat[^\\n"'']{2,46}\|fix[^\\n"'']{2,47}` for a 50-character subject |
+| Any client's copy of an MCP tool | `call.tool matches "__create_pull_request$"` (`mcp__github__…`, `mcp__plugin_github_github__…`) |
 
-## 6. Mistakes that silently break a check
+A subject over 72 characters fails. Each quote style stops at its own quote, so
+`don't` isn't cut short:
 
-- **YAML.** Put every `match` and `if` in single quotes. Unquoted, ` #` starts a
-  comment and `: ` starts a map. Inside single quotes, write `'` as `''`.
+```yaml
+        if: >-
+          let f = "commit( +(-[a-ln-zA-Z]+|--[a-z][a-z-]*(=\\S+)?))* +(-[a-zA-Z]*m|--message)[ =]?";
+          let h = "commit\\b[^\\n]*<<-? *[\"']?\\w+[\"']?[^\\n]*\\n";
+          !(call.text matches (f + "\"[^\"\\n]{73,}") || call.text matches (f + "'[^'\\n]{73,}") || call.text matches (h + "[^\\n]{73,}"))
+```
+
+If the skill says a trailing ticket like `[WEB-123]` doesn't count toward the
+limit, the pass form is `f + "\"[^\"\\n]{1,72}( *\\[[A-Z][A-Z0-9]*-[0-9]+\\])?\""`
+(and the same for `'` and `h`). Otherwise count the ticket.
+
+A test, build or lint run. Installs aren't verification (`npm ci`,
+`npm install`, `npx playwright install`), and neither is watching a run
+(`pgrep jest`):
+
+```yaml
+        if: >-
+          call.tool == "Bash" && any(call.commands, # matches "^(\\S*/)?((npm|pnpm|yarn|bun) (run )?(test|build|lint|typecheck)\\b|(npx|bunx) (jest|vitest|tsc|eslint|playwright test|biome (check|lint|ci))|go (test|vet|build)|cargo (test|check|clippy)|((uv|poetry) run )?(python3? (-m )?)?pytest|((uv|poetry) run )?python3?( \\S+)* manage\\.py test|make (test|check|lint)|(jest|vitest|tsc|eslint|ruff|mypy|biome (check|lint))\\b)")
+```
+
+**Check the patterns against how people really run things.** A team may run
+tests through `./node_modules/.bin/biome`, a Django `manage.py test`, or a
+wrapper script. Search a few recent sessions for the command
+(`grep -h '"command"' ~/.claude/projects/*/*.jsonl | grep -o 'manage.py test[^"]*' | head`),
+and make sure the pattern catches what turns up.
+
+## 6. Writing them so they don't silently break
+
+- **Use folded blocks (`>-`) for `match` and `if`**, as above. Inside them YAML
+  changes nothing: `'`, `"`, `#` and `: ` are literal, and lines join with
+  spaces, so long expressions stay readable. With a single-quoted value instead,
+  write `'` as `''`; unquoted, ` #` starts a comment.
 - **expr strings.** Inside `"..."`, a regex backslash is `\\` (`\\s`, `\\b`), a
-  `"` is `\"`, and a `'` is plain `'` (YAML-doubled to `''`). `\'` is an invalid
-  escape, and the check is dropped.
+  `"` is `\"`, and `'` is plain. `\'` is an invalid escape, and the check is
+  dropped.
 - **Go regex (RE2).** There's no lookahead, lookbehind or backreference. Split
   the condition with `&&` and `!` instead.
 - **`never` checks.** Guard with the tool first (`call.tool == "Bash" && ...`).
   An error on a call counts as a hit, because it can't show the call didn't
   happen.
-- **Anchoring.** `^` belongs on `call.commands` entries, not on `call.text`. The
-  text often starts with `cd ... &&`.
+- **Anchoring.** `^` belongs on `commands` entries, not on `text`. The text often
+  starts with `cd ... &&`.
 - **Over-matching.** `\\bjest\\b` anywhere in the text also matches
-  `pgrep -f jest` and `ls jest.config.js`. Anchor on the command's start.
-- **Ticket tags.** Many orgs append `[ABC-123]`. Don't count it against a
-  length limit another skill imposes.
+  `pgrep -f jest` and `ls jest.config.js`. Anchor on the command's start. A
+  subject pattern that isn't tied to the subject passes on any body line.
 
 ## 7. Check your checks
 
 ```
 unbound-paws explain 'git commit -m "fix: retry on 5xx"'
-unbound-paws explain 'gh pr create --title "Add x" --body y'
 unbound-paws explain --tool mcp__github__create_pull_request '{"title":"x","body":"short"}'
+unbound-paws explain --tool Write '{"file_path":"app/.env","content":"KEY=..."}'
+unbound-paws explain 'cd web && npm test'
 ```
 
-Under each matching rule, `explain` lists every check's result with that call
-as the retry:
+Any tool but Bash takes its whole input as JSON. Under each matching rule,
+`explain` lists every check's result with that call as the retry. A call that a
+rule doesn't match, but that one of its `before` or `after` checks counts (the
+`npm test` above, for a commit rule), is listed under "would count toward":
 
 ```
   → git      event=pre-tool  action=require-skill  .paws/pre-tool/git.md
@@ -138,11 +231,16 @@ as the retry:
         format          pass
         attribution     FAIL
         no-force        pass (this call doesn't break it)
+
+this call would count toward these checks of other rules:
+  verify-before-commit / verified (before)
 ```
 
+In `explain`, `blocked` is the same call as `call`. To test a case that
+reads `blocked`, put the blocked form in the command.
+
 A check that doesn't compile appears as a `!` line and is dropped. For each
-check, run at least one call that should pass and one that should fail,
-including the tricky ones: a heredoc, `cd dir && ...`, a quoted message, the MCP
-route. A `before` check shows whether this call would count, and an `after` check
-whether a call like this one, after the retry, would pass it; the rest of the
-turn isn't known to `explain`.
+check, try at least one call that should pass and one that should fail,
+including the tricky ones: a heredoc, `cd dir && ...`, a quoted message, an
+apostrophe, the MCP route, and a commit with `--no-edit` (it should show
+"doesn't apply").

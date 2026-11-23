@@ -379,6 +379,10 @@ func TestBeforeCountsEarlierInTheTurn(t *testing.T) {
 	if g := Grade(r, batch, 1); g.Checks["listed-first"] {
 		t.Error("a listing in the blocked call's own batch counted: it ran alongside, not first")
 	}
+	sameBatch := []Call{bash(0, "rm -rf build", true, ""), bash(3, "ls build", false, ""), bash(3, "rm -rf build", false, "")}
+	if g := Grade(r, sameBatch, 0); g.Checks["listed-first"] {
+		t.Error("a listing in the retry's own batch counted: it ran alongside the retry, not first")
+	}
 	calls[0].Agent = "other" // another agent's listing doesn't
 	if g := Grade(r, calls, 2); g.Checks["listed-first"] {
 		t.Error("another agent's listing counted")

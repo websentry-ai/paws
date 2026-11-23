@@ -112,7 +112,8 @@ func GradeWhere(r *rule.Rule, calls []Call, blocked int, applied func(Call) bool
 		switch e.When {
 		case rule.ExpectBefore:
 			// Earlier in the turn counts too: tests run, or files listed, before the blocked call still came first.
-			pass = retry >= 0 && (seen(earlier, e) || seen(scope[:retry+1], e))
+			// The retry's own parallel batch ran alongside it, not first: only calls logged before it count, and it.
+			pass = retry >= 0 && (seen(earlier, e) || seen(beforeRetry(scope, retry), e))
 		case rule.ExpectRetry:
 			pass = retry >= 0 && e.Eval(scope[retry].Env(), blockedEnv)
 		case rule.ExpectAfter:
@@ -154,6 +155,17 @@ func GradeWhere(r *rule.Rule, calls []Call, blocked int, applied func(Call) bool
 		res.Outcome = ChangedUnchecked
 	}
 	return res
+}
+
+// beforeRetry is the calls in scope logged before the retry, and the retry itself.
+func beforeRetry(scope []Call, retry int) []Call {
+	var out []Call
+	for _, c := range scope[:retry] {
+		if c.At.Before(scope[retry].At) {
+			out = append(out, c)
+		}
+	}
+	return append(out, scope[retry])
 }
 
 // inScope is the blocked agent's calls after the block, with, for a main-conversation block, every subagent whose

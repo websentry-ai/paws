@@ -143,5 +143,6 @@ as the retry:
 A check that doesn't compile appears as a `!` line and is dropped. For each
 check, run at least one call that should pass and one that should fail,
 including the tricky ones: a heredoc, `cd dir && ...`, a quoted message, the MCP
-route. A `before` check shows whether this call would count; the rest of the
+route. A `before` check shows whether this call would count, and an `after` check
+whether a call like this one, after the retry, would pass it; the rest of the
 turn isn't known to `explain`.

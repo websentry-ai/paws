@@ -118,8 +118,9 @@ func Explain(args []string) int {
 }
 
 // printChecks shows what each expect check makes of this call, as if it were the retry: a retry check passes or
-// fails on it, a never check is broken by it or not, and a before or after check counts it or not (the rest of the
-// turn is unknown here). A check none of whose cases fits doesn't apply.
+// fails on it, a never check is broken by it or not, and a before check counts it or not. An after check never counts
+// the retry, so it says whether a call like this one, later, would pass it. The rest of the turn is unknown here. A
+// check none of whose cases fits doesn't apply.
 func printChecks(checks []rule.Expect, call map[string]any) {
 	fmt.Println("      checks, with this call as the retry:")
 	for i := range checks {
@@ -136,10 +137,14 @@ func printChecks(checks []rule.Expect, call map[string]any) {
 			got = "FAIL (this call breaks it)"
 		case e.When == rule.ExpectNever:
 			got = "pass (this call doesn't break it)"
+		case e.When == rule.ExpectAfter && e.Eval(call, call):
+			got = "not the retry; a call like this after the retry would pass it (after)"
+		case e.When == rule.ExpectAfter:
+			got = "not the retry; a call like this after the retry wouldn't pass it (after)"
 		case e.Eval(call, call):
-			got = "this call counts (" + e.When + ")"
+			got = "this call counts (before)"
 		default:
-			got = "this call doesn't count (" + e.When + ")"
+			got = "this call doesn't count (before)"
 		}
 		fmt.Printf("        %-20s %s\n", checks[i].ID, got)
 	}

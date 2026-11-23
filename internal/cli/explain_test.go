@@ -92,3 +92,17 @@ expect:
 		t.Errorf("force push: %q", out)
 	}
 }
+
+// An after check never counts the retry: explain says so instead of reporting a pass.
+func TestExplainAfterCheckIsNotTheRetry(t *testing.T) {
+	resetDryRun(t)
+	repo := t.TempDir()
+	os.MkdirAll(filepath.Join(repo, ".git"), 0o755)
+	t.Setenv("PAWS_HOME", filepath.Join(repo, "paws-home"))
+	t.Chdir(repo)
+	putRule(t, filepath.Join(repo, ".paws"), "git.md", "---\nname: git\nevent: pre-tool\nmatcher: {tool: Bash, command_regex: 'git push'}\naction: {type: require-skill, skill: git}\nexpect:\n  - id: checked\n    when: after\n    if: 'call.text matches \"git push\"'\n---\n")
+	_, out := captureStdout(t, func() int { return Explain([]string{"git push"}) })
+	if !strings.Contains(out, "checked") || !strings.Contains(out, "not the retry") {
+		t.Errorf("after check: %q", out)
+	}
+}

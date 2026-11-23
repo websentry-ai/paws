@@ -19,6 +19,11 @@ anything no call carries.
   fixed to 5%. Two to five checks is usual. A skill with one such rule gets one.
 - Every check must fail on a real call that breaks the skill and pass on one that
   follows it. If you can't name both calls, drop the check.
+- **Stay inside the skill.** Each check traces to a sentence in the skill text,
+  with its own numbers and its own exceptions. Don't add a limit, exemption or
+  pattern the skill doesn't state, and don't tune a pattern to particular past
+  commands: it has to hold for calls nobody has made yet. When two skills
+  disagree, follow the one this rule loads.
 - Use the values the user's copy of the skill uses. A skill can leave
   placeholders like `{{COMMIT_TYPES}}` or `{{PROTECTED_BRANCHES}}`. Read the
   installed skill (or its `config.yaml`) for the filled values. If they're unset,

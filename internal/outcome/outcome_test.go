@@ -1,6 +1,7 @@
 package outcome
 
 import (
+	"maps"
 	"testing"
 	"time"
 
@@ -286,5 +287,104 @@ func TestACallInTheBlockedBatchIsNotAResponse(t *testing.T) {
 	res := Grade(r, []Call{blocked, batch, retry}, 0)
 	if res.Checks["listed-first"] {
 		t.Errorf("the batch's listing passed listed-first: %+v", res)
+	}
+}
+
+// The git rule runs git and gh: each check's cases pick the test for the command retried, and a check none of whose
+// cases fits (a PR check on a commit) is left out of the grade instead of passing.
+const ruleWithCases = `---
+name: git
+event: pre-tool
+matcher:
+  tool: Bash
+  command_regex: '\b(git\s+(commit|push)|gh\s+pr\s+create)\b'
+action:
+  type: require-skill
+  skill: git
+expect:
+  - id: format
+    when: retry
+    cases:
+      - match: 'call.tool == "Bash" && any(call.commands, # matches "^git( -C \\S+)? commit\\b")'
+        if: 'call.text matches "(feat|fix|chore)(\\([^)]*\\))?: \\S"'
+  - id: pr-described
+    when: retry
+    cases:
+      - match: 'call.tool == "Bash" && any(call.commands, # matches "^gh pr create\\b")'
+        if: 'any(call.commands, # matches "^gh pr create\\b.* (--body|-b|--body-file|-F) \\S")'
+  - id: no-force
+    when: never
+    if: 'call.tool == "Bash" && any(call.commands, # matches "^git( -C \\S+)? push\\b.* (-f|--force)( |$)")'
+---
+`
+
+func TestGradeCases(t *testing.T) {
+	r := parse(t, ruleWithCases)
+	commit := bash(0, `git commit -m "wip"`, true, "")
+	pr := bash(0, `gh pr create --title x`, true, "")
+	cases := []struct {
+		name   string
+		calls  []Call
+		want   string
+		checks map[string]bool
+	}{
+		{"commit fixed: the PR check doesn't apply", []Call{commit, bash(2, `git commit -m "fix: retry"`, false, "")},
+			Fixed, map[string]bool{"format": true, "no-force": true}},
+		{"PR fixed: the commit check doesn't apply", []Call{pr, bash(2, `gh pr create --title x --body "why"`, false, "")},
+			Fixed, map[string]bool{"pr-described": true, "no-force": true}},
+		{"PR retried the same", []Call{pr, bash(2, `gh pr create --title x`, false, "")},
+			SameRetry, map[string]bool{"pr-described": false, "no-force": true}},
+		// A force push written inside a heredoc or a commit message is text, not a command it ran.
+		{"force push in a heredoc isn't run", []Call{commit,
+			bash(2, "git commit -F - <<'EOF'\nfix: stop git push --force in CI\nEOF", false, ""),
+			bash(3, "python3 - <<'PY'\nprint('git push -f')\nPY", false, "")},
+			Fixed, map[string]bool{"format": true, "no-force": true}},
+		{"force push through bash -c is run", []Call{commit, bash(2, `git commit -m "fix: x"`, false, ""), bash(3, `bash -c "git push -f"`, false, "")},
+			ChangedFailed, map[string]bool{"format": true, "no-force": false}},
+	}
+	for _, c := range cases {
+		g := Grade(r, c.calls, 0)
+		if g.Outcome != c.want || !maps.Equal(g.Checks, c.checks) {
+			t.Errorf("%s: got %s %v, want %s %v", c.name, g.Outcome, g.Checks, c.want, c.checks)
+		}
+	}
+
+	// No check applies, and the retry changed: unchecked, not fixed.
+	only := parse(t, `---
+name: git
+event: pre-tool
+matcher: {tool: Bash, command_regex: '\bgit\s+(commit|push)\b'}
+action: {type: require-skill, skill: git}
+expect:
+  - id: format
+    when: retry
+    cases:
+      - match: 'call.tool == "Bash" && any(call.commands, # matches "^git commit\\b")'
+        if: 'call.text matches "fix: "'
+---
+`)
+	if g := Grade(only, []Call{bash(0, "git push", true, ""), bash(2, "git push origin x", false, "")}, 0); g.Outcome != ChangedUnchecked || len(g.Checks) != 0 {
+		t.Errorf("no check applied: got %s %v, want %s and no checks", g.Outcome, g.Checks, ChangedUnchecked)
+	}
+}
+
+// A before check counts what the blocked agent did earlier in the turn: tests run before the blocked commit.
+func TestBeforeCountsEarlierInTheTurn(t *testing.T) {
+	r := parse(t, ruleWithChecks)
+	calls := []Call{bash(-30, "ls build", false, ""), bash(-20, "ls other", false, "sub"), bash(0, "rm -rf build", true, ""), bash(3, "rm -rf build", false, "")}
+	if g := Grade(r, calls, 2); !g.Checks["listed-first"] || g.Outcome != Fixed {
+		t.Errorf("a listing before the block didn't count: %s %v", g.Outcome, g.Checks)
+	}
+	batch := []Call{bash(0, "ls build", false, ""), bash(0, "rm -rf build", true, ""), bash(3, "rm -rf build", false, "")}
+	if g := Grade(r, batch, 1); g.Checks["listed-first"] {
+		t.Error("a listing in the blocked call's own batch counted: it ran alongside, not first")
+	}
+	sameBatch := []Call{bash(0, "rm -rf build", true, ""), bash(3, "ls build", false, ""), bash(3, "rm -rf build", false, "")}
+	if g := Grade(r, sameBatch, 0); g.Checks["listed-first"] {
+		t.Error("a listing in the retry's own batch counted: it ran alongside the retry, not first")
+	}
+	calls[0].Agent = "other" // another agent's listing doesn't
+	if g := Grade(r, calls, 2); g.Checks["listed-first"] {
+		t.Error("another agent's listing counted")
 	}
 }

@@ -359,16 +359,21 @@ func TestADenyAfterTheStopIsTheNextTurns(t *testing.T) {
 func TestAnEarlierRefusalByAnotherHookIsNotTheBlock(t *testing.T) {
 	home := portalEnv(t, http.NotFoundHandler())
 	cwd, _ := os.Getwd()
-	writeRule(t, filepath.Join(cwd, ".paws", "pre-tool", "rm-gate.md"), rmRule)
+	// A never check: a call between the two refusals breaks it only if the earlier one were taken as the block.
+	writeRule(t, filepath.Join(cwd, ".paws", "pre-tool", "rm-gate.md"), rmRule+`  - id: no-wipe
+    label: Never wiped
+    when: never
+    if: call.text matches "^echo wiped"
+`)
 	transcript := filepath.Join(t.TempDir(), "sess-h.jsonl")
-	// Calls at -19s, -17s, -15s, -13s: refused by another hook, a listing, refused by paws, the retry.
+	// Calls at -19s, -17s, -15s, -13s: refused by another hook, the wipe, refused by paws, the retry.
 	transcriptLines(t, transcript, time.Now().Add(-20*time.Second), []struct {
 		cmd    string
 		result string
 		isErr  bool
 	}{
 		{"rm -rf build", "PreToolUse:Bash hook error: another hook refused it", true},
-		{"ls build", "a.o", false},
+		{"echo wiped", "wiped", false},
 		{"rm -rf build", "PreToolUse:Bash hook error: paws: load coreutils", true},
 		{"rm -rf build", "", false},
 	})
@@ -390,13 +395,15 @@ func TestAnEarlierRefusalByAnotherHookIsNotTheBlock(t *testing.T) {
 	}
 	runGate(t, map[string]any{"hook_event_name": "Stop", "session_id": "sess-h", "transcript_path": transcript, "cwd": cwd})
 	var got []any
+	var checks any
 	for _, rec := range auditLines(t, home) {
 		if rec["event"] == "outcome" {
 			got = append(got, rec["outcome"])
+			checks = rec["checks"]
 		}
 	}
-	if len(got) != 1 || got[0] != "same_retry" {
-		t.Errorf("outcomes %v; want [same_retry]: no listing between paws's block and the retry", got)
+	if c, _ := checks.(map[string]any); len(got) != 1 || c["no-wipe"] != true {
+		t.Errorf("outcomes %v, checks %v; want no-wipe passed: the wipe came before paws's block", got, checks)
 	}
 }
 

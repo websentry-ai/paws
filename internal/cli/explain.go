@@ -9,6 +9,7 @@ import (
 
 	"github.com/websentry-ai/paws/internal/gate"
 	"github.com/websentry-ai/paws/internal/hook"
+	"github.com/websentry-ai/paws/internal/rule"
 )
 
 // Explain is the local dry-run: show which .paws rules are in scope, which match, and the resulting decision.
@@ -56,9 +57,13 @@ func Explain(args []string) int {
 			in.ToolName, in.Source = "", text
 		default:
 			in.ToolInput = map[string]any{}
-			if field := hook.InputField(in.ToolName); field != "" {
-				in.ToolInput[field] = text
-			} else if json.Unmarshal([]byte(text), &in.ToolInput) != nil {
+			// Any tool but Bash can take its whole input as JSON: a Write's file_path and content, to try checks on.
+			asJSON := in.ToolName != "Bash" && strings.HasPrefix(strings.TrimSpace(text), "{") && json.Unmarshal([]byte(text), &in.ToolInput) == nil
+			switch field := hook.InputField(in.ToolName); {
+			case asJSON:
+			case field != "":
+				in.ToolInput = map[string]any{field: text}
+			case json.Unmarshal([]byte(text), &in.ToolInput) != nil:
 				// An MCP tool matches on its whole input: pass it as JSON, or this text stands in for it.
 				in.ToolInput = map[string]any{"input": text}
 			}
@@ -81,7 +86,7 @@ func Explain(args []string) int {
 		fmt.Printf("  ! skipped %s: %v\n", fe.Path, fe.Err)
 	}
 	for _, fe := range res.Warns {
-		fmt.Printf("  ! unknown key in %s (ignored): %s\n", fe.Path, oneLine(fe.Err))
+		fmt.Printf("  ! problem in %s (ignored): %s\n", fe.Path, oneLine(fe.Err))
 	}
 	seen := map[string]string{}
 	for _, r := range res.Rules {
@@ -103,14 +108,81 @@ func Explain(args []string) int {
 			if p := gate.DigestProblem(r); p != "" {
 				fmt.Printf("      ! digest not used, the deny names the skill instead: %s\n", p)
 			}
+			if ev.Tool != "" && len(r.Expect) > 0 {
+				printChecks(r.Expect, hook.CallOf(in.ToolName, in.ToolInput).Env())
+			}
 		}
 	}
 	if len(res.Rules) == 0 {
 		fmt.Println("  (no rules loaded)")
 	}
+	if ev.Tool != "" {
+		printCountsToward(res.Rules, ev, hook.CallOf(in.ToolName, in.ToolInput).Env())
+	}
 
 	printDecision(gate.Decide(ev, res.Rules))
 	return 0
+}
+
+// printChecks shows what each expect check makes of this call, as if it were the retry: a retry check passes or
+// fails on it, a never check is broken by it or not, and a before check counts it or not. An after check never counts
+// the retry, so it says whether a call like this one, later, would pass it. The rest of the turn is unknown here. A
+// check none of whose cases fits doesn't apply.
+func printChecks(checks []rule.Expect, call map[string]any) {
+	fmt.Println("      checks, with this call as the retry:")
+	for i := range checks {
+		e, ok := checks[i].For(call, call)
+		var got string
+		switch {
+		case !ok:
+			got = "doesn't apply (no case fits this call)"
+		case e.When == rule.ExpectRetry && e.Eval(call, call):
+			got = "pass"
+		case e.When == rule.ExpectRetry:
+			got = "FAIL"
+		case e.When == rule.ExpectNever && e.Hit(call, call):
+			got = "FAIL (this call breaks it)"
+		case e.When == rule.ExpectNever:
+			got = "pass (this call doesn't break it)"
+		case e.When == rule.ExpectAfter && e.Eval(call, call):
+			got = "not the retry; a call like this after the retry would pass it (after)"
+		case e.When == rule.ExpectAfter:
+			got = "not the retry; a call like this after the retry wouldn't pass it (after)"
+		case e.Eval(call, call):
+			got = "this call counts (before)"
+		default:
+			got = "this call doesn't count (before)"
+		}
+		fmt.Printf("        %-20s %s\n", checks[i].ID, got)
+	}
+}
+
+// printCountsToward lists the before and after checks of rules this call doesn't match that it would count toward:
+// `npm test` counts toward a commit rule's "ran the tests first", though only the commit is blocked.
+func printCountsToward(rules []*rule.Rule, ev gate.Event, call map[string]any) {
+	var lines []string
+	for _, r := range rules {
+		if gate.Applies(r, ev) {
+			continue // its checks are listed under it
+		}
+		for i := range r.Expect {
+			// The retry picks a check's case, and it isn't known here: the call counts if any case would count it.
+			for n, e := range r.Expect[i].Variants() {
+				if (e.When == rule.ExpectBefore || e.When == rule.ExpectAfter) && e.Eval(call, call) {
+					which := ""
+					if len(r.Expect[i].Cases) > 1 {
+						which = fmt.Sprintf(", when the retry is case %d", n+1)
+					}
+					lines = append(lines, fmt.Sprintf("  %s / %s (%s%s)", r.Name, e.ID, e.When, which))
+					break
+				}
+			}
+		}
+	}
+	if len(lines) > 0 {
+		fmt.Println("\nthis call would count toward these checks of other rules:")
+		fmt.Println(strings.Join(lines, "\n"))
+	}
 }
 
 // oneLine flattens a multi-line YAML error ("unmarshal errors:\n  line 6: field x not found").

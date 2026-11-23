@@ -100,6 +100,14 @@ folder and must stay inside it (no `..`): copy the text next to the rule, e.g.
 `.paws/pre-tool/digests/s3.md` with `digest: digests/s3.md`. A rule with any
 other action is skipped.
 
+## Checks: did the skill work?
+
+A rule can carry `expect:` checks that grade, after a block, whether Claude
+then followed the skill: the retried commit has the right format, the tests
+ran first, no force push followed. They only measure and never block. When
+asked to add or change checks, or to measure whether a skill is followed,
+read [expect.md](expect.md) first and follow it.
+
 ## Check it
 
 ```
@@ -112,7 +120,8 @@ unbound-paws explain --event session-start startup
 `unbound-paws explain` has no transcript: a skill never counts as loaded,
 `agent-count` never holds and `no-edit-matching` always does.
 
-A line starting with `!` is a problem to fix: a file that was skipped, an
+Under a rule with checks, `explain` shows each check's result with the call as
+the retry. A line starting with `!` is a problem to fix: a file that was skipped, an
 unknown key (a typo like `comand_regex` is ignored, so the rule matches more
 than you meant), or a digest that couldn't be read.
 

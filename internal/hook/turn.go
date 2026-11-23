@@ -153,6 +153,11 @@ func hookDenied(content json.RawMessage) bool {
 // refusedPrefix opens a refused call's result, as Claude Code writes it (gate.blobDenyPrefix).
 var refusedPrefix = regexp.MustCompile(`^PreToolUse:\S+ hook error: `)
 
+// CallOf is a tool call as expect checks see it, from its name and input (unbound-paws explain tries checks on one).
+func CallOf(tool string, input map[string]any) outcome.Call {
+	return toCall(turnBlock{Name: tool, Input: input}, time.Time{}, "")
+}
+
 func toCall(b turnBlock, at time.Time, agent string) outcome.Call {
 	in := Input{HookEventName: "PreToolUse", ToolName: b.Name, ToolInput: b.Input}
 	c := outcome.Call{ID: b.ID, Tool: b.Name, Target: in.Command(), Input: b.Input, At: at, Agent: agent}

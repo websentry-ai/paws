@@ -31,8 +31,14 @@ type Call struct {
 }
 
 // Env is the call as an expect check sees it.
-func (c Call) Env() map[string]any {
+func (c Call) Env() map[string]any { return c.env(rule.Commands) }
+
+// env is Env with the Bash parse supplied, so a grade parses each line once for all its checks.
+func (c Call) env(commands func(string) []string) map[string]any {
 	m := map[string]any{"tool": c.Tool, "text": c.Text, "input": c.Input}
+	if c.Tool == "Bash" {
+		m["commands"] = commands(c.Text)
+	}
 	if c.Input == nil {
 		m["input"] = map[string]any{}
 	}
@@ -47,7 +53,7 @@ const (
 	Fixed            = "fixed"             // retried, and every check passed
 	SameRetry        = "same_retry"        // retried the same call (checks failed or none)
 	ChangedFailed    = "changed_failed"    // retried a changed call, and a check failed
-	ChangedUnchecked = "changed_unchecked" // retried a changed call; the rule has no checks
+	ChangedUnchecked = "changed_unchecked" // retried a changed call; no check applied
 	OtherRoute       = "other_route"       // never retried; other calls ran
 	Stopped          = "stopped"           // never retried; nothing else ran
 )
@@ -55,7 +61,7 @@ const (
 // Result is one graded block.
 type Result struct {
 	Outcome string
-	Checks  map[string]bool // expect id → passed
+	Checks  map[string]bool // expect id → passed; a check none of whose cases fits the call is left out
 	Retry   *Call
 }
 
@@ -72,6 +78,12 @@ func Grade(r *rule.Rule, calls []Call, blocked int) Result {
 func GradeWhere(r *rule.Rule, calls []Call, blocked int, applied func(Call) bool) Result {
 	b := calls[blocked]
 	scope := inScope(calls, blocked)
+	var earlier []Call // the blocked agent's calls before the block; its own batch ran alongside it, not before
+	for _, c := range calls[:blocked] {
+		if c.Agent == b.Agent && c.At.Before(b.At) {
+			earlier = append(earlier, c)
+		}
+	}
 	retry := -1
 	for i, c := range scope {
 		// A Skill call is how Claude answers the deny (the gate never holds one), not a retry of the blocked call.
@@ -81,29 +93,48 @@ func GradeWhere(r *rule.Rule, calls []Call, blocked int, applied func(Call) bool
 		}
 	}
 	res := Result{Checks: map[string]bool{}}
-	blockedEnv := b.Env()
+	parsed := map[string][]string{} // each Bash line's commands, parsed once for every check
+	commands := func(line string) []string {
+		cmds, ok := parsed[line]
+		if !ok {
+			cmds = rule.Commands(line)
+			parsed[line] = cmds
+		}
+		return cmds
+	}
+	envOf := func(c Call) map[string]any { return c.env(commands) }
+	blockedEnv := envOf(b)
 	seen := func(cs []Call, e *rule.Expect) bool {
 		for _, c := range cs {
-			if !c.Denied && e.Eval(c.Env(), blockedEnv) {
+			if !c.Denied && e.Eval(envOf(c), blockedEnv) {
 				return true
 			}
 		}
 		return false
 	}
+	subject := blockedEnv // what a check's cases are matched on: the retry, else the blocked call
+	if retry >= 0 {
+		subject = envOf(scope[retry])
+	}
 	for i := range r.Expect {
-		e := &r.Expect[i]
+		e, applies := r.Expect[i].For(subject, blockedEnv)
+		if !applies {
+			continue
+		}
 		var pass bool
 		switch e.When {
 		case rule.ExpectBefore:
-			pass = retry >= 0 && seen(scope[:retry+1], e)
+			// Earlier in the turn counts too: tests run, or files listed, before the blocked call still came first.
+			// The retry's own parallel batch ran alongside it, not first: only calls logged before it count, and it.
+			pass = retry >= 0 && (seen(earlier, e) || seen(beforeRetry(scope, retry), e))
 		case rule.ExpectRetry:
-			pass = retry >= 0 && e.Eval(scope[retry].Env(), blockedEnv)
+			pass = retry >= 0 && e.Eval(subject, blockedEnv)
 		case rule.ExpectAfter:
 			pass = retry >= 0 && seen(scope[retry+1:], e)
 		case rule.ExpectNever:
 			pass = true
 			for _, c := range scope {
-				if !c.Denied && e.Hit(c.Env(), blockedEnv) {
+				if !c.Denied && e.Hit(envOf(c), blockedEnv) {
 					pass = false
 					break
 				}
@@ -122,7 +153,7 @@ func GradeWhere(r *rule.Rule, calls []Call, blocked int, applied func(Call) bool
 		return res
 	}
 	res.Retry = &scope[retry]
-	all := len(r.Expect) > 0
+	all := len(res.Checks) > 0
 	for _, ok := range res.Checks {
 		all = all && ok
 	}
@@ -131,12 +162,23 @@ func GradeWhere(r *rule.Rule, calls []Call, blocked int, applied func(Call) bool
 		res.Outcome = Fixed
 	case sameCall(scope[retry], b):
 		res.Outcome = SameRetry
-	case len(r.Expect) > 0:
+	case len(res.Checks) > 0:
 		res.Outcome = ChangedFailed
 	default:
 		res.Outcome = ChangedUnchecked
 	}
 	return res
+}
+
+// beforeRetry is the calls in scope logged before the retry, and the retry itself.
+func beforeRetry(scope []Call, retry int) []Call {
+	var out []Call
+	for _, c := range scope[:retry] {
+		if c.At.Before(scope[retry].At) {
+			out = append(out, c)
+		}
+	}
+	return append(out, scope[retry])
 }
 
 // inScope is the blocked agent's calls after the block, with, for a main-conversation block, every subagent whose

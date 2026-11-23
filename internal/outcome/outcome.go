@@ -31,10 +31,13 @@ type Call struct {
 }
 
 // Env is the call as an expect check sees it.
-func (c Call) Env() map[string]any {
+func (c Call) Env() map[string]any { return c.env(rule.Commands) }
+
+// env is Env with the Bash parse supplied, so a grade parses each line once for all its checks.
+func (c Call) env(commands func(string) []string) map[string]any {
 	m := map[string]any{"tool": c.Tool, "text": c.Text, "input": c.Input}
 	if c.Tool == "Bash" {
-		m["commands"] = rule.Commands(c.Text)
+		m["commands"] = commands(c.Text)
 	}
 	if c.Input == nil {
 		m["input"] = map[string]any{}
@@ -90,10 +93,20 @@ func GradeWhere(r *rule.Rule, calls []Call, blocked int, applied func(Call) bool
 		}
 	}
 	res := Result{Checks: map[string]bool{}}
-	blockedEnv := b.Env()
+	parsed := map[string][]string{} // each Bash line's commands, parsed once for every check
+	commands := func(line string) []string {
+		cmds, ok := parsed[line]
+		if !ok {
+			cmds = rule.Commands(line)
+			parsed[line] = cmds
+		}
+		return cmds
+	}
+	envOf := func(c Call) map[string]any { return c.env(commands) }
+	blockedEnv := envOf(b)
 	seen := func(cs []Call, e *rule.Expect) bool {
 		for _, c := range cs {
-			if !c.Denied && e.Eval(c.Env(), blockedEnv) {
+			if !c.Denied && e.Eval(envOf(c), blockedEnv) {
 				return true
 			}
 		}
@@ -101,7 +114,7 @@ func GradeWhere(r *rule.Rule, calls []Call, blocked int, applied func(Call) bool
 	}
 	subject := blockedEnv // what a check's cases are matched on: the retry, else the blocked call
 	if retry >= 0 {
-		subject = scope[retry].Env()
+		subject = envOf(scope[retry])
 	}
 	for i := range r.Expect {
 		e, applies := r.Expect[i].For(subject, blockedEnv)
@@ -115,13 +128,13 @@ func GradeWhere(r *rule.Rule, calls []Call, blocked int, applied func(Call) bool
 			// The retry's own parallel batch ran alongside it, not first: only calls logged before it count, and it.
 			pass = retry >= 0 && (seen(earlier, e) || seen(beforeRetry(scope, retry), e))
 		case rule.ExpectRetry:
-			pass = retry >= 0 && e.Eval(scope[retry].Env(), blockedEnv)
+			pass = retry >= 0 && e.Eval(subject, blockedEnv)
 		case rule.ExpectAfter:
 			pass = retry >= 0 && seen(scope[retry+1:], e)
 		case rule.ExpectNever:
 			pass = true
 			for _, c := range scope {
-				if !c.Denied && e.Hit(c.Env(), blockedEnv) {
+				if !c.Denied && e.Hit(envOf(c), blockedEnv) {
 					pass = false
 					break
 				}

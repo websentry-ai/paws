@@ -197,7 +197,7 @@ the turn; only a prompt you type does:
 |---|---|
 | `before` | a call earlier in the turn than the retry, the retry included, matches (before the deny counts) |
 | `retry` | the retry (the next call the rule matches that goes through) matches |
-| `after` | a call after the retry matches |
+| `after` | a call logged after the retry matches (not one in its own parallel batch) |
 | `never` | no call after the deny matches |
 
 `unbound-paws explain '<command>'` lists each check's result with that call as the retry (pass, FAIL, or doesn't

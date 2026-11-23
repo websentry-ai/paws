@@ -388,3 +388,26 @@ func TestBeforeCountsEarlierInTheTurn(t *testing.T) {
 		t.Error("another agent's listing counted")
 	}
 }
+
+// An after check counts only calls logged after the retry: one in the retry's own parallel batch ran alongside it.
+func TestAfterSkipsTheRetrysBatch(t *testing.T) {
+	r := parse(t, `---
+name: rm
+event: pre-tool
+matcher: {tool: Bash, command_regex: '\brm\s+-\S*r'}
+action: {type: require-skill, skill: coreutils}
+expect:
+  - id: checked
+    when: after
+    if: 'call.text matches "^ls\\b"'
+---
+`)
+	sameBatch := []Call{bash(0, "rm -rf build", true, ""), bash(3, "rm -rf build", false, ""), bash(3, "ls", false, "")}
+	if g := Grade(r, sameBatch, 0); g.Checks["checked"] {
+		t.Error("a call in the retry's batch counted as after it")
+	}
+	later := []Call{bash(0, "rm -rf build", true, ""), bash(3, "rm -rf build", false, ""), bash(5, "ls", false, "")}
+	if g := Grade(r, later, 0); !g.Checks["checked"] {
+		t.Error("a call after the retry didn't count")
+	}
+}

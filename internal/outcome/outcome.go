@@ -130,7 +130,7 @@ func GradeWhere(r *rule.Rule, calls []Call, blocked int, applied func(Call) bool
 		case rule.ExpectRetry:
 			pass = retry >= 0 && e.Eval(subject, blockedEnv)
 		case rule.ExpectAfter:
-			pass = retry >= 0 && seen(scope[retry+1:], e)
+			pass = retry >= 0 && seen(afterRetry(scope, retry), e)
 		case rule.ExpectNever:
 			pass = true
 			for _, c := range scope {
@@ -179,6 +179,17 @@ func beforeRetry(scope []Call, retry int) []Call {
 		}
 	}
 	return append(out, scope[retry])
+}
+
+// afterRetry is the calls in scope logged after the retry: its own parallel batch ran alongside it, not after.
+func afterRetry(scope []Call, retry int) []Call {
+	var out []Call
+	for _, c := range scope[retry+1:] {
+		if c.At.After(scope[retry].At) {
+			out = append(out, c)
+		}
+	}
+	return out
 }
 
 // inScope is the blocked agent's calls after the block, with, for a main-conversation block, every subagent whose

@@ -112,6 +112,22 @@ func compileExpr(src string) (*vm.Program, error) {
 	return expr.Compile(src, expr.Env(expectEnv), expr.AsBool(), expr.AllowUndefinedVariables())
 }
 
+// Variants is the check as each of its cases would apply it, in order, or the check alone when it has no cases: what
+// a call can count toward when the retry, which picks the case, isn't known yet.
+func (e *Expect) Variants() []*Expect {
+	if e.prog == nil && (len(e.Cases) == 0 || e.Cases[0].prog == nil) && e.compile() != nil {
+		return []*Expect{e}
+	}
+	if len(e.Cases) == 0 {
+		return []*Expect{e}
+	}
+	out := make([]*Expect, len(e.Cases))
+	for i, c := range e.Cases {
+		out[i] = &Expect{ID: e.ID, Label: e.Label, When: e.When, If: c.If, prog: c.prog}
+	}
+	return out
+}
+
 // For is the check as it applies to a block whose retry (or, with none, blocked call) is subject: the check itself,
 // or for a check with cases, the first case whose match holds. ok is false when no case matches: the check doesn't
 // apply. A match that fails to run doesn't hold.

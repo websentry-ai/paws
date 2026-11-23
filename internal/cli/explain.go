@@ -166,9 +166,16 @@ func printCountsToward(rules []*rule.Rule, ev gate.Event, call map[string]any) {
 			continue // its checks are listed under it
 		}
 		for i := range r.Expect {
-			e, ok := r.Expect[i].For(call, call)
-			if ok && (e.When == rule.ExpectBefore || e.When == rule.ExpectAfter) && e.Eval(call, call) {
-				lines = append(lines, fmt.Sprintf("  %s / %s (%s)", r.Name, e.ID, e.When))
+			// The retry picks a check's case, and it isn't known here: the call counts if any case would count it.
+			for n, e := range r.Expect[i].Variants() {
+				if (e.When == rule.ExpectBefore || e.When == rule.ExpectAfter) && e.Eval(call, call) {
+					which := ""
+					if len(r.Expect[i].Cases) > 1 {
+						which = fmt.Sprintf(", when the retry is case %d", n+1)
+					}
+					lines = append(lines, fmt.Sprintf("  %s / %s (%s%s)", r.Name, e.ID, e.When, which))
+					break
+				}
 			}
 		}
 	}

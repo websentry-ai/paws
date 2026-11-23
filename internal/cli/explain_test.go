@@ -120,6 +120,12 @@ func TestExplainCountsTowardOtherRulesAndTakesJSON(t *testing.T) {
 	if !strings.Contains(out, "would count toward") || !strings.Contains(out, "verify / tested (before)") {
 		t.Errorf("npm test: %q", out)
 	}
+	// A check whose case the retry picks: npm test still counts toward it.
+	putRule(t, filepath.Join(repo, ".paws"), "push.md", "---\nname: push\nevent: pre-push\naction: {type: require-skill, skill: v}\nexpect:\n  - id: tested-push\n    when: before\n    cases:\n      - match: 'call.tool == \"Bash\" && any(call.commands, # matches \"^git push\")'\n        if: 'call.tool == \"Bash\" && any(call.commands, # matches \"^npm test\")'\n---\n")
+	_, out = captureStdout(t, func() int { return Explain([]string{"npm test"}) })
+	if !strings.Contains(out, "push / tested-push (before)") {
+		t.Errorf("a cased before check: %q", out)
+	}
 	_, out = captureStdout(t, func() int {
 		return Explain([]string{"--tool", "Write", `{"file_path":"app/.env","content":"KEY=AKIAABCDEFGHIJKLMNOP"}`})
 	})

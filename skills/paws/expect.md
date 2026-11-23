@@ -51,7 +51,7 @@ All `when` values look only at the blocked agent's turn:
 |---|---|
 | `retry` | the retry (the next call the rule matches that goes through) matches |
 | `before` | a call earlier in the turn than the retry matches, or the retry itself does. Calls before the block count. Calls sent in the same parallel batch as the blocked call or the retry don't |
-| `after` | a call after the retry matches |
+| `after` | a call logged after the retry matches (not one in its own parallel batch) |
 | `never` | no call after the block matches |
 
 If no later call matches the rule, there's no retry: the block is graded

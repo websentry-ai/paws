@@ -16,7 +16,12 @@ anything no call carries.
   "must", "never" and "always" rules, not every style preference. A block is
   graded fixed only when every check that applies passes, so ten checks on one
   rule make "fixed" almost never true: a test with ten git checks fell from 42%
-  fixed to 5%. Two to five checks is usual. A skill with one such rule gets one.
+  fixed to 5%. Two to five checks is usual, and five is the most. A skill with
+  one such rule gets one.
+- **List first, then pick.** Before writing any check, write down every firm
+  rule of the skill that a call on this rule file can show. Then pick up to
+  five, the ones the skill stresses most. A skill with three such rules gets
+  three checks, not one.
 - Every check must fail on a real call that breaks the skill and pass on one that
   follows it. If you can't name both calls, drop the check.
 - **Stay inside the skill.** Each check traces to a sentence in the skill text,
@@ -24,10 +29,23 @@ anything no call carries.
   pattern the skill doesn't state, and don't tune a pattern to particular past
   commands: it has to hold for calls nobody has made yet. When two skills
   disagree, follow the one this rule loads.
+- **Measure what the sentence measures.** A number applies to the part the
+  skill names. If the skill caps the summary and its template puts more after
+  the summary (`<type>(<scope>): <summary>  [<issue-id>]`), that extra part
+  doesn't count. If it caps the subject line, everything on the line counts.
+- **Cover every form the skill names.** When the skill lists several commands
+  or forms for one rule ("before `x delete`, `x purge` or `x rm -r`, list what
+  will go"), the check covers each form the rule file can block: one `match`
+  that takes them all, or one case per form. Go through the rule file's match
+  list. Each command it can block should fall under a check, unless the skill
+  says nothing about it.
 - Use the values the user's copy of the skill uses. A skill can leave
   placeholders like `{{COMMIT_TYPES}}` or `{{PROTECTED_BRANCHES}}`. Read the
   installed skill (or its `config.yaml`) for the filled values. If they're unset,
-  use the skill's stated default, and say which values you assumed.
+  use the skill's stated default, and say which values you assumed. If the
+  skill gives no default, still check the part of the rule that doesn't need
+  the value (that a step ran first, say), and leave out only the part that
+  does.
 - `label` says the rule in plain words, as a person would read it on a
   dashboard: `Ran tests, a build or a linter first`.
 - A check looks at one call at a time, plus `blocked`. It can't say "the delete
@@ -45,7 +63,10 @@ expect:
       call.text matches "..."
 ```
 
-All `when` values look only at the blocked agent's turn:
+All `when` values look only at the blocked agent's turn. `before`, `after`
+and `never` look at every call in it, of any tool, not only calls the rule
+matches: a rule that blocks a shell command can still check a later MCP or
+Write call.
 
 | `when` | Passes when |
 |---|---|
@@ -63,7 +84,9 @@ If no later call matches the rule, there's no retry: the block is graded
 - **Following the skill means a different call the rule doesn't match**
   (`rm -rf` → `trash`, `tar -xPf` → `tar -xzf … -C dir`): a `retry` check on that
   can never pass. Use `never` for the bad form ("never extracted with
-  `-P`"), and limit it to the blocks it's about with `match` on `blocked` (§4).
+  `-P`"), and limit it to blocks of that command with `match` on `blocked`
+  (§4): any `tar` block, not only a `tar -P` block, because Claude can add the
+  bad form on the retry.
 - **The compliant next call matches the rule but is a different action** (a
   GitHub write to `main` is blocked, and Claude then calls `create_branch`): it
   becomes the retry. Give each action its own case (§4), so the branch check
@@ -163,8 +186,10 @@ makes the check pass on every call it isn't about and inflates the pass rate.
   command line (`--no-edit`, `-F file`, `--fixup`) is filtered out by the first
   `match` above, which requires `-m` or a heredoc.
 - **Scope `never` checks the same way.** "No push to main" on a block of a
-  `git tag` passes trivially. Give it a case with `match` on `blocked` (the
-  push), so it counts only on the blocks it's about.
+  `git tag` passes trivially. Give it a case with `match` on `blocked` (a
+  `git push`), so it counts only on blocks of the command it's about. Match the
+  command, not the bad form: a block of a plain `git push` whose retry pushes to
+  `main` must still count.
 
 ## 5. Patterns that work (tested)
 
@@ -186,9 +211,11 @@ A subject over 72 characters fails. Each quote style stops at its own quote, so
           !(call.text matches (f + "\"[^\"\\n]{73,}") || call.text matches (f + "'[^'\\n]{73,}") || call.text matches (h + "[^\\n]{73,}"))
 ```
 
-Count a trailing ticket like `[WEB-123]` toward the limit, unless the skill
-says otherwise. To leave it out, pass when the subject isn't over 72, or is over
-only because of the ticket:
+Whether a trailing ticket like `[WEB-123]` counts depends on what the skill
+caps (§1). If the skill caps the whole subject line, use the check above. If it
+caps the summary and its format puts the ticket after the summary, leave the
+ticket out: pass when the subject isn't over 72, or is over only because of the
+ticket:
 
 ```yaml
         if: >-
@@ -265,8 +292,24 @@ In `explain`, `blocked` is the same call as `call`. To test a case that
 reads `blocked`, put the blocked form in the command.
 
 A check that doesn't compile appears as a `! problem in …` line naming the
-check, and is dropped. For each
+check, and is dropped. Then try one
+call of each kind the rule file blocks (each command, tool or route in its
+match list). Where the skill has a firm rule for that kind of call, at least
+one check must apply to it, not show "doesn't apply". For each
 check, try at least one call that should pass and one that should fail,
 including the tricky ones: a heredoc, `cd dir && ...`, a quoted message, an
 apostrophe, the MCP route, and a commit with `--no-edit` (it should show
 "doesn't apply").
+
+## 8. Before you finish
+
+Go back to the list you made in §1 for each rule file:
+
+- Every firm rule on the list has a check, or a line in your notes saying why
+  it has none (a call can't show it, or five checks are already taken by rules
+  the skill stresses more).
+- Every kind of call the rule file blocks has a check that applies to it, if
+  the skill has a firm rule for it.
+- No check fails a call that follows the skill. Try the compliant form of each
+  check's rule once more, written the way an agent would (`cd dir && …`, a
+  heredoc, the MCP route).

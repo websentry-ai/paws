@@ -33,6 +33,8 @@ anything no call carries.
   skill names. If the skill caps the summary and its template puts more after
   the summary (`<type>(<scope>): <summary>  [<issue-id>]`), that extra part
   doesn't count. If it caps the subject line, everything on the line counts.
+  For a commit subject, count from the start of the line, `<type>(<scope>): `
+  included, unless the skill says to measure the summary alone.
 - **Cover every form the skill names.** When the skill lists several commands
   or forms for one rule ("before `x delete`, `x purge` or `x rm -r`, list what
   will go"), the check covers each form the rule file can block: one `match`
@@ -137,7 +139,7 @@ sits depends on how the commit is written:
 ```yaml
     cases:
       - match: >-
-          any(blocked.commands ?? [], # matches "^tar\\b.* -[a-zA-Z]*P")   # only tar -P blocks
+          any(blocked.commands ?? [], # matches "^tar\\b")   # any tar block: the retry can add -P
         if: >-
           call.tool == "Bash" && any(call.commands, # matches "^tar\\b.* -[a-zA-Z]*P")
 ```
@@ -215,7 +217,8 @@ Whether a trailing ticket like `[WEB-123]` counts depends on what the skill
 caps (§1). If the skill caps the whole subject line, use the check above. If it
 caps the summary and its format puts the ticket after the summary, leave the
 ticket out: pass when the subject isn't over 72, or is over only because of the
-ticket:
+ticket. Both checks count from the start of the subject, `<type>(<scope>): `
+included:
 
 ```yaml
         if: >-

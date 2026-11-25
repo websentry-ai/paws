@@ -40,10 +40,11 @@ func (r *Rule) Matches(tool, target string) bool {
 	if tool != "Bash" {
 		return (r.re == nil || r.re.MatchString(target)) && r.Event != "pre-commit" && r.Event != "pre-push"
 	}
-	// The shell parser only adds matches: a call matches whenever the whole-line regexes match, as before, and also
-	// when one of the commands the parser finds (inside bash -c, behind sudo, ...) matches.
-	cmds := parseLine(target)
-	if r.re != nil && !r.re.MatchString(target) && !anyCommand(cmds, func(c command) bool {
+	// The shell parser adds matches: a call matches when the whole-line regexes match, and also when one of the
+	// commands the parser finds (inside bash -c, behind sudo, ...) matches. The whole-line regexes read the line
+	// without the heredoc bodies no shell runs (heredoc.go).
+	cmds, text := parseLine(target)
+	if r.re != nil && !r.re.MatchString(text) && !anyCommand(cmds, func(c command) bool {
 		for _, t := range c.texts {
 			if r.re.MatchString(t) {
 				return true
@@ -55,12 +56,12 @@ func (r *Rule) Matches(tool, target string) bool {
 	}
 	switch r.Event {
 	case "pre-commit":
-		return gitCommitRe.MatchString(target) || anyCommand(cmds, func(c command) bool {
+		return gitCommitRe.MatchString(text) || anyCommand(cmds, func(c command) bool {
 			sub := gitSubcommand(c.words)
 			return sub == "commit" || sub == "commit-tree"
 		})
 	case "pre-push":
-		return gitPushRe.MatchString(target) || anyCommand(cmds, func(c command) bool { return gitSubcommand(c.words) == "push" })
+		return gitPushRe.MatchString(text) || anyCommand(cmds, func(c command) bool { return gitSubcommand(c.words) == "push" })
 	}
 	return true
 }

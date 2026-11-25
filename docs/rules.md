@@ -54,7 +54,7 @@ Per tool, `pre-tool` matches against:
 
 A `command_regex` is matched against the whole Bash call, and also against
 each command the shell will run, which paws finds with a shell parser. A rule
-fires if either matches, so the parser only adds matches:
+fires if either matches:
 
 - `cd web && npm install x` holds the command `npm install x`.
 - Commands run by `bash -c "..."` (any flags, as in `bash -euo pipefail -c`),
@@ -66,6 +66,13 @@ fires if either matches, so the parser only adds matches:
 - A command's quotes and backslashes are removed, as the program sees them
   (`\git push` is `git push`). `$VAR`, `$(...)` and assignments
   (`HUSKY=0 git commit`, `export X=1`) stay as written.
+- A heredoc body that no shell runs is text, not commands, and the whole-call
+  match skips it: `cat > notes.md <<EOF`, `tee`, `git commit -F - <<EOF`,
+  `gh ... --body-file - <<EOF`, and `$(cat <<EOF)` passed to git or gh. The
+  command reading the body still matches. A body fed to a shell (`bash <<EOF`,
+  `ssh host <<EOF`, `cat <<EOF | sh`), to an interpreter (`psql`, `python`,
+  `node`), to any other command, or written to a file the call then runs,
+  sources or chmods, stays visible. So does `$( )` inside an unquoted body.
 - A call that isn't valid Bash is matched whole only.
 
 `pre-commit` and `pre-push` find git the same way.

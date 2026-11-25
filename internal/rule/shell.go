@@ -14,7 +14,8 @@ import (
 // A Bash line is split into the simple commands the shell would run, and a rule's command_regex is also matched
 // against each one: `cd web && npm install x` holds `npm install x`, and `bash -c "git push"`, `sudo git push` and
 // `echo "git push" | sh` each hold `git push`. Matching only adds: what the whole-line regexes matched before still
-// matches. A line, or a script it runs, that doesn't parse adds nothing.
+// matches, except text in a heredoc body that no shell runs (heredoc.go). A line, or a script it runs, that doesn't
+// parse adds nothing.
 
 // command is one simple command.
 type command struct {
@@ -39,28 +40,43 @@ var splitCache struct {
 	entries [splitCacheSize]struct {
 		line string
 		cmds []command
+		text string
 	}
 }
 
 const splitCacheSize = 64
 
-func parseLine(line string) []command {
+// parseLine returns the line's commands, and the line as the whole-line regexes read it: without the heredoc bodies
+// no shell runs (heredoc.go).
+func parseLine(line string) ([]command, string) {
 	splitCache.Lock()
 	for _, e := range splitCache.entries {
 		if e.cmds != nil && e.line == line {
 			splitCache.Unlock()
-			return e.cmds
+			return e.cmds, e.text
 		}
 	}
 	splitCache.Unlock()
 	sp := &splitter{cmds: []command{}, walked: map[funcWalk]bool{}, budget: maxScriptBytes, walks: maxFuncWalks}
-	sp.split(line, 0, map[string][]*syntax.Stmt{})
+	text := line
+	if f, err := parse(line); err == nil {
+		// The commands come from the line without those bodies too: a word like "$(cat <<EOF ...)" keeps its
+		// source text, body and all.
+		if text = dataText(line, f); text != line {
+			if g, err := parse(text); err == nil {
+				f = g
+			} else {
+				text = line
+			}
+		}
+		sp.walk(f, 0, map[string][]*syntax.Stmt{})
+	}
 	splitCache.Lock()
 	e := &splitCache.entries[splitCache.next]
-	e.line, e.cmds = line, sp.cmds
+	e.line, e.cmds, e.text = line, sp.cmds, text
 	splitCache.next = (splitCache.next + 1) % splitCacheSize
 	splitCache.Unlock()
-	return sp.cmds
+	return sp.cmds, text
 }
 
 // splitter collects the commands of one line and of the scripts it runs.
@@ -81,12 +97,16 @@ type funcWalk struct {
 // split adds a script's commands. funcs holds the functions of the shell it runs in: eval shares its caller's, a new
 // shell starts with none. It reports whether the script parsed.
 func (sp *splitter) split(script string, depth int, funcs map[string][]*syntax.Stmt) bool {
-	f, err := syntax.NewParser(syntax.Variant(syntax.LangBash)).Parse(strings.NewReader(script), "")
+	f, err := parse(script)
 	if err != nil {
 		return false
 	}
 	sp.walk(f, depth, funcs)
 	return true
+}
+
+func parse(script string) (*syntax.File, error) {
+	return syntax.NewParser(syntax.Variant(syntax.LangBash)).Parse(strings.NewReader(script), "")
 }
 
 // nested splits a script the line runs (bash -c, eval, a heredoc or pipe into a shell). Its whole text is one more

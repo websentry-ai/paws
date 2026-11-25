@@ -91,7 +91,6 @@ func TestGitFoundByTheShellParser(t *testing.T) {
 		{`bash -c 'f() { git push; }'; f`, false, false}, // a new shell's functions don't reach the line
 		// The whole-line regex flagged these before, and still does: the parser only adds matches.
 		{`echo "a; git commit -m x"`, true, false},
-		{"cat <<'EOF'\ngit push\nEOF", false, true},
 		// Not valid Bash: the regex reads the line whole, as before.
 		{`git commit -m "unclosed`, true, false},
 	} {
@@ -165,7 +164,7 @@ func TestFunctionChainsStayCheap(t *testing.T) {
 		line += "f" + string(rune('0'+i)) + "() { " + body + "}; "
 	}
 	line += "f0"
-	if cmds := parseLine(line); len(cmds) > 100 {
+	if cmds, _ := parseLine(line); len(cmds) > 100 {
 		t.Fatalf("%d commands: each body should be read once", len(cmds))
 	}
 }
@@ -181,7 +180,7 @@ func TestFunctionsThatDefineFunctionsStayBounded(t *testing.T) {
 		line += "f" + string(rune('0'+i)) + "() { " + body + "}; "
 	}
 	line += "f8() { git status; }; f0"
-	if cmds := parseLine(line); len(cmds) > 2000 {
+	if cmds, _ := parseLine(line); len(cmds) > 2000 {
 		t.Fatalf("%d commands: function expansion must stay bounded", len(cmds))
 	}
 }

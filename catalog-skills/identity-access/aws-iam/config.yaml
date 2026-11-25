@@ -1,0 +1,8 @@
+# Filled into SKILL.md at install: each KEY placeholder gets its value. Angle-bracket values are
+# org settings with no safe default; SKILL.md "Defaults" says what applies until set.
+placeholders:
+  AGENT_ATTRIBUTION_CONVENTION: '[created-by: ai-agent]'
+  AWS_PROFILE: <aws-profile>
+  MAX_CREDENTIAL_TTL: 90 days
+  POLICY_NAMING_CONVENTION: '`<team>-<purpose>-<env>`'
+  ROLE_CATALOG: <role-catalog>

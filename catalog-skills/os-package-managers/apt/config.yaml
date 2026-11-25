@@ -1,0 +1,6 @@
+# Filled into SKILL.md at install: each KEY placeholder gets its value. Angle-bracket values are
+# org settings with no safe default; SKILL.md "Defaults" says what applies until set.
+placeholders:
+  PIN_POLICY: <pin-policy>
+  PROD_HOSTS: '`*prod*`'
+  SANCTIONED_SOURCES: <sanctioned-sources>

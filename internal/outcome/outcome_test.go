@@ -426,11 +426,14 @@ func TestGradeNamesTheCallThatAnswered(t *testing.T) {
 	}{
 		{"retried", []Call{blocked, bash(2, "rm -rf dist", false, "")}, "rm -rf dist", ""},
 		{"other route", []Call{blocked, skill, bash(3, "trash build", true, ""), bash(4, "trash build", false, ""), bash(5, "ls", false, "")}, "", "trash build"},
-		{"only a skill load", []Call{blocked, skill}, "", ""},
+		{"only a skill load is a stop", []Call{blocked, skill}, "", ""},
 		{"stopped", []Call{blocked}, "", ""},
 	}
 	for _, c := range cases {
 		got := Grade(r, c.calls, 0)
+		if want := map[bool]string{true: OtherRoute, false: Stopped}[c.other != ""]; c.retry == "" && got.Outcome != want {
+			t.Errorf("%s: outcome %s, want %s", c.name, got.Outcome, want)
+		}
 		if (got.Retry != nil) != (c.retry != "") || got.Retry != nil && got.Retry.Target != c.retry {
 			t.Errorf("%s: retry %+v, want %q", c.name, got.Retry, c.retry)
 		}

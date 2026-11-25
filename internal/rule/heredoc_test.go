@@ -97,6 +97,7 @@ func TestHeredocBodyAShellRuns(t *testing.T) {
 		"source ./defs.sh; cat > notes.md <<'EOF'\nrm -rf build\nEOF",
 		"cat > /dev/stdout <<'EOF' | sh\nrm -rf build\nEOF",
 		"cat > /dev/fd/1 <<'EOF' | sh\nrm -rf build\nEOF",
+		"cat 1<>/dev/stdout <<'EOF' | sh\nrm -rf build\nEOF",
 		"git stripspace <<'EOF' | sh\nrm -rf build\nEOF",
 		"cat > Makefile <<'EOF'\nall:\n\trm -rf build\nEOF\nmake",
 		"cat > build.mk <<'EOF'\nall:\n\trm -rf build\nEOF\nmake -f build.mk",

@@ -352,13 +352,9 @@ func output(st *syntax.Stmt) (kind int, file string) {
 			if r.N == nil {
 				continue
 			}
-			d = outDest{outFile, wordString(r.Word)}
+			d = fileDest(r.Word)
 		case syntax.RdrOut, syntax.AppOut, syntax.RdrClob, syntax.RdrAll, syntax.AppAll:
-			d = outDest{outFile, wordString(r.Word)}
-			if hasProcSubst(r.Word) || strings.HasPrefix(d.file, "/dev/") && d.file != "/dev/null" ||
-				strings.HasPrefix(d.file, "/proc/") { // > >(sh), > /dev/stdout | sh
-				d = outDest{outOther, ""}
-			}
+			d = fileDest(r.Word)
 			if r.Op == syntax.RdrAll || r.Op == syntax.AppAll {
 				fds["2"] = d
 			}
@@ -374,6 +370,16 @@ func output(st *syntax.Stmt) (kind int, file string) {
 	}
 	d := fds["1"]
 	return d.kind, d.file
+}
+
+// fileDest is where a redirection to w sends output: a file, or a process or descriptor paws doesn't follow
+// (> >(sh), > /dev/stdout | sh, 1<>/dev/fd/3).
+func fileDest(w *syntax.Word) outDest {
+	file := wordString(w)
+	if hasProcSubst(w) || strings.HasPrefix(file, "/dev/") && file != "/dev/null" || strings.HasPrefix(file, "/proc/") {
+		return outDest{outOther, ""}
+	}
+	return outDest{outFile, file}
 }
 
 func hasProcSubst(w *syntax.Word) bool {

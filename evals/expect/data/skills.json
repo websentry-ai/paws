@@ -1,0 +1,338 @@
+{
+ "agent-browser": {
+  "path": "skills/agent-browser",
+  "ref": "edb40f1878864f90e14f6c11e26fdafd3fecc8dc",
+  "repo": "github.com/vercel-labs/agent-browser",
+  "sha256": "3a7520e64de2dfaa516b6721c001e84e06e3c06a187b82af029ae721540ebfac"
+ },
+ "agents-sdk": {
+  "path": "skills/agents-sdk",
+  "ref": "cbf893b954222276bf1af57e5f23379231e0efb9",
+  "repo": "github.com/cloudflare/skills",
+  "sha256": "9bda4bd3adc5ab09e30c19ea6b9a0bf673f0a4b190bf7624fc1b0dc5f1fcf9c1"
+ },
+ "airunway-aks-setup": {
+  "path": "skills/airunway-aks-setup",
+  "ref": "9aa7f618563713f47481af67b7b9dcaafdc2154a",
+  "repo": "github.com/microsoft/azure-skills",
+  "sha256": "cb076706a81bef96568a0f71fdda9e44ab67bc76a3c40541d20046ae129f29df"
+ },
+ "appinsights-instrumentation": {
+  "path": "skills/appinsights-instrumentation",
+  "ref": "9aa7f618563713f47481af67b7b9dcaafdc2154a",
+  "repo": "github.com/microsoft/azure-skills",
+  "sha256": "8865590c029e53142edc56634914625fe23869baf7828a8181aed67e096a9e31"
+ },
+ "apt": {
+  "path": "catalog-skills/os-package-managers/apt",
+  "ref": "bbbe14b4122e72b50dd05a6b1436a520c149c060",
+  "repo": "github.com/websentry-ai/paws",
+  "sha256": "5935bfafcd173d6cdb21d4135dc5b8fded0814c850f58167d8be7beae48fc792"
+ },
+ "attio": {
+  "path": "catalog-skills/crm-systems/attio",
+  "ref": "bbbe14b4122e72b50dd05a6b1436a520c149c060",
+  "repo": "github.com/websentry-ai/paws",
+  "sha256": "21c432caaf885937c04ab730d4a03b773d48c8c53b0c427b82fe4e85765aeb92"
+ },
+ "aws-iam": {
+  "path": "catalog-skills/identity-access/aws-iam",
+  "ref": "bbbe14b4122e72b50dd05a6b1436a520c149c060",
+  "repo": "github.com/websentry-ai/paws",
+  "sha256": "6e8be0e1cac909e1f6ea8690e94d9df07ef3fc23aab701415d6a55e4187fb81a"
+ },
+ "aws-s3": {
+  "path": "catalog-skills/cloud-resources/aws-s3",
+  "ref": "bbbe14b4122e72b50dd05a6b1436a520c149c060",
+  "repo": "github.com/websentry-ai/paws",
+  "sha256": "7c3f94f6c185aa61b66ee55b2718efdec6926d191a2b52a81402f81f290485d4"
+ },
+ "azure-ai": {
+  "path": "skills/azure-ai",
+  "ref": "9aa7f618563713f47481af67b7b9dcaafdc2154a",
+  "repo": "github.com/microsoft/azure-skills",
+  "sha256": "7160482888f42b277406099f73499ecfb9d7fa26c2e4ffccf445a4217f65ee3f"
+ },
+ "azure-app-onboard": {
+  "path": "skills/azure-app-onboard",
+  "ref": "9aa7f618563713f47481af67b7b9dcaafdc2154a",
+  "repo": "github.com/microsoft/azure-skills",
+  "sha256": "6189ce9ed410ea4eaac2b9fef554dad602919a85f9d1238588e42bb12f7be77d"
+ },
+ "azure-app-onboard-prereq": {
+  "path": "skills/azure-app-onboard-prereq",
+  "ref": "9aa7f618563713f47481af67b7b9dcaafdc2154a",
+  "repo": "github.com/microsoft/azure-skills",
+  "sha256": "0a06cbd018005720fe56ec2d3fc52f215f4ba4019b7e78cedd08800512a51adc"
+ },
+ "azure-compliance": {
+  "path": "skills/azure-compliance",
+  "ref": "9aa7f618563713f47481af67b7b9dcaafdc2154a",
+  "repo": "github.com/microsoft/azure-skills",
+  "sha256": "f5ef52fa1c810d80ffb89d1dd0cc427f43f88849a6aa32fd7a6ee358e8d1eef4"
+ },
+ "azure-compute": {
+  "path": "skills/azure-compute",
+  "ref": "9aa7f618563713f47481af67b7b9dcaafdc2154a",
+  "repo": "github.com/microsoft/azure-skills",
+  "sha256": "a628ba7b4ed8aee7eb7a559b99f776a909bd6d7cac0f6a3fc19053a42d5ee60f"
+ },
+ "azure-deploy": {
+  "path": "skills/azure-deploy",
+  "ref": "9aa7f618563713f47481af67b7b9dcaafdc2154a",
+  "repo": "github.com/microsoft/azure-skills",
+  "sha256": "d44c25fde43a5ccfa4c16975ea75518e1d963e1c84f1da2545fb970ef79dd066"
+ },
+ "bigquery": {
+  "path": "catalog-skills/data-analytics/bigquery",
+  "ref": "bbbe14b4122e72b50dd05a6b1436a520c149c060",
+  "repo": "github.com/websentry-ai/paws",
+  "sha256": "7d1ed52c3407cd10b7d31ec1581a43793a9a6b3c9d6b767ce188315ac3b64841"
+ },
+ "brew": {
+  "path": "catalog-skills/os-package-managers/brew",
+  "ref": "bbbe14b4122e72b50dd05a6b1436a520c149c060",
+  "repo": "github.com/websentry-ai/paws",
+  "sha256": "1c9cf7a090b09d8004beff00409fbcfd9355ddd941e0d7aa48226e239a190788"
+ },
+ "cargo": {
+  "path": "catalog-skills/dependency-management/cargo",
+  "ref": "bbbe14b4122e72b50dd05a6b1436a520c149c060",
+  "repo": "github.com/websentry-ai/paws",
+  "sha256": "2f19c5e52cdea2fa47c9d7819ee1c64c5c19b1571a4dc68793fedfbbc211d6f3"
+ },
+ "caveman-commit": {
+  "path": "skills/caveman-commit",
+  "ref": "9b68f7ed12b05e7efaff18e65c5a3fc2849fd0a4",
+  "repo": "github.com/JuliusBrussee/caveman",
+  "sha256": "c788a282fc75b981b421dfdad5d84ea7f83f946c126daa39cfc7d3f97845e193"
+ },
+ "claude-code": {
+  "path": "catalog-skills/agent-environment/claude-code",
+  "ref": "bbbe14b4122e72b50dd05a6b1436a520c149c060",
+  "repo": "github.com/websentry-ai/paws",
+  "sha256": "dc0d7e0a1a32f5e502d58b000570eac7f71e83a637d8b708102b77ca8629de84"
+ },
+ "coreutils": {
+  "path": "catalog-skills/filesystem-operations/coreutils",
+  "ref": "bbbe14b4122e72b50dd05a6b1436a520c149c060",
+  "repo": "github.com/websentry-ai/paws",
+  "sha256": "c16885b1c3272df9c15652362f46678ab772325a9227e630a9e3cd2dd97011e4"
+ },
+ "curl": {
+  "path": "catalog-skills/http-clients/curl",
+  "ref": "bbbe14b4122e72b50dd05a6b1436a520c149c060",
+  "repo": "github.com/websentry-ai/paws",
+  "sha256": "e985789d539775a203c1230a1b0de932d4e91776aa13c438c7cb70b765a43f29"
+ },
+ "datadog": {
+  "path": "catalog-skills/observability/datadog",
+  "ref": "bbbe14b4122e72b50dd05a6b1436a520c149c060",
+  "repo": "github.com/websentry-ai/paws",
+  "sha256": "5ee38552e0aec899e91695ee577e70aa5f2c05e4aadfde4c76d55623c10e3127"
+ },
+ "docker": {
+  "path": "catalog-skills/container-runtime-local/docker",
+  "ref": "bbbe14b4122e72b50dd05a6b1436a520c149c060",
+  "repo": "github.com/websentry-ai/paws",
+  "sha256": "c791a06c47b40fdc741b9741f2631617634ae68b50a9c6820592901ff5ca1386"
+ },
+ "frontend-design": {
+  "path": "skills/frontend-design",
+  "ref": "dbd4588f9e1033efb41dad4bef2f7947c8993d44",
+  "repo": "github.com/anthropics/skills",
+  "sha256": "d91970639e9f5c37682ac7ab60094d35f1c7c1f38d731bd56396563aee10c1d3"
+ },
+ "git": {
+  "path": "catalog-skills/source-control/git",
+  "ref": "bbbe14b4122e72b50dd05a6b1436a520c149c060",
+  "repo": "github.com/websentry-ai/paws",
+  "sha256": "72e22c559bf328968440eb4acd6b803af109ae9372d70ba771543ef3119c1106"
+ },
+ "github": {
+  "path": "catalog-skills/source-control/github",
+  "ref": "bbbe14b4122e72b50dd05a6b1436a520c149c060",
+  "repo": "github.com/websentry-ai/paws",
+  "sha256": "751bc6a32fba4dd341cef5e709106184818114bac5308867d82fdbc4edc5f914"
+ },
+ "github-actions": {
+  "path": "catalog-skills/ci-cd-deployment/github-actions",
+  "ref": "bbbe14b4122e72b50dd05a6b1436a520c149c060",
+  "repo": "github.com/websentry-ai/paws",
+  "sha256": "1d56570ac4e8180086d6b375c2fe07c6d0d5132236b9ff1398f3101bbf7c57b0"
+ },
+ "gmail": {
+  "path": "catalog-skills/communications/gmail",
+  "ref": "bbbe14b4122e72b50dd05a6b1436a520c149c060",
+  "repo": "github.com/websentry-ai/paws",
+  "sha256": "b4f982a25a001b5642bfdb59dd37ab049a6b8f59e8f87daa570eca9c4af74e57"
+ },
+ "google-drive": {
+  "path": "catalog-skills/document-writers/google-drive",
+  "ref": "bbbe14b4122e72b50dd05a6b1436a520c149c060",
+  "repo": "github.com/websentry-ai/paws",
+  "sha256": "a673a64d9a9353277f63d087d747838c00cd860d41c38065f772c95c08822769"
+ },
+ "gsutil": {
+  "path": "catalog-skills/file-transfer/gsutil",
+  "ref": "bbbe14b4122e72b50dd05a6b1436a520c149c060",
+  "repo": "github.com/websentry-ai/paws",
+  "sha256": "aa918e8410b5cca99edfb749cf09a9ecab514ed276fd3f2c422d7a0d2c23b037"
+ },
+ "humanizer": {
+  "path": ".",
+  "ref": "8c307f367c91bd974002f10f2be2965d642c13df",
+  "repo": "github.com/blader/humanizer",
+  "sha256": "0612f1dfb1672b0ea9b97e139bf1f06cabe98d8b27424fe8ff01e1fb4cc99cad"
+ },
+ "jira": {
+  "path": "catalog-skills/issue-trackers/jira",
+  "ref": "bbbe14b4122e72b50dd05a6b1436a520c149c060",
+  "repo": "github.com/websentry-ai/paws",
+  "sha256": "978b9e1b83b63fb13fbef7fad72b1ab253d95a0fe8dfe90ae5f670856f2a047d"
+ },
+ "karpathy-guidelines": {
+  "path": "skills/karpathy-guidelines",
+  "ref": "2c606141936f1eeef17fa3043a72095b4765b9c2",
+  "repo": "github.com/multica-ai/andrej-karpathy-skills",
+  "sha256": "6e22cc54cb02a5e98ae42d06d9d7292db0c1b43894831b32879beb0166b2aea7"
+ },
+ "kubectl": {
+  "path": "catalog-skills/containers-orchestration/kubectl",
+  "ref": "bbbe14b4122e72b50dd05a6b1436a520c149c060",
+  "repo": "github.com/websentry-ai/paws",
+  "sha256": "b7fa935b109b4ede2ac1c40875e3afd3fb03a6f8aad700090ec0483ee99d434d"
+ },
+ "launchctl": {
+  "path": "catalog-skills/process-system-admin/launchctl",
+  "ref": "bbbe14b4122e72b50dd05a6b1436a520c149c060",
+  "repo": "github.com/websentry-ai/paws",
+  "sha256": "fdd8f8744c0255ab437c3ffba324ccc14a385bc664f2f9810723748cf8ad534f"
+ },
+ "linear": {
+  "path": "catalog-skills/issue-trackers/linear",
+  "ref": "bbbe14b4122e72b50dd05a6b1436a520c149c060",
+  "repo": "github.com/websentry-ai/paws",
+  "sha256": "18aa0c015365b617df9f98c43ff8e88db58fa5cee94a411508d2d46d2916fb93"
+ },
+ "notion": {
+  "path": "catalog-skills/document-writers/notion",
+  "ref": "bbbe14b4122e72b50dd05a6b1436a520c149c060",
+  "repo": "github.com/websentry-ai/paws",
+  "sha256": "805501c2ea5856ecaa0a3f52fde061185c13afb7eaf71d91eb6243f39d87da75"
+ },
+ "npm": {
+  "path": "catalog-skills/package-publishing/npm",
+  "ref": "bbbe14b4122e72b50dd05a6b1436a520c149c060",
+  "repo": "github.com/websentry-ai/paws",
+  "sha256": "94a175315c9a85a7314f153439382c822a0fdbf63038809ad6dc4c3dde729b60"
+ },
+ "npm-deps": {
+  "path": "catalog-skills/dependency-management/npm-deps",
+  "ref": "bbbe14b4122e72b50dd05a6b1436a520c149c060",
+  "repo": "github.com/websentry-ai/paws",
+  "sha256": "058870617c784d28fd4babfd295a45b1bd4673c6f9a541858ea109d0107cc984"
+ },
+ "pip": {
+  "path": "catalog-skills/dependency-management/pip",
+  "ref": "bbbe14b4122e72b50dd05a6b1436a520c149c060",
+  "repo": "github.com/websentry-ai/paws",
+  "sha256": "bf8d22e5202a7dcffde0b313334a67c22bfaa424247b6944c10f0f0c95258532"
+ },
+ "playwright": {
+  "path": "catalog-skills/browser-automation/playwright",
+  "ref": "bbbe14b4122e72b50dd05a6b1436a520c149c060",
+  "repo": "github.com/websentry-ai/paws",
+  "sha256": "cd980065a4464fda75c72487dcfe108afac2c184d512263e208d9b7454d67f57"
+ },
+ "postgres": {
+  "path": "catalog-skills/databases/postgres",
+  "ref": "bbbe14b4122e72b50dd05a6b1436a520c149c060",
+  "repo": "github.com/websentry-ai/paws",
+  "sha256": "0b4a89831d4948b2fa288fec7494593c1562bdb89bfec9b0bb54597e8a8476f2"
+ },
+ "rclone": {
+  "path": "catalog-skills/file-transfer/rclone",
+  "ref": "bbbe14b4122e72b50dd05a6b1436a520c149c060",
+  "repo": "github.com/websentry-ai/paws",
+  "sha256": "c338845e8920923de527c2ff665df1e70fcc226ac727ae4194878487b2902439"
+ },
+ "receiving-code-review": {
+  "path": "skills/receiving-code-review",
+  "ref": "22f0b463e7a5e579904dd6211a520321035526f7",
+  "repo": "github.com/obra/superpowers",
+  "sha256": "091df1629510af1b92fc4abd6f96732ebedb4cb2c0f3457e8f2740b0504a2438"
+ },
+ "rsync": {
+  "path": "catalog-skills/network-remote-access/rsync",
+  "ref": "bbbe14b4122e72b50dd05a6b1436a520c149c060",
+  "repo": "github.com/websentry-ai/paws",
+  "sha256": "fe6d791c5337de6206b08bb20c784ab771e587d1080374165e9de76be295dfd9"
+ },
+ "salesforce": {
+  "path": "catalog-skills/crm-systems/salesforce",
+  "ref": "bbbe14b4122e72b50dd05a6b1436a520c149c060",
+  "repo": "github.com/websentry-ai/paws",
+  "sha256": "3a146696608ce14aee5aabd0be2250d4ae0eb59a92457af92183f23a1563fb65"
+ },
+ "secret-scan": {
+  "path": "catalog-skills/secrets-management/secret-scan",
+  "ref": "bbbe14b4122e72b50dd05a6b1436a520c149c060",
+  "repo": "github.com/websentry-ai/paws",
+  "sha256": "aac96eaa3ab8ce3480328bcf4a3f4e38a46c10303898198c6782672a671854b0"
+ },
+ "slack": {
+  "path": "catalog-skills/communications/slack",
+  "ref": "bbbe14b4122e72b50dd05a6b1436a520c149c060",
+  "repo": "github.com/websentry-ai/paws",
+  "sha256": "5f114c75150bf9c51c317229abeba23a02084591afe4444cc0c58555efcac7c3"
+ },
+ "ssh": {
+  "path": "catalog-skills/network-remote-access/ssh",
+  "ref": "bbbe14b4122e72b50dd05a6b1436a520c149c060",
+  "repo": "github.com/websentry-ai/paws",
+  "sha256": "e0cf2704af157248ee3ff6bd23eb53ca2a6ba85472da06b861063b95b8b9821c"
+ },
+ "stop-slop": {
+  "path": ".",
+  "ref": "8da1f030185bdfe8471220585162991eaeb970e9",
+  "repo": "github.com/hardikpandya/stop-slop",
+  "sha256": "7432a1d9ebdd42b27666da8458af252edf549f723fb14bcd4791425103930310"
+ },
+ "systemctl": {
+  "path": "catalog-skills/process-system-admin/systemctl",
+  "ref": "bbbe14b4122e72b50dd05a6b1436a520c149c060",
+  "repo": "github.com/websentry-ai/paws",
+  "sha256": "99590e5dc2b3ff71c6c6fd333d1dee70549ae234c056bdc2c421dbe5047a77eb"
+ },
+ "tdd": {
+  "path": "skills/engineering/tdd",
+  "ref": "59db609eb1e18aaf59b63284d0e52255aff0c63c",
+  "repo": "github.com/mattpocock/skills",
+  "sha256": "5505d25bbaa8fc14a79e4d20163936958992a2995b7f1dd1d6197edc9ed722e0"
+ },
+ "terraform": {
+  "path": "catalog-skills/infrastructure-as-code/terraform",
+  "ref": "bbbe14b4122e72b50dd05a6b1436a520c149c060",
+  "repo": "github.com/websentry-ai/paws",
+  "sha256": "10fb17c53b378fd6b233cdfebb6a8530d38724f7ecf7f3d4b01c24eeb83fe74c"
+ },
+ "vault": {
+  "path": "catalog-skills/secrets-management/vault",
+  "ref": "bbbe14b4122e72b50dd05a6b1436a520c149c060",
+  "repo": "github.com/websentry-ai/paws",
+  "sha256": "fe3584e58df30c16b3751dcde5dff3b863297fb1b02b7545609486dee8a0bf28"
+ },
+ "vercel": {
+  "path": "catalog-skills/ci-cd-deployment/vercel",
+  "ref": "bbbe14b4122e72b50dd05a6b1436a520c149c060",
+  "repo": "github.com/websentry-ai/paws",
+  "sha256": "5e6b057a40455744304c54e7ee052b884c4028aeef34997f7e942ec84f660a70"
+ },
+ "verification-before-completion": {
+  "path": "skills/verification-before-completion",
+  "ref": "2ce8aa15d05bd57213e6f746f953aafb7ded7a8b",
+  "repo": "github.com/obra/superpowers",
+  "sha256": "2befe7fc55bcadaa3d97dd9e8efeb633d2561c0ebe74c5a8b17c4d9e7e4520b3"
+ }
+}

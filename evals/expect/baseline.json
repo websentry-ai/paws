@@ -1,0 +1,48 @@
+{
+ "checks": 283,
+ "rule_files_with_checks": 81,
+ "rule_files": 86,
+ "load_errors": 0,
+ "cases": {
+  "held": {
+   "n": 937,
+   "right": 727,
+   "breaks": 434,
+   "caught": 267,
+   "follows": 503,
+   "passed": 460
+  },
+  "all": {
+   "n": 1609,
+   "right": 1253,
+   "breaks": 762,
+   "caught": 470,
+   "follows": 847,
+   "passed": 783
+  },
+  "dev": {
+   "n": 672,
+   "right": 526,
+   "breaks": 328,
+   "caught": 203,
+   "follows": 344,
+   "passed": 323
+  }
+ },
+ "probes": {
+  "all": {
+   "n": 10,
+   "right": 10,
+   "breaks": 5,
+   "caught": 5,
+   "follows": 5,
+   "passed": 5
+  }
+ },
+ "run": {
+  "date": "2026-11-25",
+  "model": "opus (Claude Opus 5.5)",
+  "guide": "skills/paws/expect.md at f9fd3c1",
+  "parallel": 3
+ }
+}

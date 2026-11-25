@@ -241,11 +241,13 @@ func TestConcurrentGradersGradeOnce(t *testing.T) {
 	transcript := filepath.Join(t.TempDir(), "sess-c.jsonl")
 	runGate(t, map[string]any{"hook_event_name": "PreToolUse", "session_id": "sess-c", "transcript_path": transcript, "cwd": cwd,
 		"tool_name": "Bash", "tool_input": map[string]any{"command": "rm -rf build"}})
-	transcriptLines(t, transcript, time.Now().Add(-20*time.Second), []struct {
+	start := time.Now().Add(-20 * time.Second)
+	transcriptLines(t, transcript, start, []struct {
 		cmd    string
 		result string
 		isErr  bool
 	}{{"rm -rf build", "PreToolUse:Bash hook error: paws: load coreutils", true}, {"rm -rf build", "", false}})
+	denyAt(t, home, start.Add(1100*time.Millisecond)) // the turn's deny comes before its last record
 	in := hook.Input{HookEventName: "Stop", SessionID: "sess-c", TranscriptPath: transcript, CWD: cwd}
 	ev := hook.ToEvent(&in)
 	done := make(chan bool)
@@ -412,6 +414,34 @@ func TestAnUnreadableTurnIsGradedAfterTheNextPrompt(t *testing.T) {
 	}
 	if len(got) != 1 || got[0] != "same_retry rm -rf build" {
 		t.Errorf("outcomes %v; want the first turn's deny graded once: same_retry rm -rf build", got)
+	}
+}
+
+// The Stop hook starts a moment after the turn ended. A call the next turn makes in that gap, and gets denied, is after
+// the turn's last record: it is not graded with the turn that stopped.
+func TestADenyAfterTheLastRecordIsNotThisTurns(t *testing.T) {
+	home := portalEnv(t, http.NotFoundHandler())
+	cwd, _ := os.Getwd()
+	writeRule(t, filepath.Join(cwd, ".paws", "pre-tool", "rm-gate.md"), rmRule)
+	transcript := filepath.Join(t.TempDir(), "sess-g.jsonl")
+	start := time.Now().Add(-20 * time.Second)
+	transcriptLines(t, transcript, start, []struct {
+		cmd    string
+		result string
+		isErr  bool
+	}{{"rm -rf build", "PreToolUse:Bash hook error: another hook refused it", true}, {"rm -rf build", "", false}})
+	// The next turn's call is denied now, five seconds after the log's last record (start+4s is before now-15s).
+	runGate(t, map[string]any{"hook_event_name": "PreToolUse", "session_id": "sess-g", "transcript_path": transcript, "cwd": cwd,
+		"tool_name": "Bash", "tool_input": map[string]any{"command": "rm -rf build"}})
+	in := hook.Input{HookEventName: "Stop", SessionID: "sess-g", TranscriptPath: transcript, CWD: cwd}
+	gradeTurn(&in, hook.ToEvent(&in), time.Now())
+	for _, rec := range auditLines(t, home) {
+		if rec["event"] == "outcome" {
+			t.Errorf("graded a deny made after the turn's last record: %v", rec)
+		}
+	}
+	if at, ok := hook.LastRecordAt(transcript, time.Now()); !ok || at.After(start.Add(5*time.Second)) {
+		t.Errorf("LastRecordAt = %v, %v; want the log's last record, %v", at, ok, start.Add(4*time.Second))
 	}
 }
 

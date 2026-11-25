@@ -5,6 +5,7 @@ import (
 	"bytes"
 	"encoding/json"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -41,6 +42,43 @@ func TurnCalls(transcriptPath string, until time.Time) ([]outcome.Call, time.Tim
 	}
 	sort.SliceStable(calls, func(i, j int) bool { return calls[i].At.Before(calls[j].At) })
 	return calls, start, nil
+}
+
+// lastTail is how much of a log's end LastRecordAt reads: the last record sits in it.
+const lastTail = 1 << 20
+
+// LastRecordAt is the timestamp of the last record in the log at or before until: the final message of the turn that is
+// stopping, since Claude Code writes it before it runs the Stop hook. The Stop hook has no time of its own and starts a
+// moment late, so a call the next turn makes in that gap is after this time, not part of the turn. ok is false when the
+// log can't be read or holds no timestamp.
+func LastRecordAt(path string, until time.Time) (at time.Time, ok bool) {
+	f, err := os.Open(path)
+	if err != nil {
+		return time.Time{}, false
+	}
+	defer f.Close()
+	st, err := f.Stat()
+	if err != nil {
+		return time.Time{}, false
+	}
+	off := max(st.Size()-lastTail, 0)
+	buf := make([]byte, st.Size()-off)
+	if _, err := f.ReadAt(buf, off); err != nil && err != io.EOF {
+		return time.Time{}, false
+	}
+	lines := bytes.Split(buf, []byte("\n"))
+	if off > 0 {
+		lines = lines[1:] // the first line is cut
+	}
+	for i := len(lines) - 1; i >= 0; i-- {
+		var rec struct {
+			Timestamp time.Time `json:"timestamp"`
+		}
+		if len(lines[i]) > 0 && json.Unmarshal(lines[i], &rec) == nil && !rec.Timestamp.IsZero() && !rec.Timestamp.After(until) {
+			return rec.Timestamp, true
+		}
+	}
+	return time.Time{}, false
 }
 
 // turnLine is the part of a transcript record the turn reader needs.

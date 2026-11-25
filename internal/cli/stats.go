@@ -58,6 +58,8 @@ type auditRecord struct {
 	Outcome   string          `json:"outcome"`
 	Checks    map[string]bool `json:"checks"`
 	BlockedAt string          `json:"blocked_at"`
+	// The call Claude made after the block: a Bash command, else the tool and its file or MCP tool.
+	RetryCommand string `json:"retry_command"`
 	// The blocked deny's at, to the nanosecond (local only).
 	BlockedExact string `json:"blocked_exact"`
 }

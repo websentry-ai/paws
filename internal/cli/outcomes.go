@@ -2,6 +2,7 @@ package cli
 
 import (
 	"bufio"
+	"cmp"
 	"encoding/json"
 	"io"
 	"os"
@@ -115,6 +116,9 @@ func gradeTurn(in *hook.Input, ev gate.Event, stoppedAt time.Time) {
 		res := outcome.GradeWhere(r, calls, i, applied)
 		rec := map[string]any{"session": ev.Session, "agent": ev.Agent, "rule": d.Rule, "skill": r.Action.Skill,
 			"source": d.Source, "tool": d.Tool, "outcome": res.Outcome, "checks": res.Checks, "blocked_at": d.TS}
+		if ran := cmp.Or(res.Retry, res.Other); ran != nil {
+			rec["retry_command"] = gate.DescribeCall(gate.Event{Tool: ran.Tool, Target: ran.Target, Cwd: in.CWD})
+		}
 		if d.AgentID != "" {
 			rec["agent_id"] = d.AgentID
 		}

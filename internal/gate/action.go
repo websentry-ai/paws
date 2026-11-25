@@ -49,6 +49,25 @@ func RedactCommand(s string) string {
 	return s[:cut]
 }
 
+// DescribeCall is the text paws keeps for the call Claude made after a block: a Bash command, redacted and cut like
+// any uploaded command; for any other tool, its name and the repo-relative file or the MCP server and tool, never
+// the call's input.
+func DescribeCall(ev Event) string {
+	switch {
+	case ev.Tool == "Bash":
+		return RedactCommand(ev.Target)
+	case fileTool(ev.Tool):
+		if rel := repoRelative(ev.Target, ev.Cwd); rel != "" {
+			return ev.Tool + " " + rel
+		}
+	default:
+		if server, tool, ok := MCPParts(ev.Tool); ok {
+			return "MCP " + server + " " + tool
+		}
+	}
+	return ev.Tool
+}
+
 // TargetHash identifies a call's full input (the command, path, or MCP input as JSON) in the local audit log without
 // keeping it: paws scan matches the calls in Claude Code's transcripts to these records by it. Sync never sends it.
 func TargetHash(target string) string {

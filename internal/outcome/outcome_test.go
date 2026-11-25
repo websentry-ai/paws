@@ -411,3 +411,31 @@ expect:
 		t.Error("a call after the retry didn't count")
 	}
 }
+
+// The call that answered the block: the retry, else the first other call that ran (not the Skill load, not a call
+// that never ran); nothing when Claude stopped.
+func TestGradeNamesTheCallThatAnswered(t *testing.T) {
+	r := parse(t, ruleWithChecks)
+	blocked := bash(0, "rm -rf build", true, "")
+	skill := Call{Tool: "Skill", Target: "coreutils", At: t0.Add(time.Second)}
+	cases := []struct {
+		name  string
+		calls []Call
+		retry string
+		other string
+	}{
+		{"retried", []Call{blocked, bash(2, "rm -rf dist", false, "")}, "rm -rf dist", ""},
+		{"other route", []Call{blocked, skill, bash(3, "trash build", true, ""), bash(4, "trash build", false, ""), bash(5, "ls", false, "")}, "", "trash build"},
+		{"only a skill load", []Call{blocked, skill}, "", ""},
+		{"stopped", []Call{blocked}, "", ""},
+	}
+	for _, c := range cases {
+		got := Grade(r, c.calls, 0)
+		if (got.Retry != nil) != (c.retry != "") || got.Retry != nil && got.Retry.Target != c.retry {
+			t.Errorf("%s: retry %+v, want %q", c.name, got.Retry, c.retry)
+		}
+		if (got.Other != nil) != (c.other != "") || got.Other != nil && got.Other.Target != c.other {
+			t.Errorf("%s: other %+v, want %q", c.name, got.Other, c.other)
+		}
+	}
+}

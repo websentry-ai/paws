@@ -175,7 +175,9 @@ most 1,000 records and 1 MB. `unbound-paws sync --dry-run` prints the request bo
 `file`, `mcp` as in the audit log (above).
 
 **Outcome record:** `kind: outcome`, `ts`, `blocked_at`, `skill`, `action_id` (catalog and portal rules: the
-trigger's id), `tool`, `outcome` and `checks`, as in the audit log (above). No call text.
+trigger's id), `tool`, `outcome`, `checks` and `retry_command` (the call Claude ran after the block, whether it retried or went
+another route; a Bash command, redacted and cut to 4 KB, else the tool with its repo-relative file or MCP tool; empty
+when Claude stopped), as in the audit log (above).
 
 **Inventory:** the directory names in `~/.claude/skills` and the project's
 `.claude/skills`, and every paws rule in scope with its skill and a display

@@ -139,11 +139,11 @@ func TestStopGradesWhatFollowedTheBlock(t *testing.T) {
 	if o["outcome"] != "fixed" || o["skill"] != "coreutils" || checks["listed-first"] != true {
 		t.Errorf("outcome record %v; want fixed with listed-first passing", o)
 	}
-	if b, _ := json.Marshal(o); strings.Contains(string(b), "build") {
-		t.Errorf("the outcome record carries call text: %s", b)
+	if o["retry_command"] != "rm -rf build" {
+		t.Errorf("retry_command %v; want the command Claude ran after the block", o["retry_command"])
 	}
 
-	// Sync uploads it (the Stop hook may already have): the outcome and the checks, no text.
+	// Sync uploads it (the Stop hook may already have): the outcome, the checks and the retry command.
 	if code, out := captureStdout(t, func() int { return Sync(nil) }); code != 0 {
 		t.Fatalf("sync exit %d: %s", code, out)
 	}
@@ -161,6 +161,11 @@ func TestStopGradesWhatFollowedTheBlock(t *testing.T) {
 	}
 	if len(sent) != 2 {
 		t.Fatalf("uploaded outcomes %v", sent)
+	}
+	for _, r := range sent {
+		if r["retry_command"] != "rm -rf build" {
+			t.Errorf("uploaded outcome %v; want retry_command %q", r, "rm -rf build")
+		}
 	}
 }
 

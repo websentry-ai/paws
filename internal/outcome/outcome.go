@@ -63,6 +63,9 @@ type Result struct {
 	Outcome string
 	Checks  map[string]bool // expect id → passed; a check none of whose cases fits the call is left out
 	Retry   *Call
+	// Other is, for an other_route block, the first call that ran instead (a Skill call, the answer to the deny, is
+	// skipped); nil when none did.
+	Other *Call
 }
 
 // Grade grades the block of calls[blocked] by rule r. calls is the whole turn in time order, every agent's calls
@@ -144,10 +147,13 @@ func GradeWhere(r *rule.Rule, calls []Call, blocked int, applied func(Call) bool
 	}
 	if retry < 0 {
 		res.Outcome = Stopped
-		for _, c := range scope {
-			if !c.Denied {
-				res.Outcome = OtherRoute
-				break
+		for i, c := range scope {
+			if c.Denied {
+				continue
+			}
+			res.Outcome = OtherRoute
+			if res.Other == nil && c.Tool != "Skill" {
+				res.Other = &scope[i]
 			}
 		}
 		return res

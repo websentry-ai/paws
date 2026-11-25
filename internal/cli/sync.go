@@ -43,7 +43,7 @@ type actionUpload struct {
 }
 
 // outcomeUpload is what `paws sync` uploads about one graded block (see outcomes.go): the skill, the rule's action,
-// the outcome and each expect check's result. No call text.
+// the outcome, each expect check's result and what Claude ran after the block (a command, redacted).
 type outcomeUpload struct {
 	Kind      string          `json:"kind"` // "outcome"
 	TS        string          `json:"ts"`
@@ -53,6 +53,9 @@ type outcomeUpload struct {
 	Tool      string          `json:"tool,omitempty"`
 	Outcome   string          `json:"outcome"`
 	Checks    map[string]bool `json:"checks,omitempty"`
+	// What Claude ran after the block (the retry, or the other route): a redacted Bash command, else the tool and
+	// its file or MCP tool. Empty for a stopped block.
+	RetryCommand string `json:"retry_command,omitempty"`
 }
 
 type syncBody struct {
@@ -371,7 +374,7 @@ func toActionUpload(r auditRecord) actionUpload {
 // portal can show which trigger the outcome belongs to.
 func toOutcomeUpload(r auditRecord) outcomeUpload {
 	rec := outcomeUpload{Kind: "outcome", TS: r.TS, BlockedAt: r.BlockedAt, Skill: r.Skill, Tool: r.Tool,
-		Outcome: r.Outcome, Checks: r.Checks}
+		Outcome: r.Outcome, Checks: r.Checks, RetryCommand: r.RetryCommand}
 	switch {
 	case managed(r.Source): // a portal rule is named <skill>--<action id>
 		if _, id, ok := strings.Cut(r.Rule, "--"); ok {

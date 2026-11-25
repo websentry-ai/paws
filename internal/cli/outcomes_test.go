@@ -86,29 +86,6 @@ func denyAt(t *testing.T, home string, at time.Time) {
 	}
 }
 
-// denyLastAt moves only the newest deny in the audit log to at.
-func denyLastAt(t *testing.T, home string, at time.Time) {
-	t.Helper()
-	path := filepath.Join(home, "audit.log")
-	data, err := os.ReadFile(path)
-	if err != nil {
-		t.Fatal(err)
-	}
-	lines := strings.Split(strings.TrimSpace(string(data)), "\n")
-	for i := len(lines) - 1; i >= 0; i-- {
-		var rec map[string]any
-		if json.Unmarshal([]byte(lines[i]), &rec) == nil && rec["verdict"] == "deny" {
-			rec["ts"], rec["at"] = at.UTC().Format(time.RFC3339), at.UTC().Format(time.RFC3339Nano)
-			b, _ := json.Marshal(rec)
-			lines[i] = string(b)
-			break
-		}
-	}
-	if err := os.WriteFile(path, []byte(strings.Join(lines, "\n")+"\n"), 0o600); err != nil {
-		t.Fatal(err)
-	}
-}
-
 func TestStopGradesWhatFollowedTheBlock(t *testing.T) {
 	home, srv := syncEnv(t)
 	cwd, _ := os.Getwd()
@@ -463,102 +440,8 @@ func TestADenyAfterTheLastRecordIsNotThisTurns(t *testing.T) {
 			t.Errorf("graded a deny made after the turn's last record: %v", rec)
 		}
 	}
-	if at, ok := hook.LastRecordAt(transcript, time.Now(), time.Time{}); !ok || at.After(start.Add(5*time.Second)) {
+	if at, ok := hook.LastRecordAt(transcript, time.Now()); !ok || at.After(start.Add(5*time.Second)) {
 		t.Errorf("LastRecordAt = %v, %v; want the log's last record, %v", at, ok, start.Add(4*time.Second))
-	}
-}
-
-// The user's next prompt can reach the log before the Stop hook starts. A prompt that new, after the turn's own, began
-// the next turn: its denies wait for that turn's own Stop. Whether or not an earlier Stop was graded.
-func TestAPromptThatBeganTheNextTurnIsNotThisTurns(t *testing.T) {
-	for _, graded := range []bool{true, false} {
-		t.Run(map[bool]string{true: "after a graded Stop", false: "first Stop"}[graded], func(t *testing.T) {
-			home := portalEnv(t, http.NotFoundHandler())
-			cwd, _ := os.Getwd()
-			writeRule(t, filepath.Join(cwd, ".paws", "pre-tool", "rm-gate.md"), rmRule)
-			transcript := filepath.Join(t.TempDir(), "sess-q.jsonl")
-			start := time.Now().Add(-30 * time.Second)
-			transcriptLines(t, transcript, start, []struct {
-				cmd    string
-				result string
-				isErr  bool
-			}{{"rm -rf build", "PreToolUse:Bash hook error: paws: load coreutils", true}, {"rm -rf build", "", false}})
-			denyEvent := map[string]any{"hook_event_name": "PreToolUse", "session_id": "sess-q", "transcript_path": transcript, "cwd": cwd,
-				"tool_name": "Bash", "tool_input": map[string]any{"command": "rm -rf build"}}
-			runGate(t, denyEvent)
-			denyAt(t, home, start.Add(1100*time.Millisecond)) // the first turn's deny
-			// The next turn, a few seconds ago: a prompt, a call that paws denied, and the refusal.
-			f, err := os.OpenFile(transcript, os.O_APPEND|os.O_WRONLY, 0o600)
-			if err != nil {
-				t.Fatal(err)
-			}
-			at := func(ms int) string {
-				return start.Add(time.Duration(ms) * time.Millisecond).UTC().Format(time.RFC3339Nano)
-			}
-			f.WriteString(`{"type":"user","timestamp":"` + at(25000) + `","message":{"role":"user","content":"now the dist folder"}}` + "\n")
-			f.WriteString(`{"type":"assistant","timestamp":"` + at(26000) + `","message":{"content":[{"type":"tool_use","id":"toolu_n","name":"Bash","input":{"command":"rm -rf dist"}}]}}` + "\n")
-			f.WriteString(`{"type":"user","timestamp":"` + at(26500) + `","message":{"content":[{"type":"tool_result","tool_use_id":"toolu_n","is_error":true,"content":"PreToolUse:Bash hook error: paws: load coreutils"}]}}` + "\n")
-			f.Close()
-			if graded {
-				markGraded("sess-q", start.Add(-time.Second)) // the Stop before this turn was graded then
-			}
-			runGate(t, map[string]any{"hook_event_name": "PreToolUse", "session_id": "sess-q", "transcript_path": transcript, "cwd": cwd,
-				"tool_name": "Bash", "tool_input": map[string]any{"command": "rm -rf dist"}}) // denied in the next turn
-			denyLastAt(t, home, start.Add(26100*time.Millisecond))
-			in := hook.Input{HookEventName: "Stop", SessionID: "sess-q", TranscriptPath: transcript, CWD: cwd}
-			gradeTurn(&in, hook.ToEvent(&in), time.Now())
-			var got []string
-			for _, rec := range auditLines(t, home) {
-				if rec["event"] == "outcome" {
-					got = append(got, fmt.Sprint(rec["outcome"], " ", rec["retry_command"]))
-				}
-			}
-			if len(got) != 1 || got[0] != "same_retry rm -rf build" {
-				t.Errorf("outcomes %v; want only the first turn's deny graded: same_retry rm -rf build", got)
-			}
-		})
-	}
-}
-
-// An interrupted turn fires no Stop, so a Stop can find two turns since the last graded one. Neither prompt is new, so the
-// newest turn is the one that stopped, and the grader never falls a turn behind.
-func TestTurnsWithoutAStopDoNotLeaveTheGraderBehind(t *testing.T) {
-	home := portalEnv(t, http.NotFoundHandler())
-	cwd, _ := os.Getwd()
-	writeRule(t, filepath.Join(cwd, ".paws", "pre-tool", "rm-gate.md"), rmRule)
-	transcript := filepath.Join(t.TempDir(), "sess-i.jsonl")
-	start := time.Now().Add(-60 * time.Second)
-	transcriptLines(t, transcript, start, []struct {
-		cmd    string
-		result string
-		isErr  bool
-	}{{"rm -rf build", "PreToolUse:Bash hook error: paws: load coreutils", true}}) // interrupted: no retry, no Stop
-	f, err := os.OpenFile(transcript, os.O_APPEND|os.O_WRONLY, 0o600)
-	if err != nil {
-		t.Fatal(err)
-	}
-	at := func(ms int) string {
-		return start.Add(time.Duration(ms) * time.Millisecond).UTC().Format(time.RFC3339Nano)
-	}
-	f.WriteString(`{"type":"user","timestamp":"` + at(30000) + `","message":{"role":"user","content":"try the dist folder"}}` + "\n")
-	f.WriteString(`{"type":"assistant","timestamp":"` + at(31000) + `","message":{"content":[{"type":"tool_use","id":"toolu_d","name":"Bash","input":{"command":"rm -rf dist"}}]}}` + "\n")
-	f.WriteString(`{"type":"user","timestamp":"` + at(31500) + `","message":{"content":[{"type":"tool_result","tool_use_id":"toolu_d","is_error":true,"content":"PreToolUse:Bash hook error: paws: load coreutils"}]}}` + "\n")
-	f.WriteString(`{"type":"assistant","timestamp":"` + at(32000) + `","message":{"content":[{"type":"tool_use","id":"toolu_e","name":"Bash","input":{"command":"rm -rf dist"}}]}}` + "\n")
-	f.Close()
-	markGraded("sess-i", start.Add(-time.Second))
-	runGate(t, map[string]any{"hook_event_name": "PreToolUse", "session_id": "sess-i", "transcript_path": transcript, "cwd": cwd,
-		"tool_name": "Bash", "tool_input": map[string]any{"command": "rm -rf dist"}})
-	denyAt(t, home, start.Add(31100*time.Millisecond))
-	in := hook.Input{HookEventName: "Stop", SessionID: "sess-i", TranscriptPath: transcript, CWD: cwd}
-	gradeTurn(&in, hook.ToEvent(&in), time.Now())
-	var got []string
-	for _, rec := range auditLines(t, home) {
-		if rec["event"] == "outcome" {
-			got = append(got, fmt.Sprint(rec["outcome"], " ", rec["retry_command"]))
-		}
-	}
-	if len(got) == 0 || got[len(got)-1] != "same_retry rm -rf dist" {
-		t.Errorf("outcomes %v; want the newest turn's deny graded: same_retry rm -rf dist", got)
 	}
 }
 

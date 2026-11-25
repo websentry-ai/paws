@@ -47,17 +47,11 @@ func TurnCalls(transcriptPath string, until time.Time) ([]outcome.Call, time.Tim
 // lastTail is how much of a log's end LastRecordAt reads: the last record sits in it.
 const lastTail = 1 << 20
 
-// hookLag is how long after Claude Code fires Stop the hook can start. A prompt newer than this is one the user sent
-// while the hook was starting; an older one is the turn that stopped, or a turn since.
-const hookLag = 10 * time.Second
-
-// LastRecordAt is when the turn that is stopping ended: the timestamp of its last record in the log. Claude Code writes
-// the turn's final message before it runs the Stop hook, but the hook has no time of its own and starts a moment late,
-// so the next turn may already have begun. A prompt in the last hookLag before until, which is not the first one since
-// after (when the last Stop was graded), is that next turn's: the turn that stopped ended before it. Otherwise the turn
-// ended with the last record at or before until. ok is false when the log can't be read (only its last megabyte is) or
-// holds no such record.
-func LastRecordAt(path string, until, after time.Time) (at time.Time, ok bool) {
+// LastRecordAt is the timestamp of the last record in the log at or before until: the final message of the turn that is
+// stopping, since Claude Code writes it before it runs the Stop hook. The Stop hook has no time of its own and starts a
+// moment late, so a call the next turn makes in that gap is after this time, not part of the turn. ok is false when the
+// log can't be read or holds no timestamp.
+func LastRecordAt(path string, until time.Time) (at time.Time, ok bool) {
 	f, err := os.Open(path)
 	if err != nil {
 		return time.Time{}, false
@@ -76,31 +70,15 @@ func LastRecordAt(path string, until, after time.Time) (at time.Time, ok bool) {
 	if off > 0 {
 		lines = lines[1:] // the first line is cut
 	}
-	var stamps, prompts []time.Time // every record's time, and the prompts' (those after the last graded Stop)
-	for _, line := range lines {
+	for i := len(lines) - 1; i >= 0; i-- {
 		var rec struct {
 			Timestamp time.Time `json:"timestamp"`
 		}
-		if len(line) == 0 || json.Unmarshal(line, &rec) != nil || rec.Timestamp.IsZero() || rec.Timestamp.After(until) {
-			continue
-		}
-		stamps = append(stamps, rec.Timestamp)
-		if rec.Timestamp.After(after) && bytes.Contains(line, []byte(`"type":"user"`)) && gate.IsUserPromptLine(line) {
-			prompts = append(prompts, rec.Timestamp)
+		if len(lines[i]) > 0 && json.Unmarshal(lines[i], &rec) == nil && !rec.Timestamp.IsZero() && !rec.Timestamp.After(until) {
+			return rec.Timestamp, true
 		}
 	}
-	limit := until.Add(time.Nanosecond) // exclusive
-	if n := len(prompts); n >= 2 && (off == 0 || !after.IsZero()) {
-		if p := prompts[n-1]; until.Sub(p) < hookLag {
-			limit = p
-		}
-	}
-	for _, t := range stamps {
-		if t.Before(limit) && t.After(at) {
-			at = t
-		}
-	}
-	return at, !at.IsZero()
+	return time.Time{}, false
 }
 
 // turnLine is the part of a transcript record the turn reader needs.

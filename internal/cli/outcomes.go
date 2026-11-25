@@ -27,17 +27,17 @@ func gradeTurn(in *hook.Input, ev gate.Event, stoppedAt time.Time) {
 	if in.TranscriptPath == "" || ev.Session == "" {
 		return
 	}
+	// The hook starts a moment after Claude Code fires Stop, and the next turn may already have made a call by then. The
+	// turn ended with the last record of its log, so that is when it stopped.
+	if at, ok := hook.LastRecordAt(in.TranscriptPath, stoppedAt); ok {
+		stoppedAt = at
+	}
 	// Stop hooks run async and can overlap: one grader at a time, so two never grade the same block.
 	unlock, ok := lockGrading(ev.Session)
 	if !ok {
 		return
 	}
 	defer unlock()
-	// The hook starts a moment after Claude Code fires Stop, and the next turn may already have begun by then. The turn
-	// ended with its last record in the log, so that is when it stopped (see hook.LastRecordAt).
-	if at, ok := hook.LastRecordAt(in.TranscriptPath, stoppedAt, gradedThrough(ev.Session)); ok {
-		stoppedAt = at
-	}
 	// The session's denies up to the Stop, from the audit log's end. Most turns have none left to grade: then the
 	// transcript, which grows with the session, isn't read at all. Denies before the last Stop graded are settled,
 	// graded or never gradable (an interrupted turn, say), so only newer ones count here.

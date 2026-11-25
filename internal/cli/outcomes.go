@@ -21,7 +21,8 @@ const outcomeTail = 4 << 20
 
 // gradeTurn runs in the Stop hook (async: Claude isn't waiting). For each call a require-skill rule denied in the turn
 // that just ended, it reads what followed in Claude Code's log and appends an outcome record: the outcome and each
-// expect check's result. Never the calls themselves. Best effort: anything it can't read, it leaves ungraded.
+// expect check's result, and the one call that answered the block (see gate.DescribeCall), never the rest of the turn.
+// Best effort: anything it can't read, it leaves ungraded.
 func gradeTurn(in *hook.Input, ev gate.Event, stoppedAt time.Time) {
 	if in.TranscriptPath == "" || ev.Session == "" {
 		return

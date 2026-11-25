@@ -200,7 +200,7 @@ expect:
 	}
 }
 
-// Spacing between words doesn't make a different command; spacing inside quotes does.
+// Spacing between words doesn't make a different command; spacing inside quotes does, and so does an env assignment.
 func TestSameKeepsQuotedSpacing(t *testing.T) {
 	cases := []struct {
 		a, b string
@@ -208,6 +208,10 @@ func TestSameKeepsQuotedSpacing(t *testing.T) {
 	}{
 		{"rm  -rf   build", "rm -rf build", true},
 		{"cd x && rm -rf build", "rm -rf build", true},
+		{"AWS_PROFILE=prod aws s3 rm x", "AWS_PROFILE=staging aws s3 rm x", false}, // an env assignment changes the command
+		{"AWS_PROFILE=prod aws s3 rm x", "AWS_PROFILE=prod  aws s3 rm x", true},
+		{"cd x && AWS_PROFILE=prod aws s3 rm x", "AWS_PROFILE=prod aws s3 rm x", true},
+		{"AWS_PROFILE=prod aws s3 rm x", "aws s3 rm x", false},
 		{"rm -rf 'a  b'", "rm -rf 'a b'", false},
 		{`rm -rf "a  b"`, `rm  -rf "a  b"`, true},
 		{`rm -rf "x\" a  b"`, `rm -rf "x\" a b"`, false},       // an escaped quote doesn't end the string

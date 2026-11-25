@@ -57,7 +57,7 @@ turn's calls.
 | `outcome` | What Claude did after the deny, in the same turn |
 |---|---|
 | `fixed` | retried (the next call the rule matched went through), and every `expect` check passed |
-| `same_retry` | retried the same call (setup like `cd dir &&` and spacing aside), and a check failed or there are none |
+| `same_retry` | retried the same call (a `cd dir &&` in front and spacing aside; an env assignment such as `AWS_PROFILE=prod` counts), and a check failed or there are none |
 | `changed_failed` | retried a different call, and a check failed |
 | `changed_unchecked` | retried a different call; the rule has no checks |
 | `other_route` | never retried; other calls ran |

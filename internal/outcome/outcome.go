@@ -229,7 +229,7 @@ func inScope(calls []Call, blocked int) []Call {
 	return out
 }
 
-// sameCall: the same tool, and for Bash the same command once setup in front and spacing are ignored; any other
+// sameCall: the same tool, and for Bash the same command once a `cd` or subshell in front and spacing are ignored; any other
 // call is the same only when its whole input matches exactly (a Write's content, an Edit's new text: spacing counts there).
 func sameCall(a, b Call) bool {
 	if a.Tool != b.Tool {
@@ -244,10 +244,11 @@ func sameCall(a, b Call) bool {
 	return a.Target == b.Target && a.Text == b.Text
 }
 
-// lead is setup in front of the real command: a `cd dir &&`, an env assignment, a `(` opening a subshell.
-var lead = regexp.MustCompile(`^\s*(?:\(\s*|(?:cd|pushd)\s+\S+\s*(?:&&|;)\s*|[A-Za-z_]\w*=\S*\s+)`)
+// lead is setup in front of the real command: a `cd dir &&`, a `(` opening a subshell. An env assignment is not setup:
+// AWS_PROFILE=prod and AWS_PROFILE=staging run the same command against different accounts.
+var lead = regexp.MustCompile(`^\s*(?:\(\s*|(?:cd|pushd)\s+\S+\s*(?:&&|;)\s*)`)
 
-// Same reports whether two calls' targets are the same once setup in front and spacing between words are ignored;
+// Same reports whether two calls' targets are the same once a `cd` or subshell in front and spacing between words are ignored;
 // spacing inside quotes counts (`'a  b'` and `'a b'` name different files).
 func Same(a, b string) bool {
 	norm := func(s string) string {

@@ -55,7 +55,7 @@ type lineTree struct {
 
 // dataText is line without the heredoc bodies that no shell runs. f is line parsed.
 func dataText(line string, f *syntax.File) string {
-	t := lineTree{up: map[syntax.Node]syntax.Node{}, run: map[string]bool{}, funcs: map[string]bool{}}
+	t := &lineTree{up: map[syntax.Node]syntax.Node{}, run: map[string]bool{}, funcs: map[string]bool{}}
 	var stack []syntax.Node
 	var docs []*syntax.Stmt
 	syntax.Walk(f, func(n syntax.Node) bool {
@@ -74,20 +74,7 @@ func dataText(line string, f *syntax.File) string {
 			if slices.ContainsFunc(n.Redirs, isHeredoc) {
 				docs = append(docs, n)
 			}
-		case *syntax.CallExpr:
-			var stdin []string // python3 < task.py
-			if st, ok := t.up[n].(*syntax.Stmt); ok {
-				for _, r := range st.Redirs {
-					if r.Op == syntax.RdrIn && r.Word != nil {
-						stdin = append(stdin, wordString(r.Word))
-					}
-				}
-			}
-			w := stripWrappers(callWords(n))
-			t.noteRuns(w, stdin)
-			if len(w) > 0 && (w[0] == "eval" || w[0] == "source" || w[0] == "." || w[0] == "alias") {
-				t.redefine = true
-			}
+			t.noteStmt(n, 0)
 		}
 		return true
 	})
@@ -160,7 +147,7 @@ var interpreters = map[string]bool{"python": true, "python2": true, "python3": t
 // noteRuns records the files a command may run: the command itself, a script a shell, source or an interpreter
 // reads (as an argument or on stdin), and a file chmod changes (most often to make it executable). Files are known
 // by base name, since a cd between writing and running one changes its path (cat > $S/t.go; cd $S && go run t.go).
-func (t lineTree) noteRuns(w, stdin []string) {
+func (t *lineTree) noteRuns(w, stdin []string) {
 	if len(w) == 0 {
 		return
 	}
@@ -173,11 +160,59 @@ func (t lineTree) noteRuns(w, stdin []string) {
 	}
 }
 
+// noteStmt records what a simple command may run or redefine, inside the scripts bash -c and eval run too. depth
+// bounds that nesting; past it, every name may be redefined.
+func (t *lineTree) noteStmt(st *syntax.Stmt, depth int) {
+	call, ok := st.Cmd.(*syntax.CallExpr)
+	if !ok {
+		return
+	}
+	var stdin []string // python3 < task.py
+	for _, r := range st.Redirs {
+		if r.Op == syntax.RdrIn && r.Word != nil {
+			stdin = append(stdin, wordString(r.Word))
+		}
+	}
+	w := stripWrappers(callWords(call))
+	t.noteRuns(w, stdin)
+	if len(w) == 0 {
+		return
+	}
+	switch name := path.Base(w[0]); {
+	case name == "eval":
+		t.redefine = true
+		t.noteScript(strings.Join(w[1:], " "), depth)
+	case name == "source" || name == "." || name == "alias":
+		t.redefine = true
+	case shells[name]:
+		if script, isC, _ := shellArgs(w[1:]); isC {
+			t.noteScript(script, depth) // bash -c 'sh t.sh'
+		}
+	}
+}
+
+func (t *lineTree) noteScript(script string, depth int) {
+	f, err := parse(script)
+	if depth >= maxNesting || err != nil {
+		t.redefine = true
+		return
+	}
+	syntax.Walk(f, func(n syntax.Node) bool {
+		switch n := n.(type) {
+		case *syntax.FuncDecl:
+			t.funcs[n.Name.Value] = true
+		case *syntax.Stmt:
+			t.noteStmt(n, depth+1)
+		}
+		return true
+	})
+}
+
 // runs reports whether the line may run file.
-func (t lineTree) runs(file string) bool { return t.run[path.Base(file)] }
+func (t *lineTree) runs(file string) bool { return t.run[path.Base(file)] }
 
 // takesAsData reports whether the text st reads, on stdin or as an argument, can't reach a shell.
-func (t lineTree) takesAsData(st *syntax.Stmt) bool {
+func (t *lineTree) takesAsData(st *syntax.Stmt) bool {
 	if st.Cmd == nil {
 		return t.printsAsData(st) // `> notes.md <<EOF` only writes a file
 	}
@@ -201,7 +236,7 @@ func (t lineTree) takesAsData(st *syntax.Stmt) bool {
 	}
 	switch name := path.Base(w[0]); {
 	case sendsText(w):
-		return true
+		return t.printsAsData(st) // git stripspace <<EOF | sh prints the body
 	case name == "tee" && slices.ContainsFunc(w[1:], t.runs):
 		return false // tee t.sh <<EOF ... EOF; bash t.sh
 	case textCopiers[name]:
@@ -212,7 +247,7 @@ func (t lineTree) takesAsData(st *syntax.Stmt) bool {
 
 // printsAsData reports whether what st prints can't reach a shell: it goes to a file the line doesn't run, to the
 // terminal, or to a command that takes it as data.
-func (t lineTree) printsAsData(st *syntax.Stmt) bool {
+func (t *lineTree) printsAsData(st *syntax.Stmt) bool {
 	for {
 		switch kind, file := output(st); kind {
 		case outFile:

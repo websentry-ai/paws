@@ -96,6 +96,10 @@ func TestHeredocBodyAShellRuns(t *testing.T) {
 		"source ./defs.sh; cat > notes.md <<'EOF'\nrm -rf build\nEOF",
 		"cat > /dev/stdout <<'EOF' | sh\nrm -rf build\nEOF",
 		"cat > /dev/fd/1 <<'EOF' | sh\nrm -rf build\nEOF",
+		"git stripspace <<'EOF' | sh\nrm -rf build\nEOF",
+		"cat > t.sh <<'EOF'\nrm -rf build\nEOF\nbash -c 'sh t.sh'",
+		"cat > t.sh <<'EOF'\nrm -rf build\nEOF\neval './t.sh'",
+		"cat > t.sh <<'EOF'\nrm -rf build\nEOF\nbash -c \"bash -c './t.sh'\"",
 		"tee notes.md >(sh) <<'EOF' >/dev/null\nrm -rf build\nEOF",
 		"cat <<'EOF' >&2\nrm -rf build\nEOF", // stderr: paws doesn't follow it
 		"git -c 'alias.run=!sh' run <<'EOF'\nrm -rf build\nEOF",

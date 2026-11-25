@@ -377,7 +377,11 @@ func toOutcomeUpload(r auditRecord) outcomeUpload {
 		Outcome: r.Outcome, Checks: r.Checks, RetryCommand: r.RetryCommand}
 	switch {
 	case managed(r.Source): // a portal rule is named <skill>--<action id>
-		if _, id, ok := strings.Cut(r.Rule, "--"); ok {
+		// The skill's own name comes off the front, so a `--` inside the skill's name or the action id splits nowhere.
+		name, _, _ := strings.Cut(r.Skill, "@")
+		if id, ok := strings.CutPrefix(r.Rule, name+"--"); ok {
+			rec.Action = id
+		} else if _, id, ok := strings.Cut(r.Rule, "--"); ok {
 			rec.Action = id
 		}
 	case fromCatalog(r.Source): // a catalog binding's name is its action id (see index_portal.go)

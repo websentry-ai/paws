@@ -217,6 +217,22 @@ func TestCatalogOutcomesCarryTheBindingID(t *testing.T) {
 	}
 }
 
+// A portal rule is named <skill>--<action id>: the id is what follows the skill's name, even when either holds `--`.
+func TestPortalOutcomesSplitTheRuleNameAtTheSkill(t *testing.T) {
+	portalEnv(t, http.NotFoundHandler())
+	src := filepath.Join(portalDir(), "any.md")
+	for _, c := range []struct{ skill, rule, want string }{
+		{"coreutils", "coreutils--rm-1", "rm-1"},
+		{"my--skill", "my--skill--rm-1", "rm-1"},
+		{"coreutils", "coreutils--a--b", "a--b"},
+		{"coreutils@e85a43d", "coreutils--rm-1", "rm-1"},
+	} {
+		if got := toOutcomeUpload(auditRecord{Event: "outcome", Rule: c.rule, Source: src, Skill: c.skill, Outcome: "fixed"}).Action; got != c.want {
+			t.Errorf("skill %q rule %q: action_id %q, want %q", c.skill, c.rule, got, c.want)
+		}
+	}
+}
+
 // Two graders for one turn (overlapping async Stop hooks) write each outcome once.
 func TestConcurrentGradersGradeOnce(t *testing.T) {
 	home := portalEnv(t, http.NotFoundHandler())

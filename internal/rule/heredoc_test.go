@@ -18,6 +18,8 @@ func TestHeredocBodyNoShellRuns(t *testing.T) {
 		"cat >> notes.md <<-'EOF'\n\tgit push\n\trm -rf build\n\tEOF",
 		"cd docs && cat > notes.md <<'EOF'\ngit push\nrm -rf build\nEOF\nwc -l notes.md",
 		"tee notes.md <<'EOF'\ngit push\nrm -rf build\nEOF",
+		"cat > notes.md 2>&1 <<'EOF'\ngit push\nrm -rf build\nEOF",
+		"cat 3> notes.md 1>&3 <<'EOF'\ngit push\nrm -rf build\nEOF",
 		"sudo tee /etc/notes >/dev/null <<'EOF'\ngit push\nrm -rf build\nEOF",
 		"> notes.md <<'EOF'\ngit push\nrm -rf build\nEOF",
 		"gh pr comment 7 --body-file - <<'EOF'\ngit push\nrm -rf build\nEOF",
@@ -84,6 +86,10 @@ func TestHeredocBodyAShellRuns(t *testing.T) {
 		"bash <(cat <<'EOF'\nrm -rf build\nEOF\n)",
 		"cat <<'EOF' > >(bash)\nrm -rf build\nEOF",
 		"cat > /tmp/log > >(sh) <<'EOF'\nrm -rf build\nEOF",
+		"cat > notes.md 3> >(sh) 1>&3 <<'EOF'\nrm -rf build\nEOF",
+		"tee >(sh) <<'EOF'\nrm -rf build\nEOF",
+		"tee notes.md >(sh) <<'EOF' >/dev/null\nrm -rf build\nEOF",
+		"cat <<'EOF' >&2\nrm -rf build\nEOF", // stderr: paws doesn't follow it
 		"git -c 'alias.run=!sh' run <<'EOF'\nrm -rf build\nEOF",
 		"gh deploy <<'EOF'\nrm -rf build\nEOF", // a gh alias may run a shell
 		"script=$(cat <<'EOF'\nrm -rf build\nEOF\n)",
@@ -115,6 +121,21 @@ func TestHeredocBodyAShellRuns(t *testing.T) {
 		if !regexRule(t, `(^|\n)push origin`).Matches("Bash", line) {
 			t.Errorf("%q: the body is the arguments xargs passes to git", line)
 		}
+	}
+
+	// Code written to a file that an interpreter then runs stays visible too.
+	for _, line := range []string{
+		"cat > task.py <<'EOF'\nimport shutil; shutil.rmtree(\"build\")\nEOF\npython3 task.py",
+		"cat > ./task.py <<'EOF'\nimport shutil; shutil.rmtree(\"build\")\nEOF\npython3 < task.py",
+		"tee main.go <<'EOF' >/dev/null\nshutil.rmtree\nEOF\ngo run main.go",
+		"cat > $S/main.go <<'EOF'\nshutil.rmtree\nEOF\ncd $S && go run main.go",
+	} {
+		if !regexRule(t, `shutil\.rmtree`).Matches("Bash", line) {
+			t.Errorf("%q: an interpreter runs the file", line)
+		}
+	}
+	if regexRule(t, `shutil\.rmtree`).Matches("Bash", "cat > task.py <<'EOF'\nimport shutil; shutil.rmtree(\"build\")\nEOF\ngit add task.py") {
+		t.Error("a file only added to git runs nothing")
 	}
 
 	// Interpreters keep their body visible: a rule may name the SQL or code inside.

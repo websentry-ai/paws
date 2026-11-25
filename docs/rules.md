@@ -72,7 +72,7 @@ fires if either matches:
   command reading the body still matches. A body fed to a shell (`bash <<EOF`,
   `ssh host <<EOF`, `cat <<EOF | sh`), to an interpreter (`psql`, `python`,
   `node`), to any other command, or written to a file the call then runs,
-  sources or chmods, stays visible. So does `$( )` inside an unquoted body.
+  sources, chmods or passes to an interpreter, stays visible. So does `$( )` inside an unquoted body.
 - A call that isn't valid Bash is matched whole only.
 
 `pre-commit` and `pre-push` find git the same way.

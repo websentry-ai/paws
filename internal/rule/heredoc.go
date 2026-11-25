@@ -17,8 +17,8 @@ import (
 // A body is data when the command reading it only stores or sends text (git commit -F -, gh --body-file -), or copies
 // it (cat, tee, echo, printf) to a file, to the terminal, or on to such a command, through a pipe or a $( ) argument.
 // Every other body stays: one fed to a shell (bash <<EOF, cat <<EOF | sh), to an interpreter (psql, python, node,
-// ssh), or to a command paws doesn't know. So does a body written to a file the line then runs, sources or makes
-// executable (cat > t.sh <<EOF ... EOF; chmod +x t.sh; ./t.sh). In an unquoted body, $( ) still runs, so it stays too.
+// ssh), or to a command paws doesn't know. So does a body written to a file the line then runs, sources, makes
+// executable or hands to an interpreter (cat > t.sh <<EOF ... EOF; chmod +x t.sh; ./t.sh). In an unquoted body, $( ) still runs, so it stays too.
 
 // Built-in git and gh commands that store or send the text they read, on stdin or as an argument, and run none of
 // it. An alias can't take a built-in's name, so `git -c alias.run='!sh' run` and a gh shell alias stay out.
@@ -69,7 +69,15 @@ func dataText(line string, f *syntax.File) string {
 				docs = append(docs, n)
 			}
 		case *syntax.CallExpr:
-			t.noteRuns(stripWrappers(callWords(n)))
+			var stdin []string // python3 < task.py
+			if st, ok := t.up[n].(*syntax.Stmt); ok {
+				for _, r := range st.Redirs {
+					if r.Op == syntax.RdrIn && r.Word != nil {
+						stdin = append(stdin, wordString(r.Word))
+					}
+				}
+			}
+			t.noteRuns(stripWrappers(callWords(n)), stdin)
 		}
 		return true
 	})
@@ -134,22 +142,29 @@ func isHeredoc(r *syntax.Redirect) bool {
 	return (r.Op == syntax.Hdoc || r.Op == syntax.DashHdoc) && r.Hdoc != nil
 }
 
-// noteRuns records the files a command may run: the command itself, a script a shell or source reads, and a file
-// chmod changes (most often to make it executable). Paths are cleaned, so ./t.sh and t.sh are one file.
-func (t lineTree) noteRuns(w []string) {
+// interpreters run code from a file named as an argument or given on stdin.
+var interpreters = map[string]bool{"python": true, "python2": true, "python3": true, "node": true, "deno": true,
+	"bun": true, "tsx": true, "ts-node": true, "ruby": true, "perl": true, "php": true, "lua": true, "Rscript": true,
+	"osascript": true, "go": true, "psql": true, "mysql": true, "sqlite3": true}
+
+// noteRuns records the files a command may run: the command itself, a script a shell, source or an interpreter
+// reads (as an argument or on stdin), and a file chmod changes (most often to make it executable). Files are known
+// by base name, since a cd between writing and running one changes its path (cat > $S/t.go; cd $S && go run t.go).
+func (t lineTree) noteRuns(w, stdin []string) {
 	if len(w) == 0 {
 		return
 	}
-	t.run[path.Clean(w[0])] = true
-	if name := path.Base(w[0]); shells[name] || name == "source" || name == "." || name == "chmod" {
-		for _, a := range w[1:] {
-			t.run[path.Clean(a)] = true
+	t.run[path.Base(w[0])] = true
+	name := path.Base(w[0])
+	if shells[name] || interpreters[name] || name == "source" || name == "." || name == "chmod" {
+		for _, a := range slices.Concat(w[1:], stdin) {
+			t.run[path.Base(a)] = true
 		}
 	}
 }
 
 // runs reports whether the line may run file.
-func (t lineTree) runs(file string) bool { return t.run[path.Clean(file)] }
+func (t lineTree) runs(file string) bool { return t.run[path.Base(file)] }
 
 // takesAsData reports whether the text st reads, on stdin or as an argument, can't reach a shell.
 func (t lineTree) takesAsData(st *syntax.Stmt) bool {
@@ -168,6 +183,9 @@ func (t lineTree) takesAsData(st *syntax.Stmt) bool {
 	if len(w) == 0 || slices.ContainsFunc(words[:len(words)-len(w)], func(a string) bool { return path.Base(a) == "xargs" }) {
 		return false // xargs git <<EOF: the body becomes the command's arguments
 	}
+	if slices.ContainsFunc(call.Args, hasProcSubst) {
+		return false // tee >(sh) <<EOF
+	}
 	switch name := path.Base(w[0]); {
 	case sendsText(w):
 		return true
@@ -183,8 +201,11 @@ func (t lineTree) takesAsData(st *syntax.Stmt) bool {
 // terminal, or to a command that takes it as data.
 func (t lineTree) printsAsData(st *syntax.Stmt) bool {
 	for {
-		if file, ok := output(st); ok {
-			return file != "" && !t.runs(file)
+		switch kind, file := output(st); kind {
+		case outFile:
+			return !t.runs(file)
+		case outOther:
+			return false
 		}
 		switch p := t.up[st].(type) {
 		case *syntax.File:
@@ -206,24 +227,58 @@ func (t lineTree) printsAsData(st *syntax.Stmt) bool {
 	}
 }
 
-// output reports whether st redirects its output, and to which file: "" for a process (> >(sh)). The last redirect
-// wins, as in the shell.
-func output(st *syntax.Stmt) (file string, ok bool) {
+// Where a command's output goes.
+const (
+	outInherit = iota // where the output of the command around it goes
+	outFile
+	outOther // a process, stderr or another descriptor: paws doesn't follow it
+)
+
+type outDest struct {
+	kind int
+	file string
+}
+
+// output follows st's redirections in order, as the shell does, and reports where its stdout ends up.
+func output(st *syntax.Stmt) (kind int, file string) {
+	fds := map[string]outDest{"1": {outInherit, ""}}
 	for _, r := range st.Redirs {
+		if r.Word == nil {
+			continue
+		}
+		fd := "1"
+		if r.N != nil {
+			fd = r.N.Value
+		}
+		var d outDest
 		switch r.Op {
 		case syntax.RdrOut, syntax.AppOut, syntax.RdrClob, syntax.RdrAll, syntax.AppAll:
-			if r.N != nil && r.N.Value != "1" || r.Word == nil {
-				continue
+			d = outDest{outFile, wordString(r.Word)}
+			if hasProcSubst(r.Word) { // > >(sh)
+				d = outDest{outOther, ""}
 			}
-			file, ok = wordString(r.Word), true
-			for _, p := range r.Word.Parts {
-				if _, isProc := p.(*syntax.ProcSubst); isProc {
-					file = ""
-				}
+			if r.Op == syntax.RdrAll || r.Op == syntax.AppAll {
+				fds["2"] = d
 			}
+		case syntax.DplOut: // 1>&3 copies where fd 3 goes; an unknown or closed fd isn't followed
+			var ok bool
+			if d, ok = fds[wordString(r.Word)]; !ok {
+				d = outDest{outOther, ""}
+			}
+		default:
+			continue
 		}
+		fds[fd] = d
 	}
-	return file, ok
+	d := fds["1"]
+	return d.kind, d.file
+}
+
+func hasProcSubst(w *syntax.Word) bool {
+	return slices.ContainsFunc(w.Parts, func(p syntax.WordPart) bool {
+		_, ok := p.(*syntax.ProcSubst)
+		return ok
+	})
 }
 
 // enclosingStmt is n when it is a statement, else the nearest statement around it.

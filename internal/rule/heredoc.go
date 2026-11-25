@@ -57,6 +57,15 @@ func gitRunsEditor(a string) bool {
 		shortFlags.MatchString(a) && strings.Contains(a, "e")
 }
 
+// plainWrappers reports whether the wrappers stripWrappers took off words to leave w only run w as it is: no
+// VAR=x (the environment may change what w runs), no env, no xargs (the input becomes w's arguments), and no
+// wrapper named by a path (./sudo may be any program).
+func plainWrappers(words, w []string) bool {
+	return !slices.ContainsFunc(words[:len(words)-len(w)], func(a string) bool {
+		return strings.Contains(a, "=") || strings.Contains(a, "/") || a == "env" || a == "xargs"
+	})
+}
+
 // textCopiers print the text they read, so it goes wherever their output goes.
 var textCopiers = map[string]bool{"cat": true, "tee": true, "echo": true, "printf": true}
 
@@ -106,11 +115,8 @@ func newLineTree(f *syntax.File) (*lineTree, []*syntax.Stmt) {
 			if len(w) > 0 && (w[0] == "eval" || w[0] == "source" || w[0] == "." || w[0] == "alias") {
 				t.redefine = true
 			}
-			if len(words) > 0 && (len(n.Assigns) > 0 || len(w) == 0 || !runsNoFile(w) ||
-				slices.ContainsFunc(words[:len(words)-len(w)], func(a string) bool {
-					return strings.Contains(a, "=") || path.Base(a) == "env" || path.Base(a) == "xargs"
-				})) {
-				t.runsNone = false // VAR=x before a command (GIT_SSH_COMMAND=...), env, xargs, or a command that may run a file
+			if len(words) > 0 && (len(n.Assigns) > 0 || len(w) == 0 || !runsNoFile(w) || !plainWrappers(words, w)) {
+				t.runsNone = false // VAR=x before a command (GIT_SSH_COMMAND=...), or a command that may run a file
 			}
 		}
 		return true
@@ -171,7 +177,7 @@ var noFileCmds = map[string]bool{"cd": true, "pwd": true, "mkdir": true, "touch"
 	"ls": true, "wc": true, "cat": true, "tee": true, "echo": true, "printf": true, "head": true, "tail": true,
 	"grep": true, "rg": true, "sort": true, "uniq": true, "diff": true, "cmp": true, "stat": true, "file": true,
 	"du": true, "true": true, "false": true, ":": true, "test": true, "[": true, "sleep": true, "date": true,
-	"basename": true, "dirname": true, "realpath": true, "shasum": true, "sha256sum": true, "md5": true, "jq": true}
+	"basename": true, "dirname": true, "realpath": true, "shasum": true, "sha256sum": true, "md5": true} // not jq: jq -f runs a program file
 
 // gitNoFileCmds are built-in git commands; the hooks they run are files runsUnnamed keeps.
 var gitNoFileCmds = map[string]bool{"add": true, "status": true, "diff": true, "log": true, "show": true,
@@ -255,19 +261,14 @@ func (t *lineTree) takesAsData(st *syntax.Stmt) bool {
 		return false // X=$(cat <<EOF): the variable may run later
 	}
 	w := stripWrappers(words)
-	if len(w) == 0 || slices.ContainsFunc(words[:len(words)-len(w)], func(a string) bool { return path.Base(a) == "xargs" }) {
-		return false // xargs git <<EOF: the body becomes the command's arguments
+	if len(w) == 0 || len(call.Assigns) > 0 || !plainWrappers(words, w) {
+		return false // xargs git <<EOF, GIT_EDITOR=sh git commit -e, ./sudo cat
 	}
 	if slices.ContainsFunc(call.Args, hasProcSubst) {
 		return false // tee >(sh) <<EOF
 	}
 	if t.redefine || t.funcs[w[0]] || strings.Contains(w[0], "/") {
 		return false // the name may not be the program paws knows: cat() { sh; }, ./cat
-	}
-	if len(call.Assigns) > 0 || slices.ContainsFunc(words[:len(words)-len(w)], func(a string) bool {
-		return strings.Contains(a, "=") || path.Base(a) == "env"
-	}) {
-		return false // GIT_EDITOR=sh git commit -e: the environment may change what the program runs
 	}
 	switch name := w[0]; {
 	case name == "printf" && slices.ContainsFunc(w[1:], func(a string) bool { return strings.HasPrefix(a, "-v") }):

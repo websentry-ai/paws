@@ -204,7 +204,9 @@ func runsFile(text string, files []string) bool {
 			if call, ok := st.Cmd.(*syntax.CallExpr); ok && !t.redefine {
 				if w := stripWrappers(callWords(call)); len(w) > 0 && !t.funcs[w[0]] && t.readsOnly(st, w) {
 					for _, a := range call.Args {
-						named -= strings.Count(src(a), name)
+						if !runsInWord(a) { // wc "$(sh t.sh)" runs it
+							named -= strings.Count(src(a), name)
+						}
 					}
 				}
 			}
@@ -360,6 +362,11 @@ func output(st *syntax.Stmt) (kind int, file string) {
 		}
 		var d outDest
 		switch r.Op {
+		case syntax.RdrInOut: // 1<>t.sh opens t.sh for writing too; <>f alone is stdin
+			if r.N == nil {
+				continue
+			}
+			d = outDest{outFile, wordString(r.Word)}
 		case syntax.RdrOut, syntax.AppOut, syntax.RdrClob, syntax.RdrAll, syntax.AppAll:
 			d = outDest{outFile, wordString(r.Word)}
 			if hasProcSubst(r.Word) || strings.HasPrefix(d.file, "/dev/") && d.file != "/dev/null" ||
@@ -381,6 +388,19 @@ func output(st *syntax.Stmt) (kind int, file string) {
 	}
 	d := fds["1"]
 	return d.kind, d.file
+}
+
+// runsInWord reports whether a word runs commands of its own: $( ), ` `, <( ) or >( ).
+func runsInWord(w *syntax.Word) bool {
+	runs := false
+	syntax.Walk(w, func(n syntax.Node) bool {
+		switch n.(type) {
+		case *syntax.CmdSubst, *syntax.ProcSubst:
+			runs = true
+		}
+		return !runs
+	})
+	return runs
 }
 
 func hasProcSubst(w *syntax.Word) bool {

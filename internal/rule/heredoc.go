@@ -119,6 +119,8 @@ func newLineTree(f *syntax.File) (*lineTree, []*syntax.Stmt) {
 			t.runsNone = false
 		case *syntax.CoprocClause:
 			t.runsNone = false
+		case *syntax.DeclClause:
+			t.runsNone = false // export GIT_EDITOR='sh t.sh'; git commit: a later command may run what it names
 		case *syntax.Stmt:
 			if slices.ContainsFunc(n.Redirs, isHeredoc) {
 				docs = append(docs, n)
@@ -227,6 +229,9 @@ func runsUnnamed(file string) bool {
 		"pre-merge-commit", "prepare-commit-msg", "commit-msg", "post-commit", "pre-rebase", "post-checkout",
 		"post-merge", "pre-push", "post-rewrite", "reference-transaction", "pre-auto-gc", "fsmonitor-watchman":
 		return true
+	}
+	if name == "config" || name == "gitconfig" || strings.Contains(file, ".git/") || strings.HasPrefix(file, ".git") {
+		return true // git config runs core.fsmonitor, filter.*.clean, core.hooksPath and aliases on plain git commands
 	}
 	return strings.HasPrefix(name, ".") || strings.HasSuffix(name, ".mk") || strings.ContainsAny(name, "$`*?[")
 }

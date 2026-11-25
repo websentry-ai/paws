@@ -71,8 +71,11 @@ fires if either matches:
   `gh ... --body-file - <<EOF`, and `$(cat <<EOF)` passed to git or gh. The
   command reading the body still matches. A body fed to a shell (`bash <<EOF`,
   `ssh host <<EOF`, `cat <<EOF | sh`), to an interpreter (`psql`, `python`,
-  `node`), to any other command, or written to a file the call then runs,
-  sources, chmods or passes to an interpreter, stays visible. So does `$( )` inside an unquoted body.
+  `node`) or to any other command stays visible. A body written to a file
+  stays visible unless every command in the call only reads, lists or sends
+  files (`cd`, `cat`, `wc`, `git add`, ...) and the file is not one tools run
+  without naming it (`Makefile`, `package.json`, a dotfile, a git hook).
+  `$( )` inside an unquoted body stays visible too.
 - A call that isn't valid Bash is matched whole only.
 
 `pre-commit` and `pre-push` find git the same way.

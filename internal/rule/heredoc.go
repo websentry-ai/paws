@@ -17,10 +17,12 @@ import (
 // A body is data when the command reading it only stores or sends text (git commit -F -, gh --body-file -), or copies
 // it (cat, tee, echo, printf) to a file, to the terminal, or on to such a command, through a pipe or a $( ) argument.
 // Every other body stays: one fed to a shell (bash <<EOF, cat <<EOF | sh), to an interpreter (psql, python, node,
-// ssh), or to a command paws doesn't know. A body written to a file stays when the rest of the line names that file
-// (./t.sh, python3 task.py, bash -c 'sh t.sh'), or when tools run the file as shell without naming it (Makefile,
-// package.json, a dotfile). So does every body on a line that defines a function of the reader's name, or runs
-// eval, source or alias: the name may not be the program. In an unquoted body, $( ) still runs, so it stays too.
+// ssh), or to a command paws doesn't know. A body written to a file is data only when every command on the line is
+// one that runs no file (cd, mkdir, cat, wc, built-in git and gh commands, ...), and the file isn't one that tools
+// run without being told its name (Makefile, package.json, a dotfile, a git hook). Any other command could run the
+// file (./t.sh, python3 task.py, make, go run .), so the body stays. So does every body on a line that defines a
+// function of the reader's name, or runs eval, source or alias: the name may not be the program. In an unquoted
+// body, $( ) still runs, so it stays too.
 
 // Built-in git and gh commands that store or send the text they read, on stdin or as an argument, and run none of
 // it. An alias can't take a built-in's name, so `git -c alias.run='!sh' run` and a gh shell alias stay out.
@@ -51,6 +53,7 @@ type lineTree struct {
 	up       map[syntax.Node]syntax.Node
 	funcs    map[string]bool // cat() { sh; } makes cat run its input
 	redefine bool            // eval, source or alias may define any function or alias
+	runsNone bool            // every command on the line is in runsNoFile
 	files    []string
 }
 
@@ -62,7 +65,7 @@ type dataBody struct {
 
 // newLineTree reads f, and returns it with the statements that read a heredoc.
 func newLineTree(f *syntax.File) (*lineTree, []*syntax.Stmt) {
-	t := &lineTree{up: map[syntax.Node]syntax.Node{}, funcs: map[string]bool{}}
+	t := &lineTree{up: map[syntax.Node]syntax.Node{}, funcs: map[string]bool{}, runsNone: true}
 	var stack []syntax.Node
 	var docs []*syntax.Stmt
 	syntax.Walk(f, func(n syntax.Node) bool {
@@ -77,13 +80,24 @@ func newLineTree(f *syntax.File) (*lineTree, []*syntax.Stmt) {
 		switch n := n.(type) {
 		case *syntax.FuncDecl:
 			t.funcs[n.Name.Value] = true
+			t.runsNone = false
+		case *syntax.CoprocClause:
+			t.runsNone = false
 		case *syntax.Stmt:
 			if slices.ContainsFunc(n.Redirs, isHeredoc) {
 				docs = append(docs, n)
 			}
 		case *syntax.CallExpr:
-			if w := stripWrappers(callWords(n)); len(w) > 0 && (w[0] == "eval" || w[0] == "source" || w[0] == "." || w[0] == "alias") {
+			words := callWords(n)
+			w := stripWrappers(words)
+			if len(w) > 0 && (w[0] == "eval" || w[0] == "source" || w[0] == "." || w[0] == "alias") {
 				t.redefine = true
+			}
+			if len(words) > 0 && (len(n.Assigns) > 0 || len(w) == 0 || !runsNoFile(w) ||
+				slices.ContainsFunc(words[:len(words)-len(w)], func(a string) bool {
+					return strings.Contains(a, "=") || path.Base(a) == "env" || path.Base(a) == "xargs"
+				})) {
+				t.runsNone = false // VAR=x before a command (GIT_SSH_COMMAND=...), env, xargs, or a command that may run a file
 			}
 		}
 		return true
@@ -108,16 +122,10 @@ func dataText(line string, f *syntax.File) string {
 		}
 		bodies = append(bodies, d)
 	}
-	// A body written to a file the rest of the line names may run there. Keeping one body can name another's file,
-	// so repeat until nothing changes.
-	for i := 0; i < len(bodies); {
-		if runsFile(cut(line, bodies), bodies[i].files) {
-			bodies = slices.Delete(bodies, i, i+1)
-			i = 0
-		} else {
-			i++
-		}
-	}
+	// A body written to a file may run later on the line, unless nothing on it runs a file.
+	bodies = slices.DeleteFunc(bodies, func(d dataBody) bool {
+		return len(d.files) > 0 && (!t.runsNone || slices.ContainsFunc(d.files, runsUnnamed))
+	})
 	return cut(line, bodies)
 }
 
@@ -145,92 +153,50 @@ func cut(line string, bodies []dataBody) string {
 	return b.String()
 }
 
-// fileReaders read, list, write or send the files they name and run none of them. filePrinters print the file, so
-// they count only when their output can't reach a shell.
-var (
-	fileReaders = map[string]bool{"wc": true, "ls": true, "stat": true, "file": true, "rm": true, "mkdir": true,
-		"touch": true, "tee": true, "cmp": true, "du": true, "shasum": true, "sha256sum": true, "md5": true} // not open: it runs a .command file
-	filePrinters = map[string]bool{"cat": true, "head": true, "tail": true, "less": true, "grep": true, "rg": true,
-		"diff": true, "sort": true, "uniq": true, "jq": true}
-	gitFileCmds = map[string]bool{"add": true, "commit": true, "status": true, "rm": true, "restore": true}
-)
+// noFileCmds run no file the line may have written: they read, list, print, move or send files and text.
+var noFileCmds = map[string]bool{"cd": true, "pwd": true, "mkdir": true, "touch": true, "rm": true, "rmdir": true,
+	"ls": true, "wc": true, "cat": true, "tee": true, "echo": true, "printf": true, "head": true, "tail": true,
+	"grep": true, "rg": true, "sort": true, "uniq": true, "diff": true, "cmp": true, "stat": true, "file": true,
+	"du": true, "true": true, "false": true, ":": true, "test": true, "[": true, "sleep": true, "date": true,
+	"basename": true, "dirname": true, "realpath": true, "shasum": true, "sha256sum": true, "md5": true, "jq": true}
 
-// readsOnly reports whether st only reads, lists or sends the files it names: then naming a file runs nothing.
-func (t *lineTree) readsOnly(st *syntax.Stmt, w []string) bool {
-	switch name := path.Base(w[0]); {
-	case fileReaders[name]:
-		return true
-	case name == "git":
-		return gitFileCmds[gitSubcommand(w)]
-	case name == "gh":
-		return len(w) > 1 && (w[1] == "pr" || w[1] == "issue" || w[1] == "release")
-	case filePrinters[name]:
-		t.files = nil
-		return t.printsAsData(st) // cat t.sh | sh runs it
-	}
-	return false
-}
+// gitNoFileCmds are built-in git commands; the hooks they run are files runsUnnamed keeps.
+var gitNoFileCmds = map[string]bool{"add": true, "status": true, "diff": true, "log": true, "show": true,
+	"commit": true, "tag": true, "notes": true, "rm": true, "mv": true, "restore": true, "switch": true,
+	"checkout": true, "branch": true, "fetch": true, "pull": true, "push": true, "stash": true, "reset": true,
+	"rev-parse": true, "ls-files": true, "hash-object": true, "interpret-trailers": true, "stripspace": true}
 
-// runsFile reports whether the line may run one of files: tools run it without being told its name, or text (the
-// line without the data bodies) names it somewhere other than a write to it or an argument of a command that only
-// reads it. Files go by base name, so a cd between writing and running one doesn't hide it.
-func runsFile(text string, files []string) bool {
-	f, err := parse(text)
-	if err != nil {
-		return true
+// runsNoFile reports whether command w runs no file. A path (./cat) may be any program; git -c may set a command
+// git runs (core.sshCommand, alias.x=!sh).
+func runsNoFile(w []string) bool {
+	if strings.Contains(w[0], "/") {
+		return false
 	}
-	t, _ := newLineTree(f)
-	src := func(n syntax.Node) string { return text[n.Pos().Offset():n.End().Offset()] }
-	for _, file := range files {
-		if file == "/dev/null" {
-			continue
-		}
-		name := path.Base(file)
-		if runsUnnamed(name) {
-			return true
-		}
-		named := strings.Count(text, name)
-		syntax.Walk(f, func(n syntax.Node) bool {
-			st, ok := n.(*syntax.Stmt)
-			if !ok {
-				return true
-			}
-			for _, r := range st.Redirs {
-				switch r.Op {
-				case syntax.RdrOut, syntax.AppOut, syntax.RdrClob, syntax.RdrAll, syntax.AppAll:
-					named -= strings.Count(src(r.Word), name) // a write
-				}
-			}
-			if call, ok := st.Cmd.(*syntax.CallExpr); ok && !t.redefine {
-				if w := stripWrappers(callWords(call)); len(w) > 0 && !t.funcs[w[0]] && t.readsOnly(st, w) {
-					for _, a := range call.Args {
-						if !runsInWord(a) { // wc "$(sh t.sh)" runs it
-							named -= strings.Count(src(a), name)
-						}
-					}
-				}
-			}
-			return true
+	switch w[0] {
+	case "git":
+		return gitNoFileCmds[gitSubcommand(w)] && !slices.ContainsFunc(w[1:], func(a string) bool {
+			return a == "-c" || a == "--config-env" || a == "--exec-path" || strings.HasPrefix(a, "--exec-path=")
 		})
-		if named > 0 {
-			return true
-		}
+	case "gh":
+		return len(w) > 1 && ghTextCmds[w[1]]
 	}
-	return false
+	return noFileCmds[w[0]]
 }
 
-// runsUnnamed reports whether tools run a file of this name as shell without being given it: make, just, rake and
-// task read their recipe files, npm its package.json scripts, docker its Dockerfile, a shell its dotfiles, git its
-// hooks.
-func runsUnnamed(name string) bool {
+// runsUnnamed reports whether tools may run file as shell without being given its name: make, just, rake and task
+// read their recipe files, npm its package.json scripts, docker its Dockerfile, a shell its dotfiles, git its hooks.
+// A name paws can't read ($F) may be any of them.
+func runsUnnamed(file string) bool {
+	name := path.Base(file)
 	switch name {
 	case "Makefile", "makefile", "GNUmakefile", "Justfile", "justfile", "Rakefile", "Taskfile.yml", "Taskfile.yaml",
 		"package.json", "Dockerfile", "Containerfile", "docker-compose.yml", "docker-compose.yaml", "compose.yml",
-		"compose.yaml", "Procfile":
+		"compose.yaml", "Procfile", "applypatch-msg", "pre-applypatch", "post-applypatch", "pre-commit",
+		"pre-merge-commit", "prepare-commit-msg", "commit-msg", "post-commit", "pre-rebase", "post-checkout",
+		"post-merge", "pre-push", "post-rewrite", "reference-transaction", "pre-auto-gc", "fsmonitor-watchman":
 		return true
 	}
-	return strings.HasPrefix(name, ".") || strings.HasSuffix(name, ".mk") ||
-		slices.Contains([]string{"pre-commit", "pre-push", "commit-msg", "post-commit", "post-checkout", "post-merge"}, name)
+	return strings.HasPrefix(name, ".") || strings.HasSuffix(name, ".mk") || strings.ContainsAny(name, "$`*?[")
 }
 
 // bodyCuts are the parts of a heredoc's body that are plain text. $( ) in an unquoted body runs, so it stays.
@@ -388,19 +354,6 @@ func output(st *syntax.Stmt) (kind int, file string) {
 	}
 	d := fds["1"]
 	return d.kind, d.file
-}
-
-// runsInWord reports whether a word runs commands of its own: $( ), ` `, <( ) or >( ).
-func runsInWord(w *syntax.Word) bool {
-	runs := false
-	syntax.Walk(w, func(n syntax.Node) bool {
-		switch n.(type) {
-		case *syntax.CmdSubst, *syntax.ProcSubst:
-			runs = true
-		}
-		return !runs
-	})
-	return runs
 }
 
 func hasProcSubst(w *syntax.Word) bool {

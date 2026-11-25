@@ -35,6 +35,7 @@ func TestHeredocBodyNoShellRuns(t *testing.T) {
 		"cat <<'A' > a.md && cat <<'B' > b.md\ngit push\nA\nrm -rf build\nB",
 		"git tag -a v1 -F - <<'EOF'\ngit push\nrm -rf build\nEOF",
 		"gh api repos/o/r/issues -F body=@- <<'EOF'\ngit push\nrm -rf build\nEOF",
+		"gh pr create -t title --body-file - <<'EOF'\ngit push\nrm -rf build\nEOF",
 		"cat > notes.md <<'EOF'\nrm -rf build\nEOF\ngit add notes.md && wc -l notes.md",
 	} {
 		if rm.Matches("Bash", line) || commit.Matches("Bash", line) || push.Matches("Bash", line) {
@@ -135,6 +136,9 @@ func TestHeredocBodyAShellRuns(t *testing.T) {
 		"cat > t.sh <<'EOF'\nrm -rf build\nEOF\ngit diff --ext-diff",
 		"gh api repos/o/r --jq \"$(cat <<'EOF'\nrm -rf build\nEOF\n)\"",
 		"gh pr list -q \"$(cat <<'EOF'\nrm -rf build\nEOF\n)\"",
+		"gh api repos/o/r -q\"$(cat <<'EOF'\nrm -rf build\nEOF\n)\"",
+		"gh api repos/o/r -t\"$(cat <<'EOF'\nrm -rf build\nEOF\n)\"",
+		"echo \"${script:=$(cat <<'EOF'\nrm -rf build\nEOF\n)}\"; $script",
 		"T=$S/t.sh; cat > $T <<'EOF'\nrm -rf build\nEOF\n$T",
 		"cat > t.sh <<'EOF'\nrm -rf build\nEOF\ncp t.sh bin/run && bin/run",
 		"cat > t.sh <<'EOF'\nrm -rf build\nEOF\nbash -c 'sh t.sh'",

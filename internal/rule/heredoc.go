@@ -68,10 +68,15 @@ func plainWrappers(words, w []string) bool {
 }
 
 // ghSendsText reports whether gh command w only sends text: a built-in text command with no --jq or --template,
-// which gh evaluates as a program.
+// which gh evaluates as a program. -t is --template on api, list, view and status, and --title elsewhere.
 func ghSendsText(w []string) bool {
-	return len(w) > 1 && ghTextCmds[w[1]] && !slices.ContainsFunc(w[2:], func(a string) bool {
-		return a == "-q" || a == "-t" || strings.HasPrefix(a, "--jq") || strings.HasPrefix(a, "--template")
+	if len(w) < 2 || !ghTextCmds[w[1]] {
+		return false
+	}
+	tmpl := w[1] == "api" || len(w) > 2 && (w[2] == "list" || w[2] == "view" || w[2] == "status")
+	return !slices.ContainsFunc(w[2:], func(a string) bool {
+		return strings.HasPrefix(a, "-q") || strings.HasPrefix(a, "--jq") || strings.HasPrefix(a, "--template") ||
+			tmpl && strings.HasPrefix(a, "-t")
 	})
 }
 
@@ -321,8 +326,15 @@ func (t *lineTree) printsAsData(st *syntax.Stmt) bool {
 				return t.takesAsData(pipeEnd(p.Y, false))
 			}
 		case *syntax.CmdSubst, *syntax.ProcSubst: // an argument (or a file) of the command around it
-			outer := enclosingStmt(t.up[p], t.up)
-			return outer != nil && t.takesAsData(outer)
+			for n := t.up[p]; n != nil; n = t.up[n] {
+				switch n.(type) {
+				case *syntax.ParamExp:
+					return false // "${script:=$(cat <<EOF)}" stores it in a variable the line may run
+				case *syntax.Stmt:
+					return t.takesAsData(n.(*syntax.Stmt))
+				}
+			}
+			return false
 		case *syntax.FuncDecl:
 			return false // the caller's output: paws doesn't follow it
 		}

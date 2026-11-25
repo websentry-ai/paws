@@ -42,7 +42,7 @@ func sendsText(w []string) bool {
 		// -e opens the editor on the text, and -c may set it (core.editor=sh), so either keeps the body.
 		return gitTextCmds[gitSubcommand(w)] && !slices.ContainsFunc(w[1:], gitRunsEditor)
 	case "gh":
-		return len(w) > 1 && ghTextCmds[w[1]]
+		return ghSendsText(w)
 	}
 	return false
 }
@@ -64,6 +64,14 @@ func gitRunsEditor(a string) bool {
 func plainWrappers(words, w []string) bool {
 	return !slices.ContainsFunc(words[:len(words)-len(w)], func(a string) bool {
 		return strings.Contains(a, "=") || strings.Contains(a, "/") || a == "env" || a == "xargs"
+	})
+}
+
+// ghSendsText reports whether gh command w only sends text: a built-in text command with no --jq or --template,
+// which gh evaluates as a program.
+func ghSendsText(w []string) bool {
+	return len(w) > 1 && ghTextCmds[w[1]] && !slices.ContainsFunc(w[2:], func(a string) bool {
+		return a == "-q" || a == "-t" || strings.HasPrefix(a, "--jq") || strings.HasPrefix(a, "--template")
 	})
 }
 
@@ -182,11 +190,10 @@ var noFileCmds = map[string]bool{"cd": true, "pwd": true, "mkdir": true, "touch"
 	"realpath": true, "shasum": true, "sha256sum": true, "md5": true}
 
 // gitNoFileCmds are built-in git commands; the hooks they run are files runsUnnamed keeps. Not fetch, pull or push:
-// --upload-pack, --receive-pack and --exec run a program.
-var gitNoFileCmds = map[string]bool{"add": true, "status": true, "diff": true, "log": true, "show": true,
-	"commit": true, "tag": true, "notes": true, "rm": true, "mv": true, "restore": true, "switch": true,
-	"checkout": true, "branch": true, "stash": true, "reset": true,
-	"rev-parse": true, "ls-files": true, "interpret-trailers": true, "stripspace": true}
+// --upload-pack, --receive-pack and --exec run a program. Not diff, log or show: --ext-diff and --textconv run one.
+var gitNoFileCmds = map[string]bool{"add": true, "status": true, "commit": true, "tag": true, "notes": true,
+	"rm": true, "mv": true, "restore": true, "switch": true, "checkout": true, "branch": true, "stash": true,
+	"reset": true, "rev-parse": true, "ls-files": true, "interpret-trailers": true, "stripspace": true}
 
 // runsNoFile reports whether command w runs no file. A path (./cat) may be any program; git -c may set a command
 // git runs (core.sshCommand, alias.x=!sh).
@@ -198,7 +205,7 @@ func runsNoFile(w []string) bool {
 	case "git":
 		return gitNoFileCmds[gitSubcommand(w)] && !slices.ContainsFunc(w[1:], gitRunsEditor)
 	case "gh":
-		return len(w) > 1 && ghTextCmds[w[1]]
+		return ghSendsText(w)
 	}
 	return noFileCmds[w[0]]
 }
@@ -227,7 +234,8 @@ func bodyCuts(line string, r *syntax.Redirect) [][2]int {
 	if start < 0 || end > len(line) || start > end {
 		return nil
 	}
-	if nl := strings.LastIndexByte(line[start:end], '\n'); nl >= 0 && strings.TrimLeft(line[start+nl+1:end], "\t") == wordString(r.Word) {
+	nl := strings.LastIndexByte(line[start:end], '\n')
+	if nl >= 0 && strings.TrimLeft(line[start+nl+1:end], "\t") == wordString(r.Word) {
 		end = start + nl + 1
 	}
 	var cuts [][2]int

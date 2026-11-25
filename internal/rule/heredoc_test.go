@@ -27,6 +27,9 @@ func TestHeredocBodyNoShellRuns(t *testing.T) {
 		"echo \"$(cat <<'EOF'\ngit push\nrm -rf build\nEOF\n)\" > notes.md",
 		"if true; then cat <<'EOF' > notes.md\ngit push\nrm -rf build\nEOF\nfi",
 		"cat <<'A' > a.md && cat <<'B' > b.md\ngit push\nA\nrm -rf build\nB",
+		"cat > >(sh) > notes.md <<'EOF'\ngit push\nrm -rf build\nEOF",
+		"git tag -a v1 -F - <<'EOF'\ngit push\nrm -rf build\nEOF",
+		"gh api repos/o/r/issues -F body=@- <<'EOF'\ngit push\nrm -rf build\nEOF",
 		"cat > notes.md <<'EOF'\nrm -rf build\nEOF\ngit add notes.md && wc -l notes.md",
 	} {
 		if rm.Matches("Bash", line) || commit.Matches("Bash", line) || push.Matches("Bash", line) {
@@ -80,6 +83,9 @@ func TestHeredocBodyAShellRuns(t *testing.T) {
 		"eval \"$(cat <<'EOF'\nrm -rf build\nEOF\n)\"",
 		"bash <(cat <<'EOF'\nrm -rf build\nEOF\n)",
 		"cat <<'EOF' > >(bash)\nrm -rf build\nEOF",
+		"cat > /tmp/log > >(sh) <<'EOF'\nrm -rf build\nEOF",
+		"git -c 'alias.run=!sh' run <<'EOF'\nrm -rf build\nEOF",
+		"gh deploy <<'EOF'\nrm -rf build\nEOF", // a gh alias may run a shell
 		"script=$(cat <<'EOF'\nrm -rf build\nEOF\n)",
 		"f() { cat <<'EOF'\nrm -rf build\nEOF\n}; f | sh",
 		"docker exec -i box sh <<'EOF'\nrm -rf build\nEOF",

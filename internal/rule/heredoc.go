@@ -20,8 +20,25 @@ import (
 // ssh), or to a command paws doesn't know. So does a body written to a file the line then runs, sources or makes
 // executable (cat > t.sh <<EOF ... EOF; chmod +x t.sh; ./t.sh). In an unquoted body, $( ) still runs, so it stays too.
 
-// textSenders store or send the text they read, on stdin or as an argument, and run none of it.
-var textSenders = map[string]bool{"git": true, "gh": true}
+// Built-in git and gh commands that store or send the text they read, on stdin or as an argument, and run none of
+// it. An alias can't take a built-in's name, so `git -c alias.run='!sh' run` and a gh shell alias stay out.
+var (
+	gitTextCmds = map[string]bool{"commit": true, "tag": true, "notes": true, "apply": true, "am": true,
+		"hash-object": true, "interpret-trailers": true, "stripspace": true}
+	ghTextCmds = map[string]bool{"pr": true, "issue": true, "api": true, "release": true, "gist": true,
+		"label": true, "secret": true, "variable": true}
+)
+
+// sendsText reports whether the command w stores or sends what it reads.
+func sendsText(w []string) bool {
+	switch path.Base(w[0]) {
+	case "git":
+		return gitTextCmds[gitSubcommand(w)]
+	case "gh":
+		return len(w) > 1 && ghTextCmds[w[1]]
+	}
+	return false
+}
 
 // textCopiers print the text they read, so it goes wherever their output goes.
 var textCopiers = map[string]bool{"cat": true, "tee": true, "echo": true, "printf": true}
@@ -152,7 +169,7 @@ func (t lineTree) takesAsData(st *syntax.Stmt) bool {
 		return false // xargs git <<EOF: the body becomes the command's arguments
 	}
 	switch name := path.Base(w[0]); {
-	case textSenders[name]:
+	case sendsText(w):
 		return true
 	case name == "tee" && slices.ContainsFunc(w[1:], t.runs):
 		return false // tee t.sh <<EOF ... EOF; bash t.sh
@@ -189,7 +206,8 @@ func (t lineTree) printsAsData(st *syntax.Stmt) bool {
 	}
 }
 
-// output reports whether st redirects its output, and to which file: "" for a process (> >(sh)).
+// output reports whether st redirects its output, and to which file: "" for a process (> >(sh)). The last redirect
+// wins, as in the shell.
 func output(st *syntax.Stmt) (file string, ok bool) {
 	for _, r := range st.Redirs {
 		switch r.Op {
@@ -197,15 +215,15 @@ func output(st *syntax.Stmt) (file string, ok bool) {
 			if r.N != nil && r.N.Value != "1" || r.Word == nil {
 				continue
 			}
+			file, ok = wordString(r.Word), true
 			for _, p := range r.Word.Parts {
-				if _, ok := p.(*syntax.ProcSubst); ok {
-					return "", true
+				if _, isProc := p.(*syntax.ProcSubst); isProc {
+					file = ""
 				}
 			}
-			return wordString(r.Word), true
 		}
 	}
-	return "", false
+	return file, ok
 }
 
 // enclosingStmt is n when it is a statement, else the nearest statement around it.

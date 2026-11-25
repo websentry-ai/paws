@@ -25,8 +25,8 @@ import (
 // Built-in git and gh commands that store or send the text they read, on stdin or as an argument, and run none of
 // it. An alias can't take a built-in's name, so `git -c alias.run='!sh' run` and a gh shell alias stay out.
 var (
-	gitTextCmds = map[string]bool{"commit": true, "tag": true, "notes": true, "apply": true, "am": true,
-		"hash-object": true, "interpret-trailers": true, "stripspace": true}
+	gitTextCmds = map[string]bool{"commit": true, "tag": true, "notes": true, "hash-object": true,
+		"interpret-trailers": true, "stripspace": true} // not apply or am: a patch can write a script
 	ghTextCmds = map[string]bool{"pr": true, "issue": true, "api": true, "release": true, "gist": true,
 		"label": true, "secret": true, "variable": true}
 )
@@ -60,8 +60,8 @@ type dataBody struct {
 	files []string
 }
 
-// dataText is line without the heredoc bodies that no shell runs. f is line parsed.
-func dataText(line string, f *syntax.File) string {
+// newLineTree reads f, and returns it with the statements that read a heredoc.
+func newLineTree(f *syntax.File) (*lineTree, []*syntax.Stmt) {
 	t := &lineTree{up: map[syntax.Node]syntax.Node{}, funcs: map[string]bool{}}
 	var stack []syntax.Node
 	var docs []*syntax.Stmt
@@ -88,6 +88,12 @@ func dataText(line string, f *syntax.File) string {
 		}
 		return true
 	})
+	return t, docs
+}
+
+// dataText is line without the heredoc bodies that no shell runs. f is line parsed.
+func dataText(line string, f *syntax.File) string {
+	t, docs := newLineTree(f)
 	var bodies []dataBody
 	for _, st := range docs {
 		t.files = nil
@@ -139,20 +145,41 @@ func cut(line string, bodies []dataBody) string {
 	return b.String()
 }
 
-// fileReaders read, list, copy into place or send the files they name, and run none of them.
-var fileReaders = map[string]bool{"cat": true, "head": true, "tail": true, "wc": true, "ls": true, "stat": true,
-	"file": true, "less": true, "grep": true, "rg": true, "diff": true, "cmp": true, "rm": true, "mkdir": true,
-	"touch": true, "echo": true, "printf": true, "tee": true, "git": true, "gh": true, "jq": true, "sort": true,
-	"uniq": true, "du": true, "shasum": true, "sha256sum": true, "md5": true, "open": true}
+// fileReaders read, list, write or send the files they name and run none of them. filePrinters print the file, so
+// they count only when their output can't reach a shell.
+var (
+	fileReaders = map[string]bool{"wc": true, "ls": true, "stat": true, "file": true, "rm": true, "mkdir": true,
+		"touch": true, "tee": true, "cmp": true, "du": true, "shasum": true, "sha256sum": true, "md5": true, "open": true}
+	filePrinters = map[string]bool{"cat": true, "head": true, "tail": true, "less": true, "grep": true, "rg": true,
+		"diff": true, "sort": true, "uniq": true, "jq": true}
+	gitFileCmds = map[string]bool{"add": true, "commit": true, "status": true, "rm": true, "restore": true}
+)
+
+// readsOnly reports whether st only reads, lists or sends the files it names: then naming a file runs nothing.
+func (t *lineTree) readsOnly(st *syntax.Stmt, w []string) bool {
+	switch name := path.Base(w[0]); {
+	case fileReaders[name]:
+		return true
+	case name == "git":
+		return gitFileCmds[gitSubcommand(w)]
+	case name == "gh":
+		return len(w) > 1 && (w[1] == "pr" || w[1] == "issue" || w[1] == "release")
+	case filePrinters[name]:
+		t.files = nil
+		return t.printsAsData(st) // cat t.sh | sh runs it
+	}
+	return false
+}
 
 // runsFile reports whether the line may run one of files: tools run it without being told its name, or text (the
-// line without the data bodies) names it somewhere other than a write to it or an argument of a fileReader.
-// Files go by base name, so a cd between writing and running one doesn't hide it.
+// line without the data bodies) names it somewhere other than a write to it or an argument of a command that only
+// reads it. Files go by base name, so a cd between writing and running one doesn't hide it.
 func runsFile(text string, files []string) bool {
 	f, err := parse(text)
 	if err != nil {
 		return true
 	}
+	t, _ := newLineTree(f)
 	src := func(n syntax.Node) string { return text[n.Pos().Offset():n.End().Offset()] }
 	for _, file := range files {
 		if file == "/dev/null" {
@@ -174,8 +201,8 @@ func runsFile(text string, files []string) bool {
 					named -= strings.Count(src(r.Word), name) // a write
 				}
 			}
-			if call, ok := st.Cmd.(*syntax.CallExpr); ok {
-				if w := stripWrappers(callWords(call)); len(w) > 0 && fileReaders[path.Base(w[0])] {
+			if call, ok := st.Cmd.(*syntax.CallExpr); ok && !t.redefine {
+				if w := stripWrappers(callWords(call)); len(w) > 0 && !t.funcs[w[0]] && t.readsOnly(st, w) {
 					for _, a := range call.Args {
 						named -= strings.Count(src(a), name)
 					}

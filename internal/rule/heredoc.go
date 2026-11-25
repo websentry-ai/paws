@@ -18,7 +18,9 @@ import (
 // it (cat, tee, echo, printf) to a file, to the terminal, or on to such a command, through a pipe or a $( ) argument.
 // Every other body stays: one fed to a shell (bash <<EOF, cat <<EOF | sh), to an interpreter (psql, python, node,
 // ssh), or to a command paws doesn't know. So does a body written to a file the line then runs, sources, makes
-// executable or hands to an interpreter (cat > t.sh <<EOF ... EOF; chmod +x t.sh; ./t.sh). In an unquoted body, $( ) still runs, so it stays too.
+// executable or hands to an interpreter (cat > t.sh <<EOF ... EOF; chmod +x t.sh; ./t.sh). So does every body on a
+// line that defines a function of the reader's name, or runs eval, source or alias: the name may not be the program.
+// In an unquoted body, $( ) still runs, so it stays too.
 
 // Built-in git and gh commands that store or send the text they read, on stdin or as an argument, and run none of
 // it. An alias can't take a built-in's name, so `git -c alias.run='!sh' run` and a gh shell alias stay out.
@@ -43,15 +45,17 @@ func sendsText(w []string) bool {
 // textCopiers print the text they read, so it goes wherever their output goes.
 var textCopiers = map[string]bool{"cat": true, "tee": true, "echo": true, "printf": true}
 
-// lineTree is a parsed line: each node's parent, and the files the line may run.
+// lineTree is a parsed line: each node's parent, the files the line may run, and the command names it may redefine.
 type lineTree struct {
-	up  map[syntax.Node]syntax.Node
-	run map[string]bool
+	up       map[syntax.Node]syntax.Node
+	run      map[string]bool
+	funcs    map[string]bool // cat() { sh; } makes cat run its input
+	redefine bool            // eval, source or alias may define any function or alias
 }
 
 // dataText is line without the heredoc bodies that no shell runs. f is line parsed.
 func dataText(line string, f *syntax.File) string {
-	t := lineTree{up: map[syntax.Node]syntax.Node{}, run: map[string]bool{}}
+	t := lineTree{up: map[syntax.Node]syntax.Node{}, run: map[string]bool{}, funcs: map[string]bool{}}
 	var stack []syntax.Node
 	var docs []*syntax.Stmt
 	syntax.Walk(f, func(n syntax.Node) bool {
@@ -64,6 +68,8 @@ func dataText(line string, f *syntax.File) string {
 		}
 		stack = append(stack, n)
 		switch n := n.(type) {
+		case *syntax.FuncDecl:
+			t.funcs[n.Name.Value] = true
 		case *syntax.Stmt:
 			if slices.ContainsFunc(n.Redirs, isHeredoc) {
 				docs = append(docs, n)
@@ -77,7 +83,11 @@ func dataText(line string, f *syntax.File) string {
 					}
 				}
 			}
-			t.noteRuns(stripWrappers(callWords(n)), stdin)
+			w := stripWrappers(callWords(n))
+			t.noteRuns(w, stdin)
+			if len(w) > 0 && (w[0] == "eval" || w[0] == "source" || w[0] == "." || w[0] == "alias") {
+				t.redefine = true
+			}
 		}
 		return true
 	})
@@ -186,6 +196,9 @@ func (t lineTree) takesAsData(st *syntax.Stmt) bool {
 	if slices.ContainsFunc(call.Args, hasProcSubst) {
 		return false // tee >(sh) <<EOF
 	}
+	if t.redefine || t.funcs[w[0]] {
+		return false // the name may not be the program paws knows
+	}
 	switch name := path.Base(w[0]); {
 	case sendsText(w):
 		return true
@@ -254,7 +267,8 @@ func output(st *syntax.Stmt) (kind int, file string) {
 		switch r.Op {
 		case syntax.RdrOut, syntax.AppOut, syntax.RdrClob, syntax.RdrAll, syntax.AppAll:
 			d = outDest{outFile, wordString(r.Word)}
-			if hasProcSubst(r.Word) { // > >(sh)
+			if hasProcSubst(r.Word) || strings.HasPrefix(d.file, "/dev/") && d.file != "/dev/null" ||
+				strings.HasPrefix(d.file, "/proc/") { // > >(sh), > /dev/stdout | sh
 				d = outDest{outOther, ""}
 			}
 			if r.Op == syntax.RdrAll || r.Op == syntax.AppAll {

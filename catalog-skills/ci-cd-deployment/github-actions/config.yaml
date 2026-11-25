@@ -1,0 +1,10 @@
+# Filled into SKILL.md at install: each KEY placeholder gets its value. Angle-bracket values are
+# org settings with no safe default; SKILL.md "Defaults" says what applies until set.
+placeholders:
+  AGENT_ATTRIBUTION_CONVENTION: '[deployed-by: ai-agent]'
+  DEPLOY_WINDOWS: business hours Tue–Thu (owner's timezone)
+  DEPLOY_WORKFLOW_FILE: deploy.yml
+  ENV_PROMOTION_ORDER: dev → staging → prod
+  FREEZE_CALENDAR: <freeze-calendar>
+  PROD_ENVIRONMENT_NAME: production
+  ROLLBACK_MECHANISM: a re-dispatch of the deploy workflow with ref set to the previous successful prod run's headSha

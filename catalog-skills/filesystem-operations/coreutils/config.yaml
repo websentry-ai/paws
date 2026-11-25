@@ -1,0 +1,5 @@
+# Filled into SKILL.md at install: each KEY placeholder gets its value. Angle-bracket values are
+# org settings with no safe default; SKILL.md "Defaults" says what applies until set.
+placeholders:
+  DELETION_POLICY: the list-then-delete policy
+  TRASH_COMMAND: <trash-command>

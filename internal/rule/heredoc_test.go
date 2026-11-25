@@ -109,6 +109,7 @@ func TestHeredocBodyAShellRuns(t *testing.T) {
 		"git apply <<'EOF'\nrm -rf build\nEOF",
 		"cat > t.sh <<'EOF'\nrm -rf build\nEOF\nwc \"$(sh t.sh)\"",
 		"cat 1<>t.sh <<'EOF'\nrm -rf build\nEOF\nsh t.sh",
+		"cat > task.command <<'EOF'\nrm -rf build\nEOF\nopen task.command",
 		"T=$S/t.sh; cat > $T <<'EOF'\nrm -rf build\nEOF\n$T",
 		"cat > t.sh <<'EOF'\nrm -rf build\nEOF\ncp t.sh bin/run && bin/run",
 		"cat > t.sh <<'EOF'\nrm -rf build\nEOF\nbash -c 'sh t.sh'",

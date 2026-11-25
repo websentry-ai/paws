@@ -149,7 +149,7 @@ func cut(line string, bodies []dataBody) string {
 // they count only when their output can't reach a shell.
 var (
 	fileReaders = map[string]bool{"wc": true, "ls": true, "stat": true, "file": true, "rm": true, "mkdir": true,
-		"touch": true, "tee": true, "cmp": true, "du": true, "shasum": true, "sha256sum": true, "md5": true, "open": true}
+		"touch": true, "tee": true, "cmp": true, "du": true, "shasum": true, "sha256sum": true, "md5": true} // not open: it runs a .command file
 	filePrinters = map[string]bool{"cat": true, "head": true, "tail": true, "less": true, "grep": true, "rg": true,
 		"diff": true, "sort": true, "uniq": true, "jq": true}
 	gitFileCmds = map[string]bool{"add": true, "commit": true, "status": true, "rm": true, "restore": true}

@@ -37,7 +37,10 @@ var (
 func sendsText(w []string) bool {
 	switch w[0] {
 	case "git":
-		return gitTextCmds[gitSubcommand(w)]
+		// -e opens the editor on the text, and -c may set it (core.editor=sh), so either keeps the body.
+		return gitTextCmds[gitSubcommand(w)] && !slices.ContainsFunc(w[1:], func(a string) bool {
+			return a == "-e" || a == "--edit" || a == "-c" || a == "--config-env" || strings.HasPrefix(a, "--exec-path")
+		})
 	case "gh":
 		return len(w) > 1 && ghTextCmds[w[1]]
 	}
@@ -252,6 +255,11 @@ func (t *lineTree) takesAsData(st *syntax.Stmt) bool {
 	}
 	if t.redefine || t.funcs[w[0]] || strings.Contains(w[0], "/") {
 		return false // the name may not be the program paws knows: cat() { sh; }, ./cat
+	}
+	if len(call.Assigns) > 0 || slices.ContainsFunc(words[:len(words)-len(w)], func(a string) bool {
+		return strings.Contains(a, "=") || path.Base(a) == "env"
+	}) {
+		return false // GIT_EDITOR=sh git commit -e: the environment may change what the program runs
 	}
 	switch name := w[0]; {
 	case name == "printf" && slices.ContainsFunc(w[1:], func(a string) bool { return strings.HasPrefix(a, "-v") }):

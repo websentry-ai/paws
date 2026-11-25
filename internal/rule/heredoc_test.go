@@ -114,6 +114,10 @@ func TestHeredocBodyAShellRuns(t *testing.T) {
 		"cat > notes.md <<'EOF'\nrm -rf build\nEOF\nls | xargs", // xargs alone runs echo
 		"./cat <<'EOF'\nrm -rf build\nEOF",
 		"/tmp/git commit -F - <<'EOF'\nrm -rf build\nEOF",
+		"GIT_EDITOR=sh git commit -e -F - <<'EOF'\nrm -rf build\nEOF",
+		"git commit --edit -F - <<'EOF'\nrm -rf build\nEOF",
+		"env GIT_EDITOR=sh git commit -F - <<'EOF'\nrm -rf build\nEOF",
+		"git -c core.editor=sh commit -e -m \"$(cat <<'EOF'\nrm -rf build\nEOF\n)\"",
 		"printf -v script '%s' \"$(cat <<'EOF'\nrm -rf build\nEOF\n)\"; $script",
 		"cat > notes.md <<'EOF'\nrm -rf build\nEOF\nGIT_SSH_COMMAND='sh notes.md' git push",
 		"cat > notes.md <<'EOF'\nrm -rf build\nEOF\ngit -c core.sshCommand='sh notes.md' push",

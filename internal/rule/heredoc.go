@@ -292,11 +292,16 @@ func (t *lineTree) takesAsData(st *syntax.Stmt) bool {
 	case sendsText(w):
 		return t.printsAsData(st) // git stripspace <<EOF | sh prints the body
 	case name == "tee":
+		opts := true
 		for _, a := range w[1:] {
 			if strings.HasPrefix(a, "/dev/") && a != "/dev/null" || strings.HasPrefix(a, "/proc/") {
 				return false // tee /dev/fd/3 3> >(sh)
 			}
-			if !strings.HasPrefix(a, "-") {
+			if opts && a == "--" {
+				opts = false // tee -- -script: every later word is a file name
+				continue
+			}
+			if !opts || !strings.HasPrefix(a, "-") {
 				t.files = append(t.files, a)
 			}
 		}

@@ -159,6 +159,7 @@ func TestHeredocBodyAShellRuns(t *testing.T) {
 		"cat > \"$S/t.sh\" <<'EOF'\nrm -rf build\nEOF\nbash \"$S/t.sh\"",
 		"cat <<'EOF' > t.sh; . t.sh\nrm -rf build\nEOF",
 		"tee t.sh <<'EOF' >/dev/null\nrm -rf build\nEOF\nsh t.sh",
+		"tee -- -script <<'EOF' >/dev/null\nrm -rf build\nEOF\nsh ./-script",
 		"cat > $S/bin/run.sh <<'EOF'\nrm -rf build\nEOF\n$S/bin/run.sh",
 		"cat > t.sh <<'EOF'\nrm -rf build\nEOF\n./t.sh",
 		"cat > ./t.sh <<'EOF'\nrm -rf build\nEOF\nbash t.sh",

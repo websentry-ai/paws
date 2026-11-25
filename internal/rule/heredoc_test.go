@@ -92,6 +92,8 @@ func TestHeredocBodyAShellRuns(t *testing.T) {
 		"cat <<'EOF' > t.sh; . t.sh\nrm -rf build\nEOF",
 		"tee t.sh <<'EOF' >/dev/null\nrm -rf build\nEOF\nsh t.sh",
 		"cat > $S/bin/run.sh <<'EOF'\nrm -rf build\nEOF\n$S/bin/run.sh",
+		"cat > t.sh <<'EOF'\nrm -rf build\nEOF\n./t.sh",
+		"cat > ./t.sh <<'EOF'\nrm -rf build\nEOF\nbash t.sh",
 		// $( ) in an unquoted body runs, even when the body itself is only written to a file.
 		"cat > notes.md <<EOF\nbuilt at $(rm -rf build)\nEOF",
 	} {
@@ -101,6 +103,12 @@ func TestHeredocBodyAShellRuns(t *testing.T) {
 	}
 	if !push.Matches("Bash", "bash <<'EOF'\ngit push\nEOF") || !push.Matches("Bash", "cat <<'EOF' | sh\ngit push\nEOF") {
 		t.Error("git push in a body fed to a shell should still fire pre-push")
+	}
+	// xargs makes the body the arguments of the command it runs.
+	for _, line := range []string{"xargs git <<'EOF'\npush origin main\nEOF", "cat <<'EOF' | xargs -n3 git\npush origin main\nEOF"} {
+		if !regexRule(t, `(^|\n)push origin`).Matches("Bash", line) {
+			t.Errorf("%q: the body is the arguments xargs passes to git", line)
+		}
 	}
 
 	// Interpreters keep their body visible: a rule may name the SQL or code inside.

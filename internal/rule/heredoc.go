@@ -118,18 +118,21 @@ func isHeredoc(r *syntax.Redirect) bool {
 }
 
 // noteRuns records the files a command may run: the command itself, a script a shell or source reads, and a file
-// chmod changes (most often to make it executable).
+// chmod changes (most often to make it executable). Paths are cleaned, so ./t.sh and t.sh are one file.
 func (t lineTree) noteRuns(w []string) {
 	if len(w) == 0 {
 		return
 	}
-	t.run[w[0]] = true
+	t.run[path.Clean(w[0])] = true
 	if name := path.Base(w[0]); shells[name] || name == "source" || name == "." || name == "chmod" {
 		for _, a := range w[1:] {
-			t.run[a] = true
+			t.run[path.Clean(a)] = true
 		}
 	}
 }
+
+// runs reports whether the line may run file.
+func (t lineTree) runs(file string) bool { return t.run[path.Clean(file)] }
 
 // takesAsData reports whether the text st reads, on stdin or as an argument, can't reach a shell.
 func (t lineTree) takesAsData(st *syntax.Stmt) bool {
@@ -145,13 +148,13 @@ func (t lineTree) takesAsData(st *syntax.Stmt) bool {
 		return false // X=$(cat <<EOF): the variable may run later
 	}
 	w := stripWrappers(words)
-	if len(w) == 0 {
-		return false // xargs <<EOF runs a command
+	if len(w) == 0 || slices.ContainsFunc(words[:len(words)-len(w)], func(a string) bool { return path.Base(a) == "xargs" }) {
+		return false // xargs git <<EOF: the body becomes the command's arguments
 	}
 	switch name := path.Base(w[0]); {
 	case textSenders[name]:
 		return true
-	case name == "tee" && slices.ContainsFunc(w[1:], func(f string) bool { return t.run[f] }):
+	case name == "tee" && slices.ContainsFunc(w[1:], t.runs):
 		return false // tee t.sh <<EOF ... EOF; bash t.sh
 	case textCopiers[name]:
 		return t.printsAsData(st)
@@ -164,7 +167,7 @@ func (t lineTree) takesAsData(st *syntax.Stmt) bool {
 func (t lineTree) printsAsData(st *syntax.Stmt) bool {
 	for {
 		if file, ok := output(st); ok {
-			return file != "" && !t.run[file]
+			return file != "" && !t.runs(file)
 		}
 		switch p := t.up[st].(type) {
 		case *syntax.File:

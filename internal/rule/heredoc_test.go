@@ -112,6 +112,9 @@ func TestHeredocBodyAShellRuns(t *testing.T) {
 		"cat > main.go <<'EOF'\nrm -rf build\nEOF\ngo run .",
 		"f() { :; }; cat > notes.md <<'EOF'\nrm -rf build\nEOF",
 		"cat > notes.md <<'EOF'\nrm -rf build\nEOF\nls | xargs", // xargs alone runs echo
+		"./cat <<'EOF'\nrm -rf build\nEOF",
+		"/tmp/git commit -F - <<'EOF'\nrm -rf build\nEOF",
+		"printf -v script '%s' \"$(cat <<'EOF'\nrm -rf build\nEOF\n)\"; $script",
 		"cat > notes.md <<'EOF'\nrm -rf build\nEOF\nGIT_SSH_COMMAND='sh notes.md' git push",
 		"cat > notes.md <<'EOF'\nrm -rf build\nEOF\ngit -c core.sshCommand='sh notes.md' push",
 		"T=$S/t.sh; cat > $T <<'EOF'\nrm -rf build\nEOF\n$T",

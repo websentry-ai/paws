@@ -35,7 +35,7 @@ var (
 
 // sendsText reports whether the command w stores or sends what it reads.
 func sendsText(w []string) bool {
-	switch path.Base(w[0]) {
+	switch w[0] {
 	case "git":
 		return gitTextCmds[gitSubcommand(w)]
 	case "gh":
@@ -250,10 +250,12 @@ func (t *lineTree) takesAsData(st *syntax.Stmt) bool {
 	if slices.ContainsFunc(call.Args, hasProcSubst) {
 		return false // tee >(sh) <<EOF
 	}
-	if t.redefine || t.funcs[w[0]] {
-		return false // the name may not be the program paws knows
+	if t.redefine || t.funcs[w[0]] || strings.Contains(w[0], "/") {
+		return false // the name may not be the program paws knows: cat() { sh; }, ./cat
 	}
-	switch name := path.Base(w[0]); {
+	switch name := w[0]; {
+	case name == "printf" && slices.ContainsFunc(w[1:], func(a string) bool { return strings.HasPrefix(a, "-v") }):
+		return false // printf -v script stores the text in a variable the line may run
 	case sendsText(w):
 		return t.printsAsData(st) // git stripspace <<EOF | sh prints the body
 	case name == "tee":

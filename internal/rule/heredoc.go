@@ -173,12 +173,13 @@ func cut(line string, bodies []dataBody) string {
 	return b.String()
 }
 
-// noFileCmds run no file the line may have written: they read, list, print, move or send files and text.
+// noFileCmds run no file the line may have written: they read, list, print or remove files and text, and have no
+// option that runs a program. Not jq (-f runs a program file), sort (--compress-program) or rg (--pre).
 var noFileCmds = map[string]bool{"cd": true, "pwd": true, "mkdir": true, "touch": true, "rm": true, "rmdir": true,
 	"ls": true, "wc": true, "cat": true, "tee": true, "echo": true, "printf": true, "head": true, "tail": true,
-	"grep": true, "rg": true, "sort": true, "uniq": true, "diff": true, "cmp": true, "stat": true, "file": true,
-	"du": true, "true": true, "false": true, ":": true, "test": true, "[": true, "sleep": true, "date": true,
-	"basename": true, "dirname": true, "realpath": true, "shasum": true, "sha256sum": true, "md5": true} // not jq: jq -f runs a program file
+	"grep": true, "uniq": true, "diff": true, "cmp": true, "stat": true, "file": true, "du": true, "true": true,
+	"false": true, ":": true, "test": true, "[": true, "sleep": true, "date": true, "basename": true, "dirname": true,
+	"realpath": true, "shasum": true, "sha256sum": true, "md5": true}
 
 // gitNoFileCmds are built-in git commands; the hooks they run are files runsUnnamed keeps. Not fetch, pull or push:
 // --upload-pack, --receive-pack and --exec run a program.

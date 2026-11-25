@@ -26,10 +26,11 @@ import (
 // body, $( ) still runs, so it stays too.
 
 // Built-in git and gh commands that store or send the text they read, on stdin or as an argument, and run none of
-// it. An alias can't take a built-in's name, so `git -c alias.run='!sh' run` and a gh shell alias stay out.
+// it. An alias can't take a built-in's name, so `git -c alias.run='!sh' run` and a gh shell alias stay out. Not
+// apply or am (a patch can write a script), and not hash-object (--path runs a clean filter).
 var (
-	gitTextCmds = map[string]bool{"commit": true, "tag": true, "notes": true, "hash-object": true,
-		"interpret-trailers": true, "stripspace": true} // not apply or am: a patch can write a script
+	gitTextCmds = map[string]bool{"commit": true, "tag": true, "notes": true, "interpret-trailers": true,
+		"stripspace": true}
 	ghTextCmds = map[string]bool{"pr": true, "issue": true, "api": true, "release": true, "gist": true,
 		"label": true, "secret": true, "variable": true}
 )
@@ -183,7 +184,7 @@ var noFileCmds = map[string]bool{"cd": true, "pwd": true, "mkdir": true, "touch"
 var gitNoFileCmds = map[string]bool{"add": true, "status": true, "diff": true, "log": true, "show": true,
 	"commit": true, "tag": true, "notes": true, "rm": true, "mv": true, "restore": true, "switch": true,
 	"checkout": true, "branch": true, "fetch": true, "pull": true, "push": true, "stash": true, "reset": true,
-	"rev-parse": true, "ls-files": true, "hash-object": true, "interpret-trailers": true, "stripspace": true}
+	"rev-parse": true, "ls-files": true, "interpret-trailers": true, "stripspace": true}
 
 // runsNoFile reports whether command w runs no file. A path (./cat) may be any program; git -c may set a command
 // git runs (core.sshCommand, alias.x=!sh).

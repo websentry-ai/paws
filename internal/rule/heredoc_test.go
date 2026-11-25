@@ -120,6 +120,7 @@ func TestHeredocBodyAShellRuns(t *testing.T) {
 		"GIT_EDITOR=sh git commit -e -F - <<'EOF'\nrm -rf build\nEOF",
 		"git commit --edit -F - <<'EOF'\nrm -rf build\nEOF",
 		"git commit -eF - <<'EOF'\nrm -rf build\nEOF",
+		"git hash-object --path x.sh --stdin <<'EOF'\nrm -rf build\nEOF",
 		"git -ccore.editor=sh commit -e -F - <<'EOF'\nrm -rf build\nEOF",
 		"env GIT_EDITOR=sh git commit -F - <<'EOF'\nrm -rf build\nEOF",
 		"git -c core.editor=sh commit -e -m \"$(cat <<'EOF'\nrm -rf build\nEOF\n)\"",

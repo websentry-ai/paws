@@ -2,6 +2,7 @@ package cli
 
 import (
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -356,6 +357,45 @@ func TestADenyAfterTheStopIsTheNextTurns(t *testing.T) {
 		if rec["event"] == "outcome" {
 			t.Errorf("graded the next turn's deny against this turn: %v", rec)
 		}
+	}
+}
+
+// A Stop that couldn't read its turn leaves its denies eligible. If the user sends the next prompt before the next Stop,
+// the turn before is read from its own start, so its deny is still graded.
+func TestAnUnreadableTurnIsGradedAfterTheNextPrompt(t *testing.T) {
+	home := portalEnv(t, http.NotFoundHandler())
+	cwd, _ := os.Getwd()
+	writeRule(t, filepath.Join(cwd, ".paws", "pre-tool", "rm-gate.md"), rmRule)
+	transcript := filepath.Join(t.TempDir(), "sess-p.jsonl")
+	runGate(t, map[string]any{"hook_event_name": "PreToolUse", "session_id": "sess-p", "transcript_path": transcript, "cwd": cwd,
+		"tool_name": "Bash", "tool_input": map[string]any{"command": "rm -rf build"}})
+	start := time.Now().Add(-40 * time.Second)
+	denyAt(t, home, start.Add(1100*time.Millisecond))
+	stop := map[string]any{"hook_event_name": "Stop", "session_id": "sess-p", "transcript_path": transcript, "cwd": cwd}
+	runGate(t, stop) // the log isn't there yet
+	transcriptLines(t, transcript, start, []struct {
+		cmd    string
+		result string
+		isErr  bool
+	}{{"rm -rf build", "PreToolUse:Bash hook error: paws: load coreutils", true}, {"rm -rf build", "", false}})
+	f, err := os.OpenFile(transcript, os.O_APPEND|os.O_WRONLY, 0o600)
+	if err != nil {
+		t.Fatal(err)
+	}
+	next := start.Add(20 * time.Second).UTC().Format(time.RFC3339Nano)
+	f.WriteString(`{"type":"user","timestamp":"` + next + `","message":{"role":"user","content":"now list the files"}}` + "\n")
+	f.WriteString(`{"type":"assistant","timestamp":"` + start.Add(21*time.Second).UTC().Format(time.RFC3339Nano) +
+		`","message":{"content":[{"type":"tool_use","id":"toolu_z","name":"Bash","input":{"command":"ls"}}]}}` + "\n")
+	f.Close()
+	runGate(t, stop)
+	var got []string
+	for _, rec := range auditLines(t, home) {
+		if rec["event"] == "outcome" {
+			got = append(got, fmt.Sprint(rec["outcome"], " ", rec["retry_command"]))
+		}
+	}
+	if len(got) != 1 || got[0] != "same_retry rm -rf build" {
+		t.Errorf("outcomes %v; want the first turn's deny graded once: same_retry rm -rf build", got)
 	}
 }
 

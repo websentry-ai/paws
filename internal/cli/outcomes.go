@@ -65,15 +65,42 @@ func gradeTurn(in *hook.Input, ev gate.Event, stoppedAt time.Time) {
 		return
 	}
 	// From the turn's own start: a deny from the turn before isn't this turn's.
-	var denies []auditRecord
+	var denies, earlier []auditRecord
 	for _, d := range all {
 		if denyIn(d, start, stoppedAt) {
 			denies = append(denies, d)
 		}
 	}
+	for _, d := range fresh {
+		if !denyIn(d, start, stoppedAt) {
+			earlier = append(earlier, d)
+		}
+	}
+	// Denies left eligible by a Stop that couldn't read its turn (the log not flushed yet) belong to the turn before
+	// this one: read that turn, which ended when this one began.
+	if len(earlier) > 0 && !start.IsZero() {
+		if prev, prevStart, err := hook.TurnCalls(in.TranscriptPath, start.Add(-time.Nanosecond)); err == nil && len(prev) > 0 {
+			var mine []auditRecord
+			for _, d := range all {
+				if denyIn(d, prevStart, start.Add(-time.Nanosecond)) {
+					mine = append(mine, d)
+				}
+			}
+			gradeCalls(in, ev, prev, mine, allows, graded)
+		}
+	}
 	if len(denies) == 0 {
 		return
 	}
+	if !gradeCalls(in, ev, calls, denies, allows, graded) {
+		settle = false
+	}
+}
+
+// gradeCalls grades each deny against the calls of its turn and appends the outcome records. It reports false when a
+// deny's call isn't in the calls (another agent's turn, or the log isn't flushed): that deny is left ungraded.
+func gradeCalls(in *hook.Input, ev gate.Event, calls []outcome.Call, denies, allows []auditRecord, graded map[string]int) bool {
+	complete := true
 	rules := map[string]*rule.Rule{}
 	for _, r := range gate.Collect(in.CWD).Rules {
 		rules[r.SourcePath+"|"+r.Name] = r
@@ -100,7 +127,7 @@ func gradeTurn(in *hook.Input, ev gate.Event, stoppedAt time.Time) {
 		}
 		i := blockedCall(calls, d, at, used[ruleKey])
 		if i < 0 {
-			settle = false // not in this log (another agent's turn, or the log isn't flushed): left ungraded
+			complete = false
 			continue
 		}
 		used[ruleKey][i] = true // claimed, graded now or before, so a later deny of this rule takes the next call
@@ -128,6 +155,7 @@ func gradeTurn(in *hook.Input, ev gate.Event, stoppedAt time.Time) {
 		}
 		gate.LogOutcome(rec)
 	}
+	return complete
 }
 
 // gradeLockStale is when a grader's lock is taken over: past the Stop hook's 15 s timeout its holder is gone.

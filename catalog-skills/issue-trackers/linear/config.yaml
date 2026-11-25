@@ -1,0 +1,10 @@
+# Filled into SKILL.md at install: each KEY placeholder gets its value. Angle-bracket values are
+# org settings with no safe default; SKILL.md "Defaults" says what applies until set.
+placeholders:
+  AGENT_ATTRIBUTION_CONVENTION: '[created-by: ai-agent]'
+  AGENT_LABEL: ai-agent
+  DEFAULT_ASSIGNEE: the requesting human
+  DEFAULT_EPIC_POLICY: link to the project the user is working under; if none is evident, ask
+  ESTIMATION_POLICY: agents never set estimates, priority or due dates; user-supplied values only
+  LINEAR_TEAM: the team of the project the user is working in (ambiguous → ask once per session, then reuse)
+  TICKET_TEMPLATE_REGISTRY: 'the standard per-type sections — Bug: Steps / Expected / Actual / Environment; Task/Story: Context / Acceptance criteria'

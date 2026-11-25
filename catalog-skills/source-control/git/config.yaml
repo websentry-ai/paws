@@ -1,0 +1,14 @@
+# Filled into SKILL.md at install: each KEY placeholder gets its value. Angle-bracket values are
+# org settings with no safe default; SKILL.md "Defaults" says what applies until set.
+placeholders:
+  AGENT_ATTRIBUTION: 'Co-Authored-By: <agent name> <noreply@<agent-vendor>>'
+  BRANCH_FORMAT: '`<type>/<slug>` (issue ID included when known)'
+  COMMIT_FORMAT: '`<type>(<scope>): <summary>` (Conventional Commits)'
+  COMMIT_TYPES: feat, fix, chore, docs, refactor, test, perf, ci
+  FORBIDDEN_PATHS: '`**/credentials*`, `*.pem`, `*.key`, `**/*_rsa*`'
+  ISSUE_ID_PATTERN: <issue-id>
+  NO_TICKET_CONVENTION: <no-ticket-convention>
+  PROTECTED_BRANCHES: '`main`, `master`, `release/*`'
+  SECURITY_REVIEWERS: <security-reviewers>
+  SECURITY_REVIEW_PATHS: '`auth/**`, `**/crypto/**`, `**/secrets/**`, `**/iam/**`'
+  TAG_FORMAT: '`v<major>.<minor>.<patch>` (semver)'

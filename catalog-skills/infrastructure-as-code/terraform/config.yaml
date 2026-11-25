@@ -1,0 +1,6 @@
+# Filled into SKILL.md at install: each KEY placeholder gets its value. Angle-bracket values are
+# org settings with no safe default; SKILL.md "Defaults" says what applies until set.
+placeholders:
+  EPHEMERAL_WORKSPACES: ephemeral and sandbox workspaces
+  MODULE_REGISTRY: <module-registry>
+  PROD_WORKSPACES: <prod-workspaces>

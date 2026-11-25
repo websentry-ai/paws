@@ -129,6 +129,7 @@ func TestHeredocBodyAShellRuns(t *testing.T) {
 		"cat > notes.md <<'EOF'\nrm -rf build\nEOF\nGIT_SSH_COMMAND='sh notes.md' git push",
 		"cat > notes.md <<'EOF'\nrm -rf build\nEOF\ngit -c core.sshCommand='sh notes.md' push",
 		"cat > notes.md <<'EOF'\nrm -rf build\nEOF\ngit -ccore.sshCommand='sh notes.md' push",
+		"cat > t.sh <<'EOF'\nrm -rf build\nEOF\ngit fetch --upload-pack='sh t.sh' origin",
 		"T=$S/t.sh; cat > $T <<'EOF'\nrm -rf build\nEOF\n$T",
 		"cat > t.sh <<'EOF'\nrm -rf build\nEOF\ncp t.sh bin/run && bin/run",
 		"cat > t.sh <<'EOF'\nrm -rf build\nEOF\nbash -c 'sh t.sh'",

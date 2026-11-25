@@ -180,10 +180,11 @@ var noFileCmds = map[string]bool{"cd": true, "pwd": true, "mkdir": true, "touch"
 	"du": true, "true": true, "false": true, ":": true, "test": true, "[": true, "sleep": true, "date": true,
 	"basename": true, "dirname": true, "realpath": true, "shasum": true, "sha256sum": true, "md5": true} // not jq: jq -f runs a program file
 
-// gitNoFileCmds are built-in git commands; the hooks they run are files runsUnnamed keeps.
+// gitNoFileCmds are built-in git commands; the hooks they run are files runsUnnamed keeps. Not fetch, pull or push:
+// --upload-pack, --receive-pack and --exec run a program.
 var gitNoFileCmds = map[string]bool{"add": true, "status": true, "diff": true, "log": true, "show": true,
 	"commit": true, "tag": true, "notes": true, "rm": true, "mv": true, "restore": true, "switch": true,
-	"checkout": true, "branch": true, "fetch": true, "pull": true, "push": true, "stash": true, "reset": true,
+	"checkout": true, "branch": true, "stash": true, "reset": true,
 	"rev-parse": true, "ls-files": true, "interpret-trailers": true, "stripspace": true}
 
 // runsNoFile reports whether command w runs no file. A path (./cat) may be any program; git -c may set a command

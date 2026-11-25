@@ -86,6 +86,29 @@ func denyAt(t *testing.T, home string, at time.Time) {
 	}
 }
 
+// denyLastAt moves only the newest deny in the audit log to at.
+func denyLastAt(t *testing.T, home string, at time.Time) {
+	t.Helper()
+	path := filepath.Join(home, "audit.log")
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	lines := strings.Split(strings.TrimSpace(string(data)), "\n")
+	for i := len(lines) - 1; i >= 0; i-- {
+		var rec map[string]any
+		if json.Unmarshal([]byte(lines[i]), &rec) == nil && rec["verdict"] == "deny" {
+			rec["ts"], rec["at"] = at.UTC().Format(time.RFC3339), at.UTC().Format(time.RFC3339Nano)
+			b, _ := json.Marshal(rec)
+			lines[i] = string(b)
+			break
+		}
+	}
+	if err := os.WriteFile(path, []byte(strings.Join(lines, "\n")+"\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+}
+
 func TestStopGradesWhatFollowedTheBlock(t *testing.T) {
 	home, srv := syncEnv(t)
 	cwd, _ := os.Getwd()
@@ -440,8 +463,55 @@ func TestADenyAfterTheLastRecordIsNotThisTurns(t *testing.T) {
 			t.Errorf("graded a deny made after the turn's last record: %v", rec)
 		}
 	}
-	if at, ok := hook.LastRecordAt(transcript, time.Now()); !ok || at.After(start.Add(5*time.Second)) {
+	if at, ok := hook.LastRecordAt(transcript, time.Now(), time.Time{}); !ok || at.After(start.Add(5*time.Second)) {
 		t.Errorf("LastRecordAt = %v, %v; want the log's last record, %v", at, ok, start.Add(4*time.Second))
+	}
+}
+
+// The user's next prompt can reach the log before the Stop hook starts. The turn that stopped is the first one after the
+// last graded Stop: the second prompt begins the next turn, and its denies wait for that turn's own Stop.
+func TestAPromptThatBeganTheNextTurnIsNotThisTurns(t *testing.T) {
+	home := portalEnv(t, http.NotFoundHandler())
+	cwd, _ := os.Getwd()
+	writeRule(t, filepath.Join(cwd, ".paws", "pre-tool", "rm-gate.md"), rmRule)
+	transcript := filepath.Join(t.TempDir(), "sess-q.jsonl")
+	start := time.Now().Add(-60 * time.Second)
+	transcriptLines(t, transcript, start, []struct {
+		cmd    string
+		result string
+		isErr  bool
+	}{{"rm -rf build", "PreToolUse:Bash hook error: paws: load coreutils", true}, {"rm -rf build", "", false}})
+	denyEvent := map[string]any{"hook_event_name": "PreToolUse", "session_id": "sess-q", "transcript_path": transcript, "cwd": cwd,
+		"tool_name": "Bash", "tool_input": map[string]any{"command": "rm -rf build"}}
+	runGate(t, denyEvent)
+	denyAt(t, home, start.Add(1100*time.Millisecond)) // the first turn's deny
+	// The next turn: a prompt, then a call that paws denies right now. Its log records come after the first turn's.
+	f, err := os.OpenFile(transcript, os.O_APPEND|os.O_WRONLY, 0o600)
+	if err != nil {
+		t.Fatal(err)
+	}
+	at := func(sec int) string {
+		return start.Add(time.Duration(sec) * time.Second).UTC().Format(time.RFC3339Nano)
+	}
+	f.WriteString(`{"type":"user","timestamp":"` + at(20) + `","message":{"role":"user","content":"now the dist folder"}}` + "\n")
+	f.WriteString(`{"type":"assistant","timestamp":"` + at(21) + `","message":{"content":[{"type":"tool_use","id":"toolu_n","name":"Bash","input":{"command":"rm -rf dist"}}]}}` + "\n")
+	f.WriteString(`{"type":"user","timestamp":"` + start.Add(21500*time.Millisecond).UTC().Format(time.RFC3339Nano) +
+		`","message":{"content":[{"type":"tool_result","tool_use_id":"toolu_n","is_error":true,"content":"PreToolUse:Bash hook error: paws: load coreutils"}]}}` + "\n")
+	f.Close()
+	markGraded("sess-q", start.Add(-time.Second)) // the Stop before this turn was graded then
+	runGate(t, map[string]any{"hook_event_name": "PreToolUse", "session_id": "sess-q", "transcript_path": transcript, "cwd": cwd,
+		"tool_name": "Bash", "tool_input": map[string]any{"command": "rm -rf dist"}}) // denied now, in the next turn
+	denyLastAt(t, home, start.Add(21100*time.Millisecond)) // right after its call, inside the next turn
+	in := hook.Input{HookEventName: "Stop", SessionID: "sess-q", TranscriptPath: transcript, CWD: cwd}
+	gradeTurn(&in, hook.ToEvent(&in), time.Now())
+	var got []string
+	for _, rec := range auditLines(t, home) {
+		if rec["event"] == "outcome" {
+			got = append(got, fmt.Sprint(rec["outcome"], " ", rec["retry_command"]))
+		}
+	}
+	if len(got) != 1 || got[0] != "same_retry rm -rf build" {
+		t.Errorf("outcomes %v; want only the first turn's deny graded: same_retry rm -rf build", got)
 	}
 }
 

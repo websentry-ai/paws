@@ -1,0 +1,8 @@
+# Filled into SKILL.md at install: each KEY placeholder gets its value. Angle-bracket values are
+# org settings with no safe default; SKILL.md "Defaults" says what applies until set.
+placeholders:
+  GLOBAL_INSTALL_POLICY: the global-install policy (developer CLIs only, narrated)
+  INSTALL_SCRIPTS_POLICY: the install-scripts policy (scripts off on first contact with an unfamiliar package; well-known packages install normally)
+  LICENSE_ALLOWLIST: the permissive allowlist (MIT/Apache-2.0/BSD/ISC; copyleft flagged)
+  PINNING_POLICY: the pinning policy (caret ranges in package.json, exact versions in the lockfile)
+  SANCTIONED_REGISTRY: https://registry.npmjs.org

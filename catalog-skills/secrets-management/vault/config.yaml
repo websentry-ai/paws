@@ -1,0 +1,7 @@
+# Filled into SKILL.md at install: each KEY placeholder gets its value. Angle-bracket values are
+# org settings with no safe default; SKILL.md "Defaults" says what applies until set.
+placeholders:
+  DEFAULT_TOKEN_TTL: 1h
+  KV_MOUNT: secret
+  SECRET_STORE: this Vault instance
+  VAULT_ADDR: the environment's existing `VAULT_ADDR` (never set it or print a token to configure it)

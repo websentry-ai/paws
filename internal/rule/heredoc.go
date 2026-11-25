@@ -2,6 +2,7 @@ package rule
 
 import (
 	"path"
+	"regexp"
 	"slices"
 	"sort"
 	"strings"
@@ -38,13 +39,22 @@ func sendsText(w []string) bool {
 	switch w[0] {
 	case "git":
 		// -e opens the editor on the text, and -c may set it (core.editor=sh), so either keeps the body.
-		return gitTextCmds[gitSubcommand(w)] && !slices.ContainsFunc(w[1:], func(a string) bool {
-			return a == "-e" || a == "--edit" || a == "-c" || a == "--config-env" || strings.HasPrefix(a, "--exec-path")
-		})
+		return gitTextCmds[gitSubcommand(w)] && !slices.ContainsFunc(w[1:], gitRunsEditor)
 	case "gh":
 		return len(w) > 1 && ghTextCmds[w[1]]
 	}
 	return false
+}
+
+// shortFlags is a cluster of short options, such as -eF.
+var shortFlags = regexp.MustCompile(`^-[a-zA-Z]+$`)
+
+// gitRunsEditor reports whether a git argument opens the editor (-e, --edit, -eF) or may set what git runs
+// (-c core.editor=sh, -ccore.editor=sh, --config-env, --exec-path).
+func gitRunsEditor(a string) bool {
+	return a == "--edit" || a == "--config-env" || strings.HasPrefix(a, "--config-env=") ||
+		strings.HasPrefix(a, "--exec-path") || strings.HasPrefix(a, "-c") ||
+		shortFlags.MatchString(a) && strings.Contains(a, "e")
 }
 
 // textCopiers print the text they read, so it goes wherever their output goes.
@@ -177,9 +187,7 @@ func runsNoFile(w []string) bool {
 	}
 	switch w[0] {
 	case "git":
-		return gitNoFileCmds[gitSubcommand(w)] && !slices.ContainsFunc(w[1:], func(a string) bool {
-			return a == "-c" || a == "--config-env" || a == "--exec-path" || strings.HasPrefix(a, "--exec-path=")
-		})
+		return gitNoFileCmds[gitSubcommand(w)] && !slices.ContainsFunc(w[1:], gitRunsEditor)
 	case "gh":
 		return len(w) > 1 && ghTextCmds[w[1]]
 	}

@@ -113,6 +113,9 @@ func newLineTree(f *syntax.File) (*lineTree, []*syntax.Stmt) {
 			t.up[n] = stack[len(stack)-1]
 		}
 		stack = append(stack, n)
+		if st, ok := n.(*syntax.Stmt); ok && st.Cmd == nil && len(st.Redirs) > 0 {
+			t.redefine = true // a bare redirection statement
+		}
 		switch n := n.(type) {
 		case *syntax.FuncDecl:
 			t.funcs[n.Name.Value] = true
@@ -121,6 +124,9 @@ func newLineTree(f *syntax.File) (*lineTree, []*syntax.Stmt) {
 			t.runsNone = false
 		case *syntax.DeclClause:
 			t.runsNone = false // export GIT_EDITOR='sh t.sh'; git commit: a later command may run what it names
+			if slices.ContainsFunc(n.Args, func(a *syntax.Assign) bool { return a.Name != nil && a.Name.Value == "PATH" }) {
+				t.redefine = true // export PATH=./b:$PATH: a later `cat` may be another program
+			}
 		case *syntax.Stmt:
 			if slices.ContainsFunc(n.Redirs, isHeredoc) {
 				docs = append(docs, n)
@@ -128,8 +134,15 @@ func newLineTree(f *syntax.File) (*lineTree, []*syntax.Stmt) {
 		case *syntax.CallExpr:
 			words := callWords(n)
 			w := stripWrappers(words)
-			if len(w) > 0 && (w[0] == "eval" || w[0] == "source" || w[0] == "." || w[0] == "alias") {
-				t.redefine = true
+			if len(w) > 0 && (w[0] == "eval" || w[0] == "source" || w[0] == "." || w[0] == "alias" || w[0] == "hash" ||
+				w[0] == "enable" || w[0] == "exec" || w[0] == "command" && slices.Contains(w[1:], "-p")) {
+				t.redefine = true // hash -p ./x cat; exec > >(sh): later names or stdout may not be what they seem
+			}
+			if len(words) > 0 && words[0] == "exec" {
+				t.redefine = true // exec > >(sh) or exec 1>&3: stdout for the rest of the line may be a shell
+			}
+			if slices.ContainsFunc(n.Assigns, func(a *syntax.Assign) bool { return a.Name != nil && a.Name.Value == "PATH" }) {
+				t.redefine = true // PATH=./b:$PATH; cat <<EOF
 			}
 			if len(words) > 0 && (len(n.Assigns) > 0 || len(w) == 0 || !runsNoFile(w) || !plainWrappers(words, w)) {
 				t.runsNone = false // VAR=x before a command (GIT_SSH_COMMAND=...), or a command that may run a file
@@ -227,8 +240,26 @@ func runsUnnamed(file string) bool {
 		"package.json", "Dockerfile", "Containerfile", "docker-compose.yml", "docker-compose.yaml", "compose.yml",
 		"compose.yaml", "Procfile", "applypatch-msg", "pre-applypatch", "post-applypatch", "pre-commit",
 		"pre-merge-commit", "prepare-commit-msg", "commit-msg", "post-commit", "pre-rebase", "post-checkout",
-		"post-merge", "pre-push", "post-rewrite", "reference-transaction", "pre-auto-gc", "fsmonitor-watchman":
+		"post-merge", "pre-push", "post-rewrite", "reference-transaction", "pre-auto-gc", "fsmonitor-watchman",
+		"post-index-change", "push-to-checkout", "sendemail-validate", "crontab", "authorized_keys":
 		return true
+	}
+	// System services run these later: cron, systemd, launchd, login shells.
+	for _, dir := range []string{"/etc/", "/usr/", "/lib/", "/var/spool/", "/Library/", "/System/"} {
+		if strings.HasPrefix(file, dir) {
+			return true
+		}
+	}
+	for _, ext := range []string{".service", ".timer", ".socket", ".path", ".plist"} {
+		if strings.HasSuffix(name, ext) {
+			return true
+		}
+	}
+	// A dot directory on the way (~/.config/fish/config.fish, ~/.ssh/...) holds files tools read and run.
+	for _, seg := range strings.Split(path.Dir(file), "/") {
+		if strings.HasPrefix(seg, ".") && seg != "." && seg != ".." {
+			return true
+		}
 	}
 	if name == "config" || name == "gitconfig" || strings.Contains(file, ".git/") || strings.HasPrefix(file, ".git") {
 		return true // git config runs core.fsmonitor, filter.*.clean, core.hooksPath and aliases on plain git commands

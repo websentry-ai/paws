@@ -160,19 +160,26 @@ var leadingCd = regexp.MustCompile(`^\s*cd\s+(?:'([^']*)'|"([^"]*)"|(\S+))\s*(?:
 // patchDir is where a shell patch runs: the hook's cwd, or the folder a leading `cd` moves to, so a relative path in
 // `cd migrations && apply_patch ...` is a file in migrations/.
 func patchDir(cmd, cwd string) string {
-	m := leadingCd.FindStringSubmatch(cmd)
-	if m == nil {
-		return cwd
+	for {
+		m := leadingCd.FindStringSubmatchIndex(cmd)
+		if m == nil {
+			return cwd
+		}
+		dir := ""
+		for g := 2; g <= 6; g += 2 { // whichever of the quoted or bare forms matched
+			if m[g] >= 0 {
+				dir = cmd[m[g]:m[g+1]]
+			}
+		}
+		if rest, ok := strings.CutPrefix(dir, "~/"); ok {
+			home, _ := os.UserHomeDir()
+			dir = filepath.Join(home, rest)
+		}
+		if !filepath.IsAbs(dir) {
+			dir = filepath.Join(cwd, dir)
+		}
+		cwd, cmd = filepath.Clean(dir), cmd[m[1]:] // cd a && cd b: b is from a
 	}
-	dir := m[1] + m[2] + m[3]
-	if rest, ok := strings.CutPrefix(dir, "~/"); ok {
-		home, _ := os.UserHomeDir()
-		dir = filepath.Join(home, rest)
-	}
-	if !filepath.IsAbs(dir) {
-		dir = filepath.Join(cwd, dir)
-	}
-	return dir
 }
 
 // patchCalls are a patch's files as canonical calls: a Write for a new file, an Edit for any other, relative paths
@@ -282,7 +289,7 @@ func (Adapter) Observe(h *harness.Hook, d gate.Decision) {
 		if in.ToolName == "apply_patch" || in.ToolName == "Bash" && len(p.calls) > 1 {
 			// A patch: the files it changed are the ones apply_patch lists after its success line. Through the shell
 			// there is no exit code, so that line is the only sign it applied.
-			files = patchedFiles(in.ToolResponse, in.CWD)
+			files = patchedFiles(in.ToolResponse, patchDir(cmdOf(in), in.CWD))
 			if in.ToolName == "Bash" {
 				ok = len(files) > 0
 			}
@@ -295,6 +302,15 @@ func (Adapter) Observe(h *harness.Hook, d gate.Decision) {
 	case in.HookEventName == "SessionStart":
 		pruneLedgers(own)
 	}
+}
+
+// cmdOf is a Bash call's command, "" for any other tool.
+func cmdOf(in *Input) string {
+	if in.ToolName != "Bash" {
+		return ""
+	}
+	s, _ := in.ToolInput["command"].(string)
+	return s
 }
 
 // patchedFiles are the files apply_patch says it changed: the "A path", "M path" and "D path" lines after its

@@ -244,7 +244,7 @@ func (s session) SkillLoaded(skill string, window int) bool {
 	var reads []gate.FileRead
 	for _, r := range s.window(window) {
 		if r.SkillLoad == skill && r.ReadFile != "" && r.Verdict == "allow" && ok[r.ID] {
-			reads = append(reads, gate.FileRead{Skill: skill, File: r.ReadFile, Lines: rule.Lines{From: r.ReadFrom, To: r.ReadTo}})
+			reads = append(reads, gate.FileRead{Skill: skill, File: r.ReadFile, Lines: rule.Lines{From: r.ReadFrom, To: r.ReadTo}, At: r.At})
 		}
 	}
 	return gate.Covered(reads)

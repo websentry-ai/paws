@@ -341,8 +341,21 @@ func TestLedgerShellPatchNeedsSuccess(t *testing.T) {
 // A shell patch after a cd edits files in that folder.
 func TestParseShellPatchAfterCd(t *testing.T) {
 	h := parse(t, stdin(t, "PreToolUse", "t1", map[string]any{"tool_name": "Bash", "tool_input": map[string]any{
-		"command": "cd migrations && apply_patch <<'EOF'\n*** Begin Patch\n*** Add File: 1.sql\n+x\n*** End Patch\nEOF"}}))
-	if len(h.Calls) != 2 || h.Calls[1].Target != "/repo/migrations/1.sql" {
-		t.Errorf("want /repo/migrations/1.sql, got %+v", h.Calls)
+		"command": "cd db && cd migrations && apply_patch <<'EOF'\n*** Begin Patch\n*** Add File: 1.sql\n+x\n*** End Patch\nEOF"}}))
+	if len(h.Calls) != 2 || h.Calls[1].Target != "/repo/db/migrations/1.sql" {
+		t.Errorf("want /repo/db/migrations/1.sql, got %+v", h.Calls)
+	}
+}
+
+// apply_patch lists the files it changed relative to where it ran: after a cd, that folder.
+func TestLedgerShellPatchResultAfterCd(t *testing.T) {
+	ledgerEnv(t)
+	cmd := "cd src && apply_patch <<'EOF'\n*** Begin Patch\n*** Update File: a_test.go\n@@\n+x\n*** End Patch\nEOF"
+	observe(t, stdin(t, "PreToolUse", "t1", bashCall("p1", cmd)), gate.Decision{})
+	post := bashCall("p1", cmd)
+	post["tool_response"] = "Success. Updated the following files:\nM a_test.go\n"
+	observe(t, stdin(t, "PostToolUse", "t1", post), gate.Decision{})
+	if !parse(t, stdin(t, "PreToolUse", "t1", bashCall("c9", "ls"))).Calls[0].Log.EditedMatching(regexp.MustCompile(`src/a_test\.go$`)) {
+		t.Error("src/a_test.go was edited")
 	}
 }

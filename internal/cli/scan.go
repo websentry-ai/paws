@@ -113,12 +113,10 @@ func (s skipSynced) Calls(since, until time.Time, fn func(history.Call)) (int, e
 func (s skipSynced) take(c history.Call) bool {
 	want := gate.DescribeAction(gate.Event{Tool: c.Tool, Target: c.Target})
 	hash := gate.TargetHash(c.Target)
-	tool := c.Tool
-	if gate.PastSkillRead(c.Tool, c.Target, "") != "" {
-		tool = "Skill" // the hook logs a read of a SKILL.md as the skill load it is
-	}
 	for _, r := range s.logged[c.Session] {
-		if r.used || r.tool != tool || r.at.Before(c.At.Add(-time.Second)) || !r.at.Before(c.At.Add(maxCallTime)) {
+		// The hook logs a read of a SKILL.md as a Skill action: its input hash names the call whatever the tool.
+		sameTool := r.tool == c.Tool || r.tool == history.SkillTool && r.hash != "" && r.hash == hash
+		if r.used || !sameTool || r.at.Before(c.At.Add(-time.Second)) || !r.at.Before(c.At.Add(maxCallTime)) {
 			continue
 		}
 		switch {

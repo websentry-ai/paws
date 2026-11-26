@@ -8,6 +8,7 @@ import (
 	"regexp"
 	"slices"
 	"strings"
+	"time"
 
 	"github.com/websentry-ai/paws/internal/pack"
 	"github.com/websentry-ai/paws/internal/rule"
@@ -154,11 +155,13 @@ func PastSkillRead(tool, target, cwd string) string {
 	return r.Skill
 }
 
-// FileRead is a read of a skill's SKILL.md: the skill, the file, and the lines the read printed.
+// FileRead is a read of a skill's SKILL.md: the skill, the file, the lines the read printed, and when (zero if
+// unknown).
 type FileRead struct {
 	Skill string
 	File  string
 	Lines rule.Lines
+	At    time.Time
 }
 
 // readLimit is how many lines Claude Code's Read prints when the call sets no limit.
@@ -217,11 +220,14 @@ func ReadOf(tool, target string, input map[string]any, cwd string, exists bool) 
 }
 
 // Covered reports whether successful reads together printed every line of one SKILL.md, in any order: 1,240p then
-// 241,480p of a 300-line file covers it, 1,240p alone doesn't. A file gone since counts as covered only by a read of
-// the whole of it.
+// 241,480p of a 300-line file covers it, 1,240p alone doesn't. A read made before the file last changed printed an
+// older version, so it doesn't count. A file gone since counts as covered only by a read of the whole of it.
 func Covered(reads []FileRead) bool {
 	byFile := map[string][]rule.Lines{}
 	for _, r := range reads {
+		if st, err := os.Stat(r.File); err == nil && !r.At.IsZero() && r.At.Before(st.ModTime().Add(-time.Second)) {
+			continue // a second's slack: transcript times and file times come from different clocks
+		}
 		byFile[r.File] = append(byFile[r.File], r.Lines)
 	}
 	for file, ranges := range byFile {

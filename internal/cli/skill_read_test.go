@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 )
 
 // skillMD installs a skill under the temp HOME's ~/.claude/skills and returns its SKILL.md.
@@ -274,5 +275,30 @@ func TestSKILLmdReadsLoadWhenTheyCoverTheFile(t *testing.T) {
 		if loaded := out == "{}"; loaded != c.loaded {
 			t.Errorf("%s: loaded %v, want %v (%s)", name, loaded, c.loaded, out)
 		}
+	}
+}
+
+// A read made before the SKILL.md changed printed an older version: it doesn't load the skill as it is now.
+func TestASKILLmdReadBeforeTheFileChangedDoesntCount(t *testing.T) {
+	home := portalEnv(t, http.NotFoundHandler())
+	writeRule(t, filepath.Join(home, "push.md"), "name: push\nevent: pre-tool\nmatcher:\n  tool: Bash\n  command_regex: git push\naction:\n  type: require-skill\n  skill: deployer\n")
+	md := skillMD(t, "deployer")
+	in, _ := json.Marshal(map[string]string{"command": "cat " + md})
+	log := func(at time.Time) string {
+		p := filepath.Join(t.TempDir(), "s.jsonl")
+		ts := at.UTC().Format(time.RFC3339Nano)
+		os.WriteFile(p, []byte(strings.Join([]string{
+			`{"type":"user","isSidechain":false,"message":{"role":"user","content":"push it"}}`,
+			`{"type":"assistant","isSidechain":false,"timestamp":"` + ts + `","message":{"content":[{"type":"tool_use","id":"toolu_r","name":"Bash","input":` + string(in) + `}]}}`,
+			`{"type":"user","isSidechain":false,"message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"toolu_r","is_error":false,"content":"x"}]}}`,
+		}, "\n")+"\n"), 0o600)
+		return p
+	}
+	push := map[string]any{"command": "git push"}
+	if out := gateCall(t, "Bash", push, log(time.Now().Add(time.Minute))); out != "{}" {
+		t.Errorf("a read after the file's last change loads it, got %s", out)
+	}
+	if out := gateCall(t, "Bash", push, log(time.Now().Add(-time.Hour))); !strings.Contains(out, `"deny"`) {
+		t.Errorf("a read from before the file changed doesn't, got %s", out)
 	}
 }

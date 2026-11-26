@@ -11,6 +11,7 @@ import (
 	"regexp"
 	"strconv"
 	"strings"
+	"time"
 )
 
 // tailBytes is how much of a transcript's end the `when` conditions read.
@@ -199,8 +200,9 @@ func readCalls(lines [][]byte, path, skill, cwd string) map[string]FileRead {
 			continue
 		}
 		var m struct {
-			Cwd     string `json:"cwd"`
-			Message struct {
+			Cwd       string    `json:"cwd"`
+			Timestamp time.Time `json:"timestamp"`
+			Message   struct {
 				Content []struct {
 					Type  string         `json:"type"`
 					ID    string         `json:"id"`
@@ -220,6 +222,7 @@ func readCalls(lines [][]byte, path, skill, cwd string) map[string]FileRead {
 			target, _ := b.Input[key].(string)
 			// The file may be gone since: a read that succeeded put the skill in the agent's context all the same.
 			if r, ok := ReadOf(b.Name, target, b.Input, cmp.Or(m.Cwd, cwd), false); b.Type == "tool_use" && ok && r.Skill == skill {
+				r.At = m.Timestamp
 				calls[b.ID] = r
 			}
 		}

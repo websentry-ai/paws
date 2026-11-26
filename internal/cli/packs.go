@@ -106,11 +106,28 @@ func loadCatalog(dir string, names ...string) (*catalog.Catalog, error) {
 }
 
 func target(project bool) pack.Target {
+	cwd, _ := os.Getwd()
+	t := pack.UserTarget(gate.UserDir())
 	if project {
-		cwd, _ := os.Getwd()
-		return pack.ProjectTarget(projectRoot(cwd))
+		t = pack.ProjectTarget(projectRoot(cwd))
 	}
-	return pack.UserTarget(gate.UserDir())
+	t.Mirrors = skillMirrors(!project, projectRoot(cwd))
+	return t
+}
+
+// skillMirrors are the skills folders, user (global) or the project's at root, of each harness other than Claude Code
+// that runs paws here: paws installs skills into Claude Code's folders, and copies them into these.
+func skillMirrors(global bool, root string) []string {
+	var dirs []string
+	for _, a := range adapters {
+		if a == defaultAdapter() || !hookedIn(a) {
+			continue
+		}
+		if d := a.SkillsDirFor(a.HookFile(global, root)); d != "" {
+			dirs = append(dirs, d)
+		}
+	}
+	return dirs
 }
 
 // Add installs packs or single bindings: `paws add [--project] [--pick group=option] NAME...`.
@@ -162,9 +179,14 @@ func Add(args []string) int {
 		for _, s := range res.Kept {
 			fmt.Printf("  %-12s already in %s, not from paws; left as is\n", s, tilde(filepath.Join(t.SkillsDir, s)))
 		}
+		for _, m := range t.Mirrors {
+			if len(res.Installed) > 0 {
+				fmt.Printf("  %-12s copied to %s\n", "skills", tilde(m))
+			}
+		}
 	}
 	if !hookRegistered() {
-		fmt.Printf("\nClaude Code doesn't run paws here yet. Turn it on with one of:\n")
+		fmt.Printf("\nNo agent runs paws here yet. Turn it on with one of:\n")
 		for _, l := range [][2]string{{cliName + " init --global", "every repo"}, {cliName + " init", "this repo only"}} {
 			fmt.Printf("  %s%s %s\n", cyan(l[0]), strings.Repeat(" ", max(0, 28-len(l[0]))), dim(l[1])) // pad the text, not the colour codes
 		}

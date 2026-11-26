@@ -8,13 +8,14 @@ import (
 	"strings"
 	"time"
 
+	"github.com/websentry-ai/paws/internal/codex"
 	"github.com/websentry-ai/paws/internal/gate"
 	"github.com/websentry-ai/paws/internal/harness"
 	"github.com/websentry-ai/paws/internal/hook"
 )
 
 // adapters are the harnesses paws runs in; the last is the fallback for a hook call no other one claims.
-var adapters = []harness.Adapter{hook.Claude{}}
+var adapters = []harness.Adapter{codex.Adapter{}, hook.Claude{}}
 
 // A SKILL.md read loads a skill only from a folder some harness loads skills from.
 func init() {

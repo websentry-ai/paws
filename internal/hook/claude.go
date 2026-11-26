@@ -124,6 +124,7 @@ func (Claude) HookFiles(root string) []string {
 }
 
 func (Claude) HookCommand(gate string) string { return gate }
+func (Claude) InstallNote() string            { return "" }
 func (Claude) Events() []string               { return RegisteredEvents }
 
 func (Claude) Entry(event, command string) map[string]any { return SettingsEntry(event, command) }

@@ -378,6 +378,12 @@ func prepareSkill(s portalSkill, skillsDir string) (string, error) {
 	case outcome == badPin:
 		return "its pin is not a github.com repo at a commit with a content hash; not installed", nil
 	case err == nil:
+		// The other harnesses that run paws read their own folders: each gets a copy.
+		for _, m := range skillMirrors(true, "") {
+			if _, err := pack.MirrorSkill(skillsDir, m, s.Name); err != nil {
+				return "", fmt.Errorf("copy to %s: %w", m, err)
+			}
+		}
 		return "", nil
 	case serr != nil:
 		return "not installed: " + err.Error(), err

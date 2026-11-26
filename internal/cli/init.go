@@ -10,6 +10,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"runtime"
+	"slices"
 	"strings"
 
 	"github.com/websentry-ai/paws"
@@ -80,6 +81,9 @@ func Init(args []string) int {
 	fmt.Printf("Registered paws in %s\n  command: %s\n", settingsPath, command)
 	if guard {
 		fmt.Println("  Where paws isn't installed, the hook says how to install it and blocks the tool call.")
+	}
+	if note := a.InstallNote(); note != "" {
+		fmt.Println(note)
 	}
 	// A different paws hook in the other scope makes the harness run paws twice: say which init fixes it.
 	other, fix := user, "`"+cliName+" init --global"+agentFlag(a)+"`"
@@ -397,6 +401,15 @@ func Skill(args []string) int {
 		return 1
 	}
 	dest := filepath.Join(skillsDir, "paws")
+	if !slices.Contains(args, "--agent") && !slices.Contains(args, "--settings") {
+		// No harness named: every other harness that runs paws here gets the skill too, in its own folder.
+		cwd, _ := os.Getwd()
+		for _, m := range skillMirrors(slices.Contains(args, "--global"), projectRoot(cwd)) {
+			if st, err := pack.ReinstallBundledSkill(src, m, "paws", "paws "+Version); err == nil && st != pack.BundledKept {
+				fmt.Printf("Installed the paws skill (paws %s) in %s\n", Version, filepath.Join(m, "paws"))
+			}
+		}
+	}
 	status, err := pack.ReinstallBundledSkill(src, skillsDir, "paws", "paws "+Version)
 	switch {
 	case err != nil:

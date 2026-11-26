@@ -55,6 +55,8 @@ type Installer interface {
 	Entry(event, command string) map[string]any
 	// SkillsDirFor is the skills folder the harness reads beside hookFile, or "" when it has none there.
 	SkillsDirFor(hookFile string) string
+	// InstallNote is what `paws init` tells the user once the hook is registered, "" for nothing.
+	InstallNote() string
 }
 
 // Hook is one hook call in canonical terms.

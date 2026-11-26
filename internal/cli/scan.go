@@ -16,6 +16,7 @@ import (
 	"time"
 
 	"github.com/websentry-ai/paws/internal/gate"
+	"github.com/websentry-ai/paws/internal/harness"
 	"github.com/websentry-ai/paws/internal/history"
 	"github.com/websentry-ai/paws/internal/hook"
 	"github.com/websentry-ai/paws/internal/rule"
@@ -249,6 +250,14 @@ var scanNow = time.Now
 
 // Scan is `paws scan [--days 30|90] [--dry-run]`.
 func Scan(args []string) int {
+	if name := agentArg(args); name != "" {
+		// Only Claude Code's session logs are read; Codex's rollout files aren't a stable format.
+		if a := harness.Find(adapters, name); a == nil || a != defaultAdapter() {
+			fmt.Fprintf(os.Stderr, "paws: scan reads %s sessions only; it can't read %s sessions yet\n", defaultAdapter().Title(), name)
+			return 2
+		}
+		args = withoutAgent(args)
+	}
 	days, dry, ok := scanFlags(args)
 	if !ok {
 		fmt.Fprintln(os.Stderr, scanUsage)
@@ -264,6 +273,19 @@ func Scan(args []string) int {
 		return 1
 	}
 	return runScan(creds, days, dry)
+}
+
+// withoutAgent is args without --agent and its value.
+func withoutAgent(args []string) []string {
+	var out []string
+	for i := 0; i < len(args); i++ {
+		if args[i] == "--agent" && i+1 < len(args) {
+			i++
+			continue
+		}
+		out = append(out, args[i])
+	}
+	return out
 }
 
 // scanFlags reads --days N and --dry-run.

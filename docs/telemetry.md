@@ -9,9 +9,15 @@ Files are 0600 in a 0700 directory. Past 50 MB the log moves to
 ## Records (schema v2)
 
 Every record has `v` (2), `ts`, `agent`, `event` and `session`, plus
-`agent_id` when a subagent made the call, `harness` (the harness that ran the hook: `claude-code`; `agent` holds the
-same value, for older readers) and `model` when known (on Claude Code, the model of the session's last assistant
-message, so one response behind right after `/model`).
+`agent_id` when a subagent made the call, `harness` (the harness that ran the hook: `claude-code` or `codex`; `agent`
+holds the same value, for older readers) and `model` when known (on Claude Code, the model of the session's last
+assistant message, so one response behind right after `/model`; on Codex, the model the hook names).
+
+On Codex, paws also keeps a ledger per session thread, because Codex's own session files are not a stable format:
+`$PAWS_HOME/sessions/codex/<session>.jsonl` (`<session>.<agent>.jsonl` for a subagent), 0600. It holds each tool
+call with paws's verdict and its input, whether it succeeded, a marker per turn (never the prompt) and per
+compaction. The gate reads it for skill loads, delivered digests, `when:` conditions and outcome grading. It never
+leaves the machine.
 
 **Rule records** (a rule matched): `rule`, `action`, `skill` (the skill
 the rule requires), `verdict` (`allow` or `deny`), `tool`, `target` (the

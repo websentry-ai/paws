@@ -247,6 +247,31 @@ func replaceable(dir string) bool {
 	return err == nil && now == m.Installed
 }
 
+// MirrorSkill copies the skill paws installed at <from>/<name> into <to>/<name>, a real copy with its own marker, so
+// a harness that reads <to> loads it too. A skill paws didn't install in from, or a copy in to that paws doesn't own,
+// is left alone; installed says whether it copied.
+func MirrorSkill(from, to, name string) (installed bool, err error) {
+	src := filepath.Join(from, name)
+	data, err := os.ReadFile(filepath.Join(src, markerFile))
+	if err != nil {
+		return false, nil
+	}
+	var m marker
+	if json.Unmarshal(data, &m) != nil {
+		return false, nil
+	}
+	return installSkill(os.DirFS(src), to, name, marker{Skill: m.Skill, Source: m.Source, Hash: m.Hash})
+}
+
+// removeSkill removes a skill paws installed from the target's skills folder and its mirrors; removed is the
+// target's own folder.
+func (t Target) removeSkill(name string) (removed bool, err error) {
+	for _, m := range t.Mirrors {
+		removeSkill(m, name)
+	}
+	return removeSkill(t.SkillsDir, name)
+}
+
 // removeSkill deletes a skill directory only if paws installed it and it is unedited; it
 // reports whether it removed it.
 func removeSkill(skillsDir, name string) (bool, error) {

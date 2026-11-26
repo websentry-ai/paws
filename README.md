@@ -17,7 +17,7 @@ paws guarantees the skill was loaded; the skill governs the behaviour. The
 hook never rewrites tool input or reads tool output, and the gate that decides
 each tool call never calls the network.
 
-Apache-2.0 · no account · Claude Code today; other coding agents to follow.
+Apache-2.0 · no account · Claude Code and Codex CLI.
 
 ## Ten minutes
 
@@ -43,6 +43,18 @@ Dry-run any action without a session:
 ```bash
 unbound-paws explain 'gh pr create --fill'
 ```
+
+### Codex CLI
+
+```bash
+unbound-paws init --agent codex            # this repo's .codex/hooks.json; --global for ~/.codex/hooks.json
+```
+
+Codex runs a new hook only after you trust it: start Codex, run `/hooks` and trust the paws hook. The same rules
+apply. Codex has no Skill tool, so a deny names the skill's `SKILL.md` and Codex reads it; that read is the load.
+`apply_patch` counts as a `Write` (new file) or `Edit` of each file it touches. Skills paws installs (`add`, the
+portal, `paws skill`) are copied into `.agents/skills` too once the Codex hook is in place. `paws scan` reads Claude
+Code sessions only.
 
 ## Packs
 

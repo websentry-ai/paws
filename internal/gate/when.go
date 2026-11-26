@@ -55,6 +55,9 @@ func fileTool(tool string) bool {
 	return tool == "Read" || tool == "Write" || tool == "Edit" || tool == "NotebookEdit"
 }
 
+// RepoRoot is the nearest ancestor of cwd holding .git, or cwd itself: where a harness's project skills live.
+func RepoRoot(cwd string) string { return repoRoot(cwd) }
+
 // repoRoot is the nearest ancestor of cwd holding .git, or cwd itself.
 func repoRoot(cwd string) string {
 	for cur := cwd; cur != ""; {

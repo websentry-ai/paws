@@ -73,10 +73,14 @@ func usage() {
 	fmt.Fprint(os.Stderr, `paws — Pre-tool Agent Workflow System
 
 Usage:
-  unbound-paws gate                                      Run as a Claude Code hook (reads event JSON on stdin).
-  unbound-paws init [--global | --settings <path>]       Register paws in a Claude Code settings.json.
-  unbound-paws uninstall [--global | --settings <path>]  Remove paws from a settings.json.
-  unbound-paws skill [--global | --settings <path>]      Install or reinstall the paws skill (Claude writes rules with it).
+  unbound-paws gate [--agent codex]                      Run as an agent hook (reads event JSON on stdin).
+  unbound-paws init [--agent codex] [--global | --settings <path>]
+                                                         Register paws in Claude Code's settings.json, or with
+                                                         --agent codex in Codex's hooks.json (.codex/ or ~/.codex/).
+  unbound-paws uninstall [--agent codex] [--global | --settings <path>]
+                                                         Remove paws from that file.
+  unbound-paws skill [--agent codex] [--global | --settings <path>]
+                                                         Install or reinstall the paws skill (the agent writes rules with it).
   unbound-paws explain [--tool T] [--event E] <command>  Dry-run: show matching rules and the decision.
   echo '<event json>' | unbound-paws explain -           Dry-run a full event JSON.
   unbound-paws add [--project] [--pick g=o] <pack|cat/binding>...

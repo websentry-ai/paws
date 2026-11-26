@@ -7,6 +7,7 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
+	"regexp"
 	"strings"
 
 	"github.com/websentry-ai/paws/internal/harness"
@@ -309,6 +310,9 @@ func unguard(command string) string {
 	return command
 }
 
+// agentName is a harness id as `paws gate --agent` takes it.
+var agentName = regexp.MustCompile(`^[a-z][a-z-]*$`)
+
 // legacyMarker prefixed hook commands written by paws 0.3.0 and earlier; still recognised so
 // init upgrades and uninstall removes those entries.
 const legacyMarker = "PAWS_MANAGED=1 "
@@ -319,6 +323,9 @@ const legacyMarker = "PAWS_MANAGED=1 "
 func isPawsCommand(command string) bool {
 	command = unguard(command)
 	rest, marked := strings.CutPrefix(command, legacyMarker)
+	if i := strings.LastIndex(rest, " gate --agent "); i >= 0 && agentName.MatchString(rest[i+len(" gate --agent "):]) {
+		rest = rest[:i+len(" gate")] // a harness named after the gate: `unbound-paws gate --agent codex`
+	}
 	prog, ok := strings.CutSuffix(rest, " gate")
 	if !ok {
 		return false

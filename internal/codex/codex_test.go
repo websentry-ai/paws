@@ -59,6 +59,9 @@ func TestParsePatch(t *testing.T) {
 			t.Errorf("file %d: got %+v, want %+v", i, got[i], want[i])
 		}
 	}
+	if f := parsePatch("*** Begin Patch\n  *** Update File: migrations/1.sql  \n+x\n*** End Patch"); len(f) != 1 || f[0].Path != "migrations/1.sql" {
+		t.Errorf("a header with spaces around it still names its file: %+v", f)
+	}
 	if f := parsePatch("not a patch"); len(f) != 0 {
 		t.Errorf("no headers, no files: %+v", f)
 	}
@@ -168,10 +171,10 @@ func TestLedgerSkillWindow(t *testing.T) {
 	next := func(turn string) gate.Session {
 		return parse(t, stdin(t, "PreToolUse", turn, bashCall("c9", "git push"))).Calls[0].Log
 	}
-	if !next("t1").SkillLoaded("git", 20) {
-		t.Error("the load counts before its result is in (PostToolUse is async)")
+	if next("t1").SkillLoaded("git", 20) {
+		t.Error("a read still running (no result yet) is not a load")
 	}
-	observe(t, stdin(t, "PostToolUse", "t1", result("c1", "---\nname: git\n---\n")), gate.Decision{})
+	observe(t, stdin(t, "PostToolUse", "t1", result("c1", "---\nname: git\n---\nIf push says Permission denied, check the key.\n")), gate.Decision{})
 	if !next("t1").SkillLoaded("git", 20) || next("t1").SkillLoaded("other", 20) {
 		t.Error("a successful read loads that skill only")
 	}

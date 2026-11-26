@@ -15,9 +15,9 @@ assistant message, so one response behind right after `/model`; on Codex, the mo
 
 On Codex, paws also keeps a ledger per session thread, because Codex's own session files are not a stable format:
 `$PAWS_HOME/sessions/codex/<session>.jsonl` (`<session>.<agent>.jsonl` for a subagent), 0600. It holds each tool
-call with paws's verdict and its input, whether it succeeded, a marker per turn (never the prompt) and per
-compaction. The gate reads it for skill loads, delivered digests, `when:` conditions and outcome grading. It never
-leaves the machine.
+call with paws's verdict and its input (secrets masked as in the audit log), whether it succeeded, a marker per
+turn (never the prompt) and per compaction. The gate reads it for skill loads, delivered digests, `when:` conditions
+and outcome grading. It never leaves the machine, and a ledger nobody wrote for 7 days is deleted.
 
 **Rule records** (a rule matched): `rule`, `action`, `skill` (the skill
 the rule requires), `verdict` (`allow` or `deny`), `tool`, `target` (the

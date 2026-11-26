@@ -35,6 +35,9 @@ func parsePatch(patch string) []patchFile {
 		cur = len(files) - 1
 	}
 	for _, line := range strings.Split(strings.ReplaceAll(patch, "\r\n", "\n"), "\n") {
+		if t := strings.TrimSpace(line); strings.HasPrefix(t, "*** ") {
+			line = t // Codex reads a header with spaces around it too
+		}
 		switch {
 		case strings.HasPrefix(line, "*** Add File: "):
 			start(strings.TrimPrefix(line, "*** Add File: "), true)

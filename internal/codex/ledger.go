@@ -71,6 +71,18 @@ func appendRecords(path string, recs []record) {
 	var buf bytes.Buffer
 	for _, r := range recs {
 		r.End = end
+		raw := r.Text
+		r.Text = gate.AuditTarget(r.Text) // secrets masked, as in the audit log
+		if r.Text != raw {
+			in := map[string]any{}
+			for k, v := range r.Input {
+				if v == raw {
+					v = r.Text
+				}
+				in[k] = v
+			}
+			r.Input = in
+		}
 		if len(r.Text) > maxRecordText {
 			r.Text = r.Text[:maxRecordText]
 		}
@@ -93,7 +105,7 @@ func appendRecords(path string, recs []record) {
 }
 
 // ledgerTTL is how long a session's ledger outlives its last write.
-const ledgerTTL = 30 * 24 * time.Hour
+const ledgerTTL = 7 * 24 * time.Hour
 
 // pruneLedgers removes the ledgers beside path that nobody wrote for ledgerTTL.
 func pruneLedgers(path string) {
@@ -200,19 +212,16 @@ func (s session) window(n int) []record {
 	return out
 }
 
-// SkillLoaded: a read of the skill's SKILL.md that paws let through in the window, and that didn't fail. The gate
-// checked the file exists before it allowed the read, so a read whose result isn't in yet (PostToolUse is async)
-// counts.
+// SkillLoaded: a read of the skill's SKILL.md that paws let through in the window and that succeeded. A read still
+// running (a call made alongside it) doesn't count yet.
 func (s session) SkillLoaded(skill string, window int) bool {
 	if skill == "" {
 		return false
 	}
 	ok := results(readLedger(s.own))
 	for _, r := range s.window(window) {
-		if r.SkillLoad == skill && r.Verdict == "allow" {
-			if succeeded, done := ok[r.ID]; !done || succeeded {
-				return true
-			}
+		if r.SkillLoad == skill && r.Verdict == "allow" && ok[r.ID] {
+			return true
 		}
 	}
 	return false

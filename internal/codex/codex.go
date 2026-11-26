@@ -3,10 +3,12 @@
 package codex
 
 import (
+	"cmp"
 	"encoding/json"
 	"fmt"
 	"os"
 	"path/filepath"
+	"regexp"
 	"sort"
 	"strings"
 	"time"
@@ -116,7 +118,8 @@ func canonical(in *Input) []call {
 		return []call{{tool: "Bash", target: cmd, text: cmd, input: map[string]any{"command": cmd}}}
 	case in.ToolName == "apply_patch":
 		var calls []call
-		for _, f := range parsePatch(str("command")) {
+		patch := cmp.Or(str("command"), str("input"), str("patch"))
+		for _, f := range parsePatch(patch) {
 			path := f.Path
 			if !filepath.IsAbs(path) {
 				path = filepath.Join(in.CWD, path)
@@ -128,7 +131,7 @@ func canonical(in *Input) []call {
 			calls = append(calls, c)
 		}
 		if len(calls) == 0 {
-			return []call{{tool: "apply_patch", target: str("command"), text: str("command"), input: ti}}
+			return []call{{tool: "apply_patch", target: patch, text: patch, input: ti}}
 		}
 		return calls
 	case in.ToolName == "spawn_agent":
@@ -242,7 +245,8 @@ func (Adapter) Observe(h *harness.Hook, d gate.Decision) {
 }
 
 // resultOK reads a PostToolUse tool_response: apply_patch's starts "Exit code: N"; a Bash result is the output alone,
-// so a read that failed shows as the shell's error text.
+// so a read that failed shows as the reader's error on the first line ("sed: <path>: No such file or directory"). The
+// rest of the output is the file, which may mention any error.
 func resultOK(raw json.RawMessage) bool {
 	var s string
 	if json.Unmarshal(raw, &s) != nil {
@@ -252,13 +256,11 @@ func resultOK(raw json.RawMessage) bool {
 	if rest, ok := strings.CutPrefix(s, "Exit code: "); ok {
 		return strings.HasPrefix(rest, "0\n") || rest == "0"
 	}
-	for _, e := range []string{"No such file or directory", "Permission denied", "Is a directory"} {
-		if strings.Contains(s, e) {
-			return false
-		}
-	}
-	return true
+	first, _, _ := strings.Cut(s, "\n")
+	return !readError.MatchString(first)
 }
+
+var readError = regexp.MustCompile(`(^|: )(No such file or directory|Permission denied|Is a directory)$`)
 
 // Turns is the ledger of the session, from the Stop's turn id.
 func (Adapter) Turns(h *harness.Hook) harness.TurnLog {
@@ -332,11 +334,12 @@ func (Adapter) Events() []string {
 }
 
 // Entry is a hooks.json entry: an explicit 15 s timeout (Codex's default is 600 s), async where nothing waits on the
-// answer, and matcher * on tool events.
+// answer, and matcher * on tool events. PostToolUse is not async: the ledger must hold a call's result before the
+// next call is gated, since a skill read or an edit counts only once it succeeded.
 func (Adapter) Entry(event, command string) map[string]any {
 	h := map[string]any{"type": "command", "command": command, "timeout": 15}
 	switch event {
-	case "UserPromptSubmit", "PostToolUse", "Stop", "PostCompact":
+	case "UserPromptSubmit", "Stop", "PostCompact":
 		h["async"] = true
 	}
 	if event == "PreToolUse" || event == "PostToolUse" {

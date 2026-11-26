@@ -265,6 +265,11 @@ func toCall(b turnBlock, at time.Time, agent string) outcome.Call {
 	in := Input{HookEventName: "PreToolUse", ToolName: b.Name, ToolInput: b.Input}
 	c := outcome.Call{ID: b.ID, Tool: b.Name, Target: in.Command(), Input: b.Input, At: at, Agent: agent}
 	c.Text = mainText(b.Name, b.Input, c.Target)
+	if b.Name == "Skill" {
+		c.SkillLoad, _ = b.Input["skill"].(string)
+	} else {
+		c.SkillLoad = gate.SkillRead(b.Name, c.Target, "")
+	}
 	if server, tool, ok := gate.MCPParts(b.Name); ok {
 		c.MCP = map[string]any{"server": server, "tool": tool, "class": rule.MCPAction(b.Name)}
 	}

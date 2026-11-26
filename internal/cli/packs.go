@@ -14,6 +14,7 @@ import (
 
 	"github.com/websentry-ai/paws/internal/catalog"
 	"github.com/websentry-ai/paws/internal/gate"
+	"github.com/websentry-ai/paws/internal/harness"
 	"github.com/websentry-ai/paws/internal/pack"
 	"github.com/websentry-ai/paws/internal/rule"
 )
@@ -214,15 +215,20 @@ func askPick(g catalog.PickOne) string {
 	return strings.TrimSpace(line)
 }
 
-// hookRegistered reports whether this repo's or the global settings run paws.
+// hookRegistered reports whether any harness runs paws in this repo or for this user.
 func hookRegistered() bool {
+	for _, a := range adapters {
+		if hookedIn(a) {
+			return true
+		}
+	}
+	return false
+}
+
+// hookedIn reports whether harness a runs paws in this repo or for this user.
+func hookedIn(a harness.Adapter) bool {
 	cwd, _ := os.Getwd()
-	claude := userClaudeDir()
-	for _, p := range []string{
-		filepath.Join(projectRoot(cwd), ".claude", "settings.json"),
-		filepath.Join(projectRoot(cwd), ".claude", "settings.local.json"),
-		filepath.Join(claude, "settings.json"),
-	} {
+	for _, p := range a.HookFiles(projectRoot(cwd)) {
 		if hasPawsHook(p) {
 			return true
 		}

@@ -31,13 +31,25 @@ func ToEvent(in *Input) gate.Event {
 		AgentID:    in.AgentID,
 		AgentType:  in.AgentType,
 	}
+	ev.Log = gate.TranscriptLog(ev.Transcript, ev.Own)
+	ev.Harness = Claude{}
 	switch in.HookEventName {
 	case "PreToolUse":
 		ev.Kind = rule.KindTool
+		ev.SkillLoad = skillLoad(in, ev.Target)
 	case "SessionStart":
 		ev.Kind = rule.KindSession
 	}
 	return ev
+}
+
+// skillLoad names the skill a call loads: the Skill tool's skill, or the one whose SKILL.md it reads.
+func skillLoad(in *Input, target string) string {
+	if in.ToolName == "Skill" {
+		s, _ := in.ToolInput["skill"].(string)
+		return s
+	}
+	return gate.SkillRead(in.ToolName, target, in.CWD)
 }
 
 // agentIDRe is what Claude Code's agent ids look like; anything else (a "/" or "..") could name a file

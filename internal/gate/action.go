@@ -99,6 +99,7 @@ func LogAction(ev Event) {
 	if ev.AgentID != "" {
 		rec["agent_id"] = ev.AgentID
 	}
+	Stamp(rec, ev)
 	appendAudit(p, rec)
 }
 

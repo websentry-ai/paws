@@ -94,8 +94,9 @@ type skillResult struct {
 }
 
 // SkillLoaded reports whether skill was invoked successfully within the last `window`
-// turns of the transcript at path. A turn is one message the user typed and everything
-// the agent did to answer it, however many tool calls that took.
+// turns of the transcript at path: with the Skill tool, or by reading its SKILL.md (see
+// SkillRead) with a result that isn't an error. A turn is one message the user typed and
+// everything the agent did to answer it, however many tool calls that took.
 //
 // False is the answer for every uncertain case — no transcript, unreadable file,
 // window exhausted, or a context compaction between the load and now — because
@@ -107,10 +108,14 @@ func SkillLoaded(path, skill string, window int) bool {
 	}
 	lines := windowLines(path, window)
 	calls := skillCalls(lines, path, skill)
+	reads := readCalls(lines, path, skill)
 	// Only a line with the skill's result record or one of its calls' ids (a blob answering it) can match.
 	name, _ := json.Marshal(skill)
 	needles := [][]byte{append([]byte(`"commandName":`), name...)}
 	for id := range calls {
+		needles = append(needles, []byte(id))
+	}
+	for id := range reads {
 		needles = append(needles, []byte(id))
 	}
 	return scanLines(lines, path, needles, func(e transcriptEntry) bool {
@@ -118,11 +123,19 @@ func SkillLoaded(path, skill string, window int) bool {
 			// A tool_result answering a Skill tool_use for this skill, not an error. The pairing
 			// by id is what keeps a command that prints "Launching skill: x" from counting.
 			for _, b := range e.blocks() {
-				if b.Type == "tool_result" && !b.IsError && calls[b.ToolUseID] {
+				if b.Type == "tool_result" && !b.IsError && (calls[b.ToolUseID] || reads[b.ToolUseID]) {
 					return true
 				}
 			}
 			return false
+		}
+		if e.Type == "user" && len(reads) > 0 {
+			// A read of the skill's SKILL.md that succeeded: its tool_result, paired by id.
+			for _, b := range e.blocks() {
+				if b.Type == "tool_result" && !b.IsError && reads[b.ToolUseID] {
+					return true
+				}
+			}
 		}
 		if e.Type != "user" || len(e.ToolUseResult) == 0 || e.ToolUseResult[0] != '{' {
 			return false
@@ -153,6 +166,81 @@ func skillCalls(lines [][]byte, path, skill string) map[string]bool {
 	}
 	return calls
 }
+
+// readCalls returns the ids of the log's own Read and Bash tool_use blocks that read skill's SKILL.md.
+func readCalls(lines [][]byte, path, skill string) map[string]bool {
+	calls := map[string]bool{}
+	file := []byte("/" + skill + "/SKILL.md") // skips every line that can't name the file
+	for _, l := range lines {
+		var e transcriptEntry
+		if !bytes.Contains(l, file) || !bytes.Contains(l, toolUseType) || json.Unmarshal(l, &e) != nil || foreign(e, path) || (e.Type != "assistant" && e.Type != requestBlob) {
+			continue
+		}
+		var m struct {
+			Cwd     string `json:"cwd"`
+			Message struct {
+				Content []struct {
+					Type  string `json:"type"`
+					ID    string `json:"id"`
+					Name  string `json:"name"`
+					Input struct {
+						FilePath string `json:"file_path"`
+						Command  string `json:"command"`
+					} `json:"input"`
+				} `json:"content"`
+			} `json:"message"`
+		}
+		if json.Unmarshal(l, &m) != nil {
+			continue
+		}
+		for _, b := range m.Message.Content {
+			target := b.Input.Command
+			if b.Name == "Read" {
+				target = b.Input.FilePath
+			}
+			if b.Type == "tool_use" && SkillRead(b.Name, target, m.Cwd) == skill {
+				calls[b.ID] = true
+			}
+		}
+	}
+	return calls
+}
+
+var toolUseType = []byte(`"type":"tool_use"`)
+
+// transcriptModel is the model of the last assistant message in the log at path: Claude Code names it on each one,
+// so after a /model switch it is one response behind at most. "" when the tail has none.
+func transcriptModel(path string) string {
+	lines, err := tailLines(path)
+	if err != nil {
+		return ""
+	}
+	for i := len(lines) - 1; i >= 0; i-- {
+		l := lines[i]
+		if !bytes.Contains(l, assistantType) || !bytes.Contains(l, modelKey) {
+			continue
+		}
+		var e struct {
+			Type        string `json:"type"`
+			IsSidechain bool   `json:"isSidechain"`
+			Message     struct {
+				Model string `json:"model"`
+			} `json:"message"`
+		}
+		if json.Unmarshal(l, &e) != nil || e.Type != "assistant" || e.IsSidechain && !subagentLog(path) {
+			continue
+		}
+		if m := e.Message.Model; m != "" && m != "<synthetic>" { // <synthetic>: a message Claude Code wrote itself
+			return m
+		}
+	}
+	return ""
+}
+
+var (
+	assistantType = []byte(`"type":"assistant"`)
+	modelKey      = []byte(`"model":"`)
+)
 
 // hookDenyPrefix is how Claude Code records a PreToolUse deny in toolUseResult:
 // "Error: PreToolUse:<Tool> hook error: <reason>". A failed command is recorded as

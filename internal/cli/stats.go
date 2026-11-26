@@ -54,6 +54,8 @@ type auditRecord struct {
 	File    string        `json:"file"`
 	MCP     *gate.MCPCall `json:"mcp"`
 	AgentID string        `json:"agent_id"`
+	Harness string        `json:"harness"` // "claude-code", "codex"; older records have none
+	Model   string        `json:"model"`
 	// outcome records (see outcomes.go): what followed a block, graded at the end of its turn.
 	Outcome   string          `json:"outcome"`
 	Checks    map[string]bool `json:"checks"`

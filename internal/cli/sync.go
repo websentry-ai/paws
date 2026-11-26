@@ -29,6 +29,8 @@ type ruleUpload struct {
 	Verdict       string `json:"verdict"`
 	AlreadyLoaded bool   `json:"already_loaded"`
 	SatisfiedBy   string `json:"satisfied_by,omitempty"`
+	Harness       string `json:"harness,omitempty"` // which harness made the call; the portal takes none as claude-code
+	Model         string `json:"model,omitempty"`
 }
 
 // actionUpload is what `paws sync` uploads about one finished tool call (see gate.ToolAction).
@@ -40,6 +42,8 @@ type actionUpload struct {
 	Command string        `json:"command,omitempty"`
 	File    string        `json:"file,omitempty"`
 	MCP     *gate.MCPCall `json:"mcp,omitempty"`
+	Harness string        `json:"harness,omitempty"`
+	Model   string        `json:"model,omitempty"`
 }
 
 // outcomeUpload is what `paws sync` uploads about one graded block (see outcomes.go): the skill, the rule's action,
@@ -56,6 +60,8 @@ type outcomeUpload struct {
 	// What Claude ran after the block (the retry, or the other route): a redacted Bash command, else the tool and
 	// its file or MCP tool. Empty for a stopped block.
 	RetryCommand string `json:"retry_command,omitempty"`
+	Harness      string `json:"harness,omitempty"`
+	Model        string `json:"model,omitempty"`
 }
 
 type syncBody struct {
@@ -345,7 +351,7 @@ func toRuleUpload(r auditRecord, already bool, rules sourceRules) (ruleUpload, b
 		return ruleUpload{}, false
 	}
 	rec := ruleUpload{Kind: "rule", TS: r.TS, Event: r.Event, Skill: skill, Tool: r.Tool, Verdict: r.Verdict,
-		AlreadyLoaded: already, SatisfiedBy: r.SatisfiedBy}
+		AlreadyLoaded: already, SatisfiedBy: r.SatisfiedBy, Harness: r.Harness, Model: uploadModel(r.Model)}
 	if r.Tool == "Bash" {
 		rec.Command = gate.RedactCommand(r.Target)
 	}
@@ -358,9 +364,23 @@ func toRuleUpload(r auditRecord, already bool, rules sourceRules) (ruleUpload, b
 	return rec, true
 }
 
+// uploadModel is a model name as it may leave the machine: up to 100 printable ASCII characters, else none.
+func uploadModel(m string) string {
+	if len(m) > 100 {
+		return ""
+	}
+	for _, r := range m {
+		if r < 0x20 || r > 0x7e {
+			return ""
+		}
+	}
+	return m
+}
+
 // toActionUpload passes an action record through, re-checking what may leave the machine.
 func toActionUpload(r auditRecord) actionUpload {
-	rec := actionUpload{Kind: "action", TS: r.TS, Tool: r.Tool, Action: r.Action, File: r.File, MCP: r.MCP}
+	rec := actionUpload{Kind: "action", TS: r.TS, Tool: r.Tool, Action: r.Action, File: r.File, MCP: r.MCP,
+		Harness: r.Harness, Model: uploadModel(r.Model)}
 	if r.Command != "" {
 		rec.Command = gate.RedactCommand(r.Command)
 	}
@@ -374,7 +394,7 @@ func toActionUpload(r auditRecord) actionUpload {
 // portal can show which trigger the outcome belongs to.
 func toOutcomeUpload(r auditRecord) outcomeUpload {
 	rec := outcomeUpload{Kind: "outcome", TS: r.TS, BlockedAt: r.BlockedAt, Skill: r.Skill, Tool: r.Tool,
-		Outcome: r.Outcome, Checks: r.Checks, RetryCommand: r.RetryCommand}
+		Outcome: r.Outcome, Checks: r.Checks, RetryCommand: r.RetryCommand, Harness: r.Harness, Model: uploadModel(r.Model)}
 	switch {
 	case managed(r.Source): // a portal rule is named <skill>--<action id>
 		// The skill's own name comes off the front, so a `--` inside the skill's name or the action id splits nowhere.

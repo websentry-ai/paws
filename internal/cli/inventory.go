@@ -8,7 +8,6 @@ import (
 	"strings"
 
 	"github.com/websentry-ai/paws/internal/gate"
-	"github.com/websentry-ai/paws/internal/pack"
 	"github.com/websentry-ai/paws/internal/rule"
 )
 
@@ -28,7 +27,11 @@ type inventoryRule struct {
 func inventoryFor(cwd string) *inventory {
 	inv := &inventory{Skills: []string{}, Rules: []inventoryRule{}}
 	seen := map[string]bool{}
-	for _, dir := range []string{pack.UserTarget(gate.UserDir()).SkillsDir, pack.ProjectTarget(projectRoot(cwd)).SkillsDir} {
+	var dirs []string
+	for _, a := range adapters {
+		dirs = append(dirs, a.SkillDirs(cwd)...)
+	}
+	for _, dir := range dirs {
 		entries, _ := os.ReadDir(dir)
 		for _, e := range entries {
 			name := e.Name()

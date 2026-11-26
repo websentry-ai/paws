@@ -44,9 +44,9 @@ func conditionHolds(c rule.Condition, ev Event) bool {
 		_, err := os.Stat(path)
 		return os.IsNotExist(err)
 	case rule.WhenNoEditMatching:
-		return !editedMatching(ev.Transcript, c.Glob)
+		return !ev.session().EditedMatching(c.Glob)
 	case rule.WhenAgentCount:
-		return agentsSinceUserTurn(ev.Transcript) > c.N
+		return ev.session().AgentsSinceUserTurn() > c.N
 	}
 	return false
 }

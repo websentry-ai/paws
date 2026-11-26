@@ -7,31 +7,27 @@ import (
 	"strings"
 	"unicode/utf8"
 
-	"github.com/websentry-ai/paws/internal/pack"
 	"github.com/websentry-ai/paws/internal/rule"
 )
 
-// Event is an agent-normalized pending action; adapters build it from native hook JSON.
+// Event is an agent-normalized pending action; adapters build it from native hook JSON, in the canonical vocabulary
+// (Claude Code's tool names: Bash, Read, Write, Edit, Agent, mcp__<server>__<tool>, Skill).
 type Event struct {
-	Agent      string // which agent produced it, e.g. "claude-code"
+	Agent      string // the harness that produced it, the id stored on every record: "claude-code", "codex"
 	Kind       string // rule.KindTool or rule.KindSession
 	Tool       string
 	Target     string // the string rules match against (command, path, or session source)
 	Session    string
-	Transcript string // path to the session log, when the agent supplies one
+	Transcript string // path to Claude Code's session log, when the event has no Log
 	Own        string // the calling thread's own log when it isn't Transcript: a subagent's
 	Cwd        string // the agent's working directory; repo conditions resolve from it
 	AgentID    string // set when the call comes from a subagent rather than the main thread
 	AgentType  string
-}
-
-// ownLog is the log of the thread making the call: where its own skill loads and the denies it was
-// shown are. Session-wide conditions (agent-count, edits) read Transcript.
-func (ev Event) ownLog() string {
-	if ev.Own != "" {
-		return ev.Own
-	}
-	return ev.Transcript
+	// SkillLoad names the skill this call loads (the Skill tool, or a read of the skill's SKILL.md); such a call is
+	// never gated, since it is the call that clears a require-skill gate.
+	SkillLoad string
+	Log       Session // the session's past; nil reads Transcript and Own as Claude Code logs
+	Harness   Harness // skill folders and deny wording; nil is SkillTool
 }
 
 // DefaultSkillWindow is how many turns back a skill load still counts for: the user's last 20 messages
@@ -79,6 +75,29 @@ func Decide(ev Event, rules []*rule.Rule) Decision {
 		}
 	}
 	return resolve(ev, matched)
+}
+
+// DecideAll is the decision for a call that touches several targets (a patch to several files), one event each:
+// any deny wins, and each distinct reason and context is kept once.
+func DecideAll(evs []Event, rules []*rule.Rule) Decision {
+	if len(evs) == 1 {
+		return Decide(evs[0], rules)
+	}
+	top := Decision{Verdict: Allow}
+	var reasons, contexts []string
+	for _, ev := range evs {
+		d := Decide(ev, rules)
+		if d.Verdict == Deny {
+			top.Verdict = Deny
+			reasons = appendNew(reasons, d.Reason)
+		}
+		if d.Context != "" {
+			contexts = appendNew(contexts, d.Context)
+		}
+	}
+	top.Reason = capText(strings.Join(reasons, "\n\n"))
+	top.Context = capText(strings.Join(contexts, "\n"))
+	return top
 }
 
 // resolve collapses matched rules into one decision: any deny wins, context concatenates, fired rules are audited.
@@ -136,22 +155,22 @@ func evaluate(r *rule.Rule, ev Event) outcome {
 	if a.Type != rule.ActionRequireSkill {
 		return outcome{}
 	}
-	if ev.Kind == rule.KindTool && ev.Tool == "Skill" {
-		// Loading a skill is how a require-skill gate clears; gating the Skill tool would lock
-		// the agent out of the very call that satisfies the rule.
+	if ev.Kind == rule.KindTool && (ev.SkillLoad != "" || ev.Tool == "Skill") {
+		// Loading a skill is how a require-skill gate clears; gating the Skill tool, or the read of a
+		// SKILL.md, would lock the agent out of the very call that satisfies the rule.
 		return outcome{}
 	}
-	if SkillLoaded(ev.ownLog(), a.Skill, DefaultSkillWindow) {
+	if ev.session().SkillLoaded(a.Skill, DefaultSkillWindow) {
 		return outcome{verdict: Allow, satisfiedBy: skillLoadSatisfied, fired: true}
 	}
 	digest, digestErr := loadDigest(r)
-	if digest == "" && portalSkillMissing(r, ev.Cwd) {
+	if digest == "" && portalSkillMissing(r, ev) {
 		// A portal rule whose skill isn't on this laptop (deleted by hand, or not installed
 		// yet): the agent has nothing to load, so denying would be a dead end. The next config
 		// check reinstalls the skill.
 		return outcome{}
 	}
-	if digest != "" && DenyDelivered(ev.ownLog(), digestMarker(r), DefaultSkillWindow) {
+	if digest != "" && ev.session().DenyDelivered(digestMarker(r), DefaultSkillWindow) {
 		// The digest already rode in a deny this window: the agent has the rules, let the retry through.
 		return outcome{verdict: Allow, satisfiedBy: digestSatisfied, fired: true}
 	}
@@ -160,7 +179,7 @@ func evaluate(r *rule.Rule, ev Event) outcome {
 		if digest != "" {
 			return outcome{verdict: Allow, context: digestMarker(r) + " " + digest, fired: true}
 		}
-		return outcome{verdict: Allow, context: msgOr(a.Message, sessionSkillContext(r)), fired: true}
+		return outcome{verdict: Allow, context: msgOr(a.Message, sessionSkillContext(r, ev)), fired: true}
 	}
 	if digest != "" {
 		return outcome{verdict: Deny, reason: digestReason(r, digest), fired: true}
@@ -172,9 +191,9 @@ func evaluate(r *rule.Rule, ev Event) outcome {
 }
 
 // portalSkillMissing reports whether r is a portal rule (under UserDir()/portal) whose skill
-// has no SKILL.md in the user's skills directory or cwd's project. paws installs every portal
+// has no SKILL.md in the harness's user skills directory or cwd's project. paws installs every portal
 // skill there, so unlike a local rule (whose skill may come from a plugin) absence is certain.
-func portalSkillMissing(r *rule.Rule, cwd string) bool {
+func portalSkillMissing(r *rule.Rule, ev Event) bool {
 	user := UserDir()
 	if user == "" {
 		return false
@@ -186,12 +205,7 @@ func portalSkillMissing(r *rule.Rule, cwd string) bool {
 	if !strings.HasPrefix(r.SourcePath, filepath.Join(root, "portal")+string(filepath.Separator)) {
 		return false
 	}
-	for _, dir := range []string{pack.UserTarget(user).SkillsDir, pack.ProjectTarget(repoRoot(cwd)).SkillsDir} {
-		if st, err := os.Stat(filepath.Join(dir, r.Action.Skill, "SKILL.md")); err == nil && st.Mode().IsRegular() {
-			return false
-		}
-	}
-	return true
+	return ev.skillFile(r.Action.Skill) == ""
 }
 
 // loadDigest returns the rule's digest when on_miss is digest. On a missing, unreadable or
@@ -229,8 +243,9 @@ func digestReason(r *rule.Rule, digest string) string {
 		digestMarker(r), r.Action.Skill, digest)
 }
 
-func sessionSkillContext(r *rule.Rule) string {
-	return fmt.Sprintf("paws (rule %s): this project needs the %q skill. Load it with the Skill tool before you start work.", r.Name, r.Action.Skill)
+func sessionSkillContext(r *rule.Rule, ev Event) string {
+	skill := Skill{Name: r.Action.Skill, File: ev.skillFile(r.Action.Skill)}
+	return fmt.Sprintf("paws (rule %s): this project needs the %q skill. %s", r.Name, r.Action.Skill, ev.harness().LoadAtStart(skill))
 }
 
 // skillReason is the default require-skill deny: it says paws sent it and which rules, so a person
@@ -243,15 +258,17 @@ func skillReason(names, skills []string, ev Event) string {
 		label = "rules " + strings.Join(names, ", ")
 	}
 	quoted := make([]string, len(skills))
+	refs := make([]Skill, len(skills))
 	for i, s := range skills {
 		quoted[i] = fmt.Sprintf("%q", s)
+		refs[i] = Skill{Name: s, File: ev.skillFile(s)}
 	}
-	need, pronoun := fmt.Sprintf("the %s skill", quoted[0]), "it"
+	need := fmt.Sprintf("the %s skill", quoted[0])
 	if len(quoted) > 1 {
-		need, pronoun = fmt.Sprintf("the %s and %s skills", strings.Join(quoted[:len(quoted)-1], ", "), quoted[len(quoted)-1]), "them"
+		need = fmt.Sprintf("the %s and %s skills", strings.Join(quoted[:len(quoted)-1], ", "), quoted[len(quoted)-1])
 	}
 	noun := actionNoun(ev)
-	return fmt.Sprintf("paws (%s): this is paws working as intended, nothing is broken. This %s needs %s. Load %s with the Skill tool, then retry this exact %s.", label, noun, need, pronoun, noun)
+	return fmt.Sprintf("paws (%s): this is paws working as intended, nothing is broken. This %s needs %s. %s", label, noun, need, ev.harness().LoadSkills(refs, noun))
 }
 
 // actionNoun names the call a deny blocks: Claude retries "this exact command" for Bash, and the

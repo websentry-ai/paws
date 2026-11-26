@@ -9,6 +9,7 @@ import (
 	"reflect"
 	"strings"
 
+	"github.com/websentry-ai/paws/internal/harness"
 	"github.com/websentry-ai/paws/internal/hook"
 )
 
@@ -91,24 +92,33 @@ func writeSettings(path string, doc settingsDoc) error {
 	return nil
 }
 
-// ensureHooks adds (or repoints, if the binary moved) a paws entry per registered event; idempotent,
-// other hooks untouched.
+// ensureHooks is ensureHooksFor Claude Code.
 func ensureHooks(doc settingsDoc, command string, guard bool) (bool, error) {
+	return ensureHooksFor(hook.Claude{}, doc, command, guard)
+}
+
+// ensureHooksFor adds (or repoints, if the binary moved) a paws entry per event the harness registers; idempotent,
+// other hooks untouched.
+func ensureHooksFor(a harness.Adapter, doc settingsDoc, command string, guard bool) (bool, error) {
 	hooks, err := hooksBlock(doc)
 	if err != nil {
 		return false, err
 	}
 	changed := false
-	for _, event := range hook.RegisteredEvents {
+	for _, event := range a.Events() {
 		var list []json.RawMessage
 		if raw, ok := hooks[event]; ok {
 			if err := json.Unmarshal(raw, &list); err != nil {
 				return false, fmt.Errorf("hooks.%s: %w", event, err)
 			}
 		}
-		desired := hook.RawEntry(event, command)
+		entry := a.Entry(event, command)
 		if guard {
-			desired = hook.RawEntry(event, guardedCommand(command, event))
+			entry = a.Entry(event, guardedCommand(command, event))
+		}
+		desired, err := json.Marshal(entry)
+		if err != nil {
+			return false, err
 		}
 		idx := pawsEntryIndex(list)
 		switch {

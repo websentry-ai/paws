@@ -332,8 +332,8 @@ func buildScan(creds *credentials, days int) ([]byte, history.Summary, error) {
 	}
 	until := scanNow().UTC()
 	since := until.AddDate(0, 0, -days)
-	transcripts := hook.Transcripts{Dir: filepath.Join(userClaudeDir(), "projects")}
-	var src history.Source = transcripts
+	a := defaultAdapter()
+	src, dir := a.History()
 	// Once logged in, sync uploads every call the hook logged, from before the login too (the first sync sends the
 	// whole audit log). Each of those reached the portal already, so it is left out; a call the hook never logged (paws
 	// not registered there, or not yet) still counts.
@@ -342,10 +342,10 @@ func buildScan(creds *credentials, days int) ([]byte, history.Summary, error) {
 		// earlier account may have received the older ones).
 		src = skipSynced{Source: src, from: syncCursor{TS: creds.SyncFrom, N: creds.SyncFromN}}
 	}
-	fmt.Fprintf(os.Stderr, "Reading the Claude Code sessions in %s from %s to %s...\n", transcripts.Dir, since.Format(time.DateOnly), until.Format(time.DateOnly))
+	fmt.Fprintf(os.Stderr, "Reading the %s sessions in %s from %s to %s...\n", a.Title(), dir, since.Format(time.DateOnly), until.Format(time.DateOnly))
 	sum, err := history.Summarize(src, since, until, days, catalog)
 	if err != nil {
-		return nil, sum, fmt.Errorf("reading %s: %w", transcripts.Dir, err)
+		return nil, sum, fmt.Errorf("reading %s: %w", dir, err)
 	}
 	body, err := json.MarshalIndent(historyUpload{Summary: sum, CatalogVersion: cat.Version}, "", "  ")
 	return append(body, '\n'), sum, err

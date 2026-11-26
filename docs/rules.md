@@ -112,6 +112,17 @@ sends and everything the agent does to answer it, however many tool calls.
 On `session-start`, which can't be denied, it adds context naming the skill
 instead (`message` replaces that text).
 
+A skill is loaded by the Skill tool, or by reading its `SKILL.md`
+(`<dir>/skills/<skill>/SKILL.md`): the Read tool on the file, or a Bash command
+that only prints it (`cat`, `sed -n '1,240p'`, `head`, `tail`, `nl`, `less`,
+`more`, `bat`, an `awk` print). A read chained with anything else
+(`cat SKILL.md && git push`) is not a load. A load is never gated, so a rule
+that matches every call can't block the call that clears it; it counts only
+when it succeeded. A skill installed after the session started isn't in
+Claude Code's skill list, so the default deny also names the skill's
+`SKILL.md` when paws finds it in `~/.claude/skills` or the project's
+`.claude/skills`.
+
 `deny_message` replaces the default deny, which names the skill and tells
 the agent to invoke it and retry the same command. A compaction resets the
 20-turn window, so the next gated call denies once more.

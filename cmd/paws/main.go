@@ -23,7 +23,7 @@ func run(args []string) int {
 	}
 	switch args[0] {
 	case "gate":
-		return cli.Gate()
+		return cli.GateFor(args[1:])
 	case "init":
 		return cli.Init(args[1:])
 	case "uninstall":

@@ -247,6 +247,26 @@ func replaceable(dir string) bool {
 	return err == nil && now == m.Installed
 }
 
+// untouched is replaceable plus a check the content hash can't make: it skips hidden paths, and paws writes none
+// but the marker, so a hidden file or a link inside the skill is the user's.
+func untouched(dir string) bool {
+	if !replaceable(dir) {
+		return false
+	}
+	ok := true
+	filepath.WalkDir(dir, func(p string, d fs.DirEntry, err error) error {
+		if err != nil || p == dir {
+			return nil
+		}
+		if rel, _ := filepath.Rel(dir, p); rel != markerFile && (strings.HasPrefix(d.Name(), ".") || !d.IsDir() && !d.Type().IsRegular()) {
+			ok = false
+			return filepath.SkipAll
+		}
+		return nil
+	})
+	return ok
+}
+
 // removeSkill deletes a skill directory only if paws installed it and it is unedited; it
 // reports whether it removed it.
 func removeSkill(skillsDir, name string) (bool, error) {
@@ -254,7 +274,7 @@ func removeSkill(skillsDir, name string) (bool, error) {
 		return false, fmt.Errorf("invalid skill name %q", name)
 	}
 	dir := filepath.Join(skillsDir, name)
-	if !replaceable(dir) {
+	if !untouched(dir) {
 		return false, nil
 	}
 	return true, os.RemoveAll(dir)
@@ -377,10 +397,11 @@ func PawsSkills(skillsDir string) []PawsSkill {
 	var out []PawsSkill
 	for _, e := range entries {
 		dir := filepath.Join(skillsDir, e.Name())
-		if st, err := os.Stat(dir); err != nil || !st.IsDir() || !catalog.ValidSkillName(e.Name()) || !pawsOwned(dir) {
+		// A symbolic link to a skill is the user's wiring, not a directory paws installed.
+		if !e.IsDir() || !catalog.ValidSkillName(e.Name()) || !pawsOwned(dir) {
 			continue
 		}
-		out = append(out, PawsSkill{Name: e.Name(), Edited: !replaceable(dir)})
+		out = append(out, PawsSkill{Name: e.Name(), Edited: !untouched(dir)})
 	}
 	return out
 }

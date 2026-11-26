@@ -221,3 +221,59 @@ func TestUninstallWithNothingInstalled(t *testing.T) {
 		t.Errorf("unknown flag: exit %d, want 2", code)
 	}
 }
+
+// A cloned repo controls .paws/installed.yaml and .paws/packs, so a symbolic link in there must not lead the
+// deletion elsewhere, and the state file stays so a retry finds the pack.
+func TestUninstallDoesNotFollowSymlinksOutOfThePacksFolder(t *testing.T) {
+	f := setupUninstall(t)
+	victim := filepath.Join(f.home, "victim")
+	writeFile(t, filepath.Join(victim, "docs", "keep.txt"), "x")
+	packs := filepath.Join(f.repo, ".paws", "packs")
+	for _, name := range []string{"writing", "_bindings"} {
+		os.RemoveAll(filepath.Join(packs, name))
+	}
+	if err := os.Symlink(victim, filepath.Join(packs, "evil")); err != nil {
+		t.Skip(err)
+	}
+	state := filepath.Join(f.repo, ".paws", "installed.yaml")
+	writeFile(t, state, "packs:\n  evil/docs:\n    bindings: [a.md]\n    at: now\n  evil:\n    bindings: [a.md]\n    at: now\n  .:\n    bindings: [a.md]\n    at: now\n")
+	code, _ := capture(t, &os.Stderr, func() int {
+		c, _ := captureStdout(t, func() int { return Uninstall([]string{"--project", "--yes"}) })
+		return c
+	})
+	if code != 1 {
+		t.Errorf("exit %d, want 1: a pack could not be removed", code)
+	}
+	kept(t, filepath.Join(victim, "docs", "keep.txt"), filepath.Join(packs, "evil"), state)
+}
+
+func TestUninstallKeepsSkillsWithHiddenFilesAndUnreadableLogin(t *testing.T) {
+	f := setupUninstall(t)
+	gitSkill := filepath.Join(f.home, ".claude", "skills", "git")
+	writeFile(t, filepath.Join(gitSkill, ".notes"), "mine") // the content hash ignores hidden files
+	creds := filepath.Join(f.pawsHome, "credentials.json")
+	writeFile(t, creds, "not json")
+	code, out := capture(t, &os.Stderr, func() int {
+		c, _ := captureStdout(t, func() int { return Uninstall([]string{"--global", "--yes"}) })
+		return c
+	})
+	if code != 1 {
+		t.Errorf("exit %d, want 1 for the login that could not be read: %s", code, out)
+	}
+	if !strings.Contains(out, "can't read") || f.logouts.Load() != 0 {
+		t.Errorf("stderr %q, %d logouts", out, f.logouts.Load())
+	}
+	kept(t, filepath.Join(gitSkill, ".notes"), creds)
+	gone(t, filepath.Join(f.home, ".claude", "skills", "humanizer"), filepath.Join(f.pawsHome, "packs"))
+}
+
+func TestUninstallGlobalKeepsTheBinaryAHookHereStillRuns(t *testing.T) {
+	f := setupUninstall(t)
+	if code, out := captureStdout(t, func() int { return Uninstall([]string{"--global", "--yes"}) }); code != 0 {
+		t.Fatalf("exit %d: %s", code, out)
+	}
+	kept(t, filepath.Join(f.pawsHome, "bin"), filepath.Join(f.repo, ".claude", "settings.json"))
+	if hasPawsHook(filepath.Join(f.home, ".claude", "settings.json")) {
+		t.Error("--global left the global hook")
+	}
+}

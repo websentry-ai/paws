@@ -83,7 +83,10 @@ func Uninstall(args []string) int {
 		hooks := []string{filepath.Join(userClaudeDir(), "settings.json")}
 		plan, keep = planScope(plan, keep, "global", hooks, pack.UserTarget(gate.UserDir()), f.keepSkills)
 		plan = planPortal(plan)
-		plan = planUserFiles(plan)
+		// Without --project, this project's hook stays, and it may run the shared copy of the binary.
+		keepBin := !f.project && (hasPawsHook(filepath.Join(projectRoot(cwd), ".claude", "settings.json")) ||
+			hasPawsHook(filepath.Join(projectRoot(cwd), ".claude", "settings.local.json")))
+		plan, keep = planUserFiles(plan, keep, keepBin)
 	}
 
 	if len(plan) == 0 {
@@ -138,6 +141,8 @@ To remove the binary itself, use the way you installed it:
   npm rm -g unbound-paws
   brew uninstall --cask unbound-paws
   rm ~/.local/bin/unbound-paws     # the install script
+
+A repo that committed the paws hook keeps it until you remove it there (unbound-paws uninstall, run in that repo).
 `)
 	return code
 }
@@ -152,6 +157,7 @@ func planScope(plan []removal, keep []string, scope string, settings []string, t
 		}
 	}
 	if st, err := pack.LoadState(t.StateFile); err == nil && len(st.Packs) > 0 {
+		packFailed := false
 		var names []string
 		for n := range st.Packs {
 			names = append(names, n)
@@ -159,16 +165,23 @@ func planScope(plan []removal, keep []string, scope string, settings []string, t
 		sort.Strings(names)
 		for _, n := range names {
 			n, dir := n, pack.InstallDir(t, n)
-			if rel, err := filepath.Rel(t.PacksDir, dir); err != nil || !filepath.IsLocal(rel) {
+			if rel, err := filepath.Rel(t.PacksDir, dir); err != nil || !filepath.IsLocal(rel) || rel == "." {
 				continue // a name in the state file that points outside the packs folder is not paws's to delete
 			}
 			plan = append(plan, removal{fmt.Sprintf("pack      %s (%s) in %s", n, count(len(st.Packs[n].Bindings), "rule"), tilde(dir)), func() error {
-				err := os.RemoveAll(dir)
+				err := removePackDir(t.PacksDir, dir)
+				if err != nil {
+					packFailed = true
+				}
 				pruneUp(filepath.Dir(dir), t.PacksDir)
 				return err
 			}})
 		}
 		plan = append(plan, removal{"packs     " + tilde(t.StateFile), func() error {
+			if packFailed {
+				// The state file is how a retry finds the packs left behind.
+				return fmt.Errorf("kept %s: a pack could not be removed, so run uninstall again after fixing that", tilde(t.StateFile))
+			}
 			err := os.Remove(t.StateFile)
 			if errors.Is(err, os.ErrNotExist) {
 				err = nil
@@ -201,10 +214,13 @@ func planPortal(plan []removal) []removal {
 	if path := credentialsPath(); path != "" {
 		if _, err := os.Stat(path); err == nil {
 			plan = append(plan, removal{"login     " + tilde(path) + " (logs this laptop out of the portal first)", func() error {
-				if c, _ := loadCredentials(); c != nil {
-					if Logout(nil) != 0 {
-						return errors.New("logout failed; credentials.json is still there")
-					}
+				c, err := loadCredentials()
+				if err != nil {
+					// Deleting a file paws can't read would leave this laptop's login live in the portal.
+					return fmt.Errorf("can't read %s (%v); kept it. Disconnect this laptop in the portal, then delete the file", tilde(path), err)
+				}
+				if c != nil && Logout(nil) != 0 {
+					return errors.New("logout failed; credentials.json is still there")
 				}
 				if err := os.Remove(path); err != nil && !errors.Is(err, os.ErrNotExist) {
 					return err
@@ -230,10 +246,10 @@ func planPortal(plan []removal) []removal {
 
 // planUserFiles adds the files paws writes in its own folder as it runs: the audit log, the sync cursors and the
 // binary copy init makes. Rule files the user wrote there are not on the list.
-func planUserFiles(plan []removal) []removal {
+func planUserFiles(plan []removal, keep []string, keepBin bool) ([]removal, []string) {
 	dir := gate.UserDir()
 	if dir == "" {
-		return plan
+		return plan, keep
 	}
 	for _, name := range []string{"audit.log", "audit.log.1", "sync-state.json", "sync-from.json"} {
 		path := filepath.Join(dir, name)
@@ -250,7 +266,9 @@ func planUserFiles(plan []removal) []removal {
 				paths = append(paths, filepath.Join(bin, n))
 			}
 		}
-		if len(paths) > 0 {
+		if len(paths) > 0 && keepBin {
+			keep = append(keep, "binary    "+tilde(bin)+" (the hook still registered in this project runs it)")
+		} else if len(paths) > 0 {
 			plan = append(plan, removal{"binary    " + tilde(bin) + " (the copy `init` made for the hook)", func() error {
 				var errs []error
 				for _, p := range paths {
@@ -261,7 +279,7 @@ func planUserFiles(plan []removal) []removal {
 			}})
 		}
 	}
-	return plan
+	return plan, keep
 }
 
 // unregisterHook strips the paws hook entries from a settings file, deleting the file if nothing else was in it.
@@ -298,4 +316,28 @@ func pruneUp(dir, stop string) {
 		}
 		dir = filepath.Dir(dir)
 	}
+}
+
+// removePackDir deletes a pack's folder under packs. The state file can come from a cloned repo, so it refuses to
+// walk through a symbolic link: a link inside the folder could point at anything.
+func removePackDir(packs, dir string) error {
+	rel, err := filepath.Rel(packs, dir)
+	if err != nil || !filepath.IsLocal(rel) || rel == "." {
+		return fmt.Errorf("%s is not inside %s", tilde(dir), tilde(packs))
+	}
+	cur := packs
+	for _, part := range append([]string{""}, strings.Split(rel, string(filepath.Separator))...) {
+		cur = filepath.Join(cur, part)
+		st, err := os.Lstat(cur)
+		if errors.Is(err, os.ErrNotExist) {
+			return nil
+		}
+		if err != nil {
+			return err
+		}
+		if st.Mode()&os.ModeSymlink != 0 {
+			return fmt.Errorf("%s is a symbolic link; left it alone", tilde(cur))
+		}
+	}
+	return os.RemoveAll(dir)
 }

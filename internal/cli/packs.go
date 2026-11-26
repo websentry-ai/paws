@@ -183,6 +183,9 @@ func didYouMean(name string) string {
 	if len(near) == 0 {
 		return ""
 	}
+	for i, n := range near {
+		near[i] = printable(n) // the names come from the server
+	}
 	return " Did you mean " + strings.Join(near, ", ") + "?"
 }
 

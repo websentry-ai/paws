@@ -84,6 +84,35 @@ func TestAddUnknownNameWithNothingCloseStillHints(t *testing.T) {
 	}
 }
 
+func TestAddTargetsAreOnlyWhatAddAccepts(t *testing.T) {
+	for _, c := range []struct{ add, want string }{
+		{"unbound-paws add writing", "writing"},
+		{"unbound-paws add ai-development/agents-sdk-docs ai-development/agents-sdk-install", "ai-development/agents-sdk-docs ai-development/agents-sdk-install"},
+		{"unbound-paws add db --pick engine=postgres --project", "db"},
+		{"unbound-paws add --pick engine=postgres db", "db"},
+		{"", ""},
+	} {
+		if got := strings.Join(addTargets(c.add), " "); got != c.want {
+			t.Errorf("addTargets(%q) = %q, want %q", c.add, got, c.want)
+		}
+	}
+}
+
+func TestAddSuggestionsDropControlCharacters(t *testing.T) {
+	portalEnv(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/paws/v1/catalog/source" {
+			w.WriteHeader(http.StatusNotFound)
+			fmt.Fprint(w, `{"error": "none"}`)
+			return
+		}
+		json.NewEncoder(w).Encode(map[string]any{"skills": []catalogRow{{Name: "x", Add: "unbound-paws add writin\u001b]g"}}})
+	}))
+	_, out := capture(t, &os.Stderr, func() int { return Add([]string{"writing"}) })
+	if !strings.Contains(out, "Did you mean writin]g?") || strings.ContainsAny(out, "\x1b") {
+		t.Errorf("a name from the server reached the terminal with control characters: %q", out)
+	}
+}
+
 func TestClosestNames(t *testing.T) {
 	names := []string{"writing", "writing-plans", "testing", "tdd", "planning", "waiting", "wrting"}
 	got := closestNames("writting", names)

@@ -227,8 +227,26 @@ func searchCatalog(api, query string) ([]catalogRow, int, error) {
 	return page.Skills, page.Total, err
 }
 
-// catalogNames lists every name `add` accepts that the catalog listing shows: each skill's name and each target of
-// its install command (a pack such as "writing", or a rule file such as "testing/tdd"). It pages through the listing.
+// addTargets are the names in a skill's install command that `add` accepts: a pack such as "writing" or a rule file
+// such as "testing/tdd". Flags and their values (--pick group=option) are not names. The skill's own name is not
+// one either: `add humanizer` fails where the listing's command is `add writing`.
+func addTargets(add string) []string {
+	var out []string
+	words := strings.Fields(strings.TrimPrefix(add, cliName+" add"))
+	for i := 0; i < len(words); i++ {
+		switch w := words[i]; {
+		case w == "--pick":
+			i++
+		case strings.HasPrefix(w, "-"), strings.Contains(w, "="):
+		default:
+			out = append(out, w)
+		}
+	}
+	return out
+}
+
+// catalogNames lists every name `add` accepts that the catalog listing shows: the targets of each skill's install
+// command. It pages through the listing.
 func catalogNames(api string) ([]string, error) {
 	seen := map[string]bool{}
 	var names []string
@@ -242,9 +260,8 @@ func catalogNames(api string) ([]string, error) {
 			return names, err
 		}
 		for _, r := range rows.Skills {
-			cands := append([]string{r.Name}, strings.Fields(strings.TrimPrefix(r.Add, cliName+" add"))...)
-			for _, n := range cands {
-				if n != "" && !seen[n] {
+			for _, n := range addTargets(r.Add) {
+				if !seen[n] {
 					seen[n] = true
 					names = append(names, n)
 				}

@@ -126,7 +126,7 @@ func canonical(in *Input) []call {
 		cmd := str("command")
 		calls := []call{{tool: "Bash", target: cmd, text: cmd, input: map[string]any{"command": cmd}}}
 		if strings.Contains(cmd, "*** Begin Patch") {
-			calls = append(calls, patchCalls(cmd, in.CWD)...)
+			calls = append(calls, patchCalls(cmd, patchDir(cmd, in.CWD))...)
 		}
 		return calls
 	case in.ToolName == "apply_patch":
@@ -152,6 +152,27 @@ func canonical(in *Input) []call {
 		return []call{{tool: in.ToolName, target: string(b), text: strings.Join(stringsIn(ti), "\n"), input: ti}}
 	}
 	return []call{{tool: in.ToolName, target: in.ToolName, text: in.ToolName, input: ti}}
+}
+
+// leadingCd is a `cd <dir> &&` (or `;`) in front of a command.
+var leadingCd = regexp.MustCompile(`^\s*cd\s+(?:'([^']*)'|"([^"]*)"|(\S+))\s*(?:&&|;)`)
+
+// patchDir is where a shell patch runs: the hook's cwd, or the folder a leading `cd` moves to, so a relative path in
+// `cd migrations && apply_patch ...` is a file in migrations/.
+func patchDir(cmd, cwd string) string {
+	m := leadingCd.FindStringSubmatch(cmd)
+	if m == nil {
+		return cwd
+	}
+	dir := m[1] + m[2] + m[3]
+	if rest, ok := strings.CutPrefix(dir, "~/"); ok {
+		home, _ := os.UserHomeDir()
+		dir = filepath.Join(home, rest)
+	}
+	if !filepath.IsAbs(dir) {
+		dir = filepath.Join(cwd, dir)
+	}
+	return dir
 }
 
 // patchCalls are a patch's files as canonical calls: a Write for a new file, an Edit for any other, relative paths

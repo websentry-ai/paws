@@ -337,3 +337,12 @@ func TestLedgerShellPatchNeedsSuccess(t *testing.T) {
 		t.Error("a file the patch didn't change, by apply_patch's own list, is no edit")
 	}
 }
+
+// A shell patch after a cd edits files in that folder.
+func TestParseShellPatchAfterCd(t *testing.T) {
+	h := parse(t, stdin(t, "PreToolUse", "t1", map[string]any{"tool_name": "Bash", "tool_input": map[string]any{
+		"command": "cd migrations && apply_patch <<'EOF'\n*** Begin Patch\n*** Add File: 1.sql\n+x\n*** End Patch\nEOF"}}))
+	if len(h.Calls) != 2 || h.Calls[1].Target != "/repo/migrations/1.sql" {
+		t.Errorf("want /repo/migrations/1.sql, got %+v", h.Calls)
+	}
+}

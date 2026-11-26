@@ -481,3 +481,28 @@ func TestUninstallKeepsSkillsWhenProjectDotPawsIsLinked(t *testing.T) {
 	captureStdout(t, func() int { return Uninstall([]string{"--project", "--yes"}) })
 	kept(t, filepath.Join(f.repo, ".claude", "skills", "git"))
 }
+
+// Project skills are required by the portal rules too: when the logout fails (a 503) they stay.
+func TestUninstallKeepsProjectSkillsWhenLogoutFails(t *testing.T) {
+	b := &fakeCatalogBackend{files: map[string][]pushFile{}}
+	pawsHome := portalEnv(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/paws/v1/device/logout" {
+			w.WriteHeader(http.StatusServiceUnavailable)
+			return
+		}
+		b.ServeHTTP(w, r)
+	}))
+	b.publish(t, writeTestCatalog(t))
+	repo := filepath.Join(os.Getenv("HOME"), "repo")
+	os.MkdirAll(filepath.Join(repo, ".git"), 0o755)
+	t.Chdir(repo)
+	captureStdout(t, func() int { return Add([]string{"--project", "writing"}) })
+	writeFile(t, filepath.Join(pawsHome, "credentials.json"), `{"api":"`+strings.TrimSuffix(os.Getenv("PAWS_PORTAL_API"), "/")+`","token":"tok"}`)
+	skill := filepath.Join(repo, ".claude", "skills", "humanizer")
+	kept(t, skill)
+	capture(t, &os.Stderr, func() int {
+		c, _ := captureStdout(t, func() int { return Uninstall([]string{"--yes"}) })
+		return c
+	})
+	kept(t, skill, filepath.Join(pawsHome, "credentials.json"))
+}

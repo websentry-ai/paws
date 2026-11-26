@@ -87,12 +87,14 @@ func Uninstall(args []string) int {
 		fmt.Fprintln(os.Stderr, "paws: this folder is not in a repo, so its project files are your global ones. Run --project from a repo, or use --global.")
 		return 2
 	}
+	if f.global {
+		plan = planPortal(plan) // first: late steps run in plan order, and the skills below need the login gone first
+	}
 	if f.project {
 		hooks := []string{filepath.Join(root, ".claude", "settings.json"), filepath.Join(root, ".claude", "settings.local.json")}
 		plan, keep = planScope(plan, keep, "project", hooks, pack.ProjectTarget(root), f.keepSkills, shared)
 	}
 	if f.global {
-		plan = planPortal(plan)
 		plan, keep = planScope(plan, keep, "global", []string{filepath.Join(userClaudeDir(), "settings.json")}, user, f.keepSkills, overlap{})
 		// Without --project, this project's hook stays, and it may run the shared copy of the binary.
 		keepBin := !f.project && !shared.hooks && (hasPawsHook(filepath.Join(root, ".claude", "settings.json")) ||

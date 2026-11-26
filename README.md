@@ -207,6 +207,11 @@ won't last (npx, a source build), it copies the binary to `~/.paws/bin/paws`
 and registers `"$HOME/.paws/bin/paws" gate` instead. From source:
 `go build -o paws ./cmd/paws && ./paws init`.
 
+On macOS and Linux the registered command starts with a check for the binary, so a teammate who opens a committed
+repo without paws gets "paws is not installed; install it with npm i -g unbound-paws (or see
+https://paws.getunbound.ai)" instead of a vague hook error. For `PreToolUse` the call is blocked (exit 2); the other
+events only show the message. Windows keeps the plain `unbound-paws gate`, because the check needs `sh`.
+
 Upgrading from 0.3.0: install with the line above, then run `unbound-paws init`
 (and `init --global` if you used it) once; it replaces the old
 `PAWS_MANAGED=1 …` hook entry. `init` no longer installs the paws skill: run

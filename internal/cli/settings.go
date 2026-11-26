@@ -46,6 +46,8 @@ func writeSettings(path string, doc settingsDoc) error {
 	if err != nil {
 		return err
 	}
+	// Go escapes < > & as \u003c \u003e \u0026. The guard command has `>` and `&`; keep them readable in a file that is committed.
+	b = []byte(strings.NewReplacer(`\u003c`, "<", `\u003e`, ">", `\u0026`, "&").Replace(string(b)))
 	f, err := os.CreateTemp(dir, ".settings-*.json")
 	if err != nil {
 		return err
@@ -77,7 +79,7 @@ func writeSettings(path string, doc settingsDoc) error {
 
 // ensureHooks adds (or repoints, if the binary moved) a paws entry per registered event; idempotent,
 // other hooks untouched.
-func ensureHooks(doc settingsDoc, command string) (bool, error) {
+func ensureHooks(doc settingsDoc, command string, guard bool) (bool, error) {
 	hooks, err := hooksBlock(doc)
 	if err != nil {
 		return false, err
@@ -91,6 +93,9 @@ func ensureHooks(doc settingsDoc, command string) (bool, error) {
 			}
 		}
 		desired := hook.RawEntry(event, command)
+		if guard {
+			desired = hook.RawEntry(event, guardedCommand(command, event))
+		}
 		idx := pawsEntryIndex(list)
 		switch {
 		case idx < 0:
@@ -243,6 +248,43 @@ func withoutPawsHooks(entry json.RawMessage) (rest json.RawMessage, had bool) {
 	return rest, true
 }
 
+// missingMsg is what a teammate sees when a committed hook runs on a machine without paws.
+const missingMsg = "paws is not installed; install it with npm i -g unbound-paws (or see https://paws.getunbound.ai)"
+
+// guardMid is the middle of a guarded hook command. exit is 2 for PreToolUse, where Claude Code blocks the call and
+// shows stderr to Claude, and 1 for the other events, where it only shows the error: exit 2 on UserPromptSubmit or
+// Stop would block the prompt or the end of the turn.
+func guardMid(exit string) string {
+	return " >/dev/null 2>&1 || { echo '" + missingMsg + "' >&2; exit " + exit + "; }; "
+}
+
+// guardedCommand makes a project hook fail loudly where the binary is missing, instead of a vague "command not
+// found". It is for sh, which Claude Code runs hooks with on macOS and Linux.
+func guardedCommand(command, event string) string {
+	exit := "1"
+	if event == "PreToolUse" {
+		exit = "2"
+	}
+	return "command -v " + strings.TrimSuffix(command, " gate") + guardMid(exit) + command
+}
+
+// unguard returns the plain `<prog> gate` inside a command guardedCommand wrote, or command itself.
+func unguard(command string) string {
+	rest, ok := strings.CutPrefix(command, "command -v ")
+	if !ok {
+		return command
+	}
+	for _, exit := range []string{"1", "2"} {
+		mid := guardMid(exit)
+		if i := strings.Index(rest, mid); i >= 0 {
+			if prog, plain := rest[:i], rest[i+len(mid):]; plain == prog+" gate" {
+				return plain
+			}
+		}
+	}
+	return command
+}
+
 // legacyMarker prefixed hook commands written by paws 0.3.0 and earlier; still recognised so
 // init upgrades and uninstall removes those entries.
 const legacyMarker = "PAWS_MANAGED=1 "
@@ -251,6 +293,7 @@ const legacyMarker = "PAWS_MANAGED=1 "
 // shellQuote'd path then ` gate`, the binary named paws (paws.exe), or any such single path
 // after 0.3.0's marker. Nothing that can expand or chain (`"$(x)/paws"`, `scan; paws gate`) counts.
 func isPawsCommand(command string) bool {
+	command = unguard(command)
 	rest, marked := strings.CutPrefix(command, legacyMarker)
 	prog, ok := strings.CutSuffix(rest, " gate")
 	if !ok {

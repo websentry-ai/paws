@@ -250,8 +250,12 @@ func TestInitOnPathWritesTheCommandName(t *testing.T) {
 	hooks, _ := hooksBlock(doc)
 	var pre []json.RawMessage
 	json.Unmarshal(hooks["PreToolUse"], &pre)
-	if !containsCommand(pre, "unbound-paws gate") {
-		t.Errorf("want unbound-paws gate, got %s", hooks["PreToolUse"])
+	want := "unbound-paws gate"
+	if hookGuard() {
+		want = guardedCommand(want, "PreToolUse")
+	}
+	if !containsCommand(pre, want) {
+		t.Errorf("want %s, got %s", want, hooks["PreToolUse"])
 	}
 	if _, err := os.Stat(filepath.Join(home, ".paws", "bin")); err == nil {
 		t.Error("init copied the binary although unbound-paws is on PATH")
@@ -289,7 +293,7 @@ func TestInitKeepsProjectAndGlobalOnOneLine(t *testing.T) {
 	os.WriteFile(filepath.Join(pathBin, "unbound-paws"), []byte("#!/bin/sh\n"), 0o755)
 	t.Setenv("PATH", pathBin)
 	doc := settingsDoc{}
-	ensureHooks(doc, "unbound-paws gate")
+	ensureHooks(doc, "unbound-paws gate", hookGuard())
 	writeSettings(filepath.Join(cfg, "settings.json"), doc)
 	repo := filepath.Join(home, "repo")
 	os.MkdirAll(filepath.Join(repo, ".git"), 0o755)
@@ -297,7 +301,7 @@ func TestInitKeepsProjectAndGlobalOnOneLine(t *testing.T) {
 	if code := Init(nil); code != 0 {
 		t.Fatalf("init exit %d", code)
 	}
-	if got := pawsCommandIn(filepath.Join(repo, ".claude", "settings.json")); got != "unbound-paws gate" {
+	if got := pawsCommandIn(filepath.Join(repo, ".claude", "settings.json")); got != pawsCommandIn(filepath.Join(cfg, "settings.json")) {
 		t.Errorf("project init should reuse the global line, got %q", got)
 	}
 	// A global init (off PATH here) next to a project line it can't match says so.
@@ -310,10 +314,10 @@ func TestInitKeepsProjectAndGlobalOnOneLine(t *testing.T) {
 	// With unbound-paws gone from PATH, reusing the global line would register a hook that can't
 	// start: keep the working fallback instead.
 	doc = settingsDoc{}
-	ensureHooks(doc, "unbound-paws gate")
+	ensureHooks(doc, "unbound-paws gate", hookGuard())
 	writeSettings(filepath.Join(cfg, "settings.json"), doc)
 	Init(nil)
-	if got := pawsCommandIn(filepath.Join(repo, ".claude", "settings.json")); got == "unbound-paws gate" {
+	if got := pawsCommandIn(filepath.Join(repo, ".claude", "settings.json")); unguard(got) == "unbound-paws gate" {
 		t.Errorf("project init reused unbound-paws gate with no unbound-paws on PATH")
 	}
 }
@@ -351,7 +355,7 @@ func TestInitPointsAtGlobalInitForAnOldGlobalHook(t *testing.T) {
 	t.Setenv("CLAUDE_CONFIG_DIR", cfg)
 	t.Setenv("PATH", "")
 	doc := settingsDoc{}
-	ensureHooks(doc, `PAWS_MANAGED=1 '`+filepath.Join(home, ".paws", "bin", "paws")+`' gate`)
+	ensureHooks(doc, `PAWS_MANAGED=1 '`+filepath.Join(home, ".paws", "bin", "paws")+`' gate`, false)
 	writeSettings(filepath.Join(cfg, "settings.json"), doc)
 	repo := filepath.Join(home, "repo")
 	os.MkdirAll(filepath.Join(repo, ".git"), 0o755)

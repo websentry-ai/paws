@@ -35,7 +35,7 @@ func Init(args []string) int {
 	// `unbound-paws gate` while unbound-paws is still installed on PATH.
 	user := filepath.Join(userClaudeDir(), "settings.json")
 	command := cliName + " gate"
-	reuse := filepath.Clean(settingsPath) != filepath.Clean(user) && pawsCommandIn(user) == command && cliPath() != ""
+	reuse := filepath.Clean(settingsPath) != filepath.Clean(user) && unguard(pawsCommandIn(user)) == command && cliPath() != ""
 	if !onPath(self) && !reuse {
 		// Not installed on PATH: copy the binary somewhere the npx cache can't clean up.
 		bin, err := installSelf(self, gate.UserDir())
@@ -54,7 +54,14 @@ func Init(args []string) int {
 		fmt.Fprintf(os.Stderr, "paws: %v\n", err)
 		return 1
 	}
-	changed, err := ensureHooks(doc, command)
+	// A committed `unbound-paws gate` runs on teammates' machines too: guard it so a missing binary says how to
+	// install paws. The copied binary under ~/.paws/bin is not guarded, because `npm i -g` would not create it.
+	guard := hookGuard() && command == cliName+" gate"
+	written := command
+	if guard {
+		written = guardedCommand(command, "PreToolUse")
+	}
+	changed, err := ensureHooks(doc, command, guard)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "paws: %s: %v\n", settingsPath, err)
 		return 1
@@ -68,6 +75,9 @@ func Init(args []string) int {
 		return 1
 	}
 	fmt.Printf("Registered paws in %s\n  command: %s\n", settingsPath, command)
+	if guard {
+		fmt.Println("  Where paws isn't installed, the hook says how to install it and blocks the tool call.")
+	}
 	// A different paws hook in the other scope makes Claude Code run paws twice: say which init fixes it.
 	other, fix := user, "`"+cliName+" init --global`"
 	if filepath.Clean(settingsPath) == filepath.Clean(user) {
@@ -75,11 +85,14 @@ func Init(args []string) int {
 		root := projectRoot(cwd)
 		other, fix = filepath.Join(root, ".claude", "settings.json"), "`"+cliName+" init` in "+root
 	}
-	if c := pawsCommandIn(other); c != "" && c != command {
+	if c := pawsCommandIn(other); c != "" && c != written {
 		fmt.Printf("%s has a different paws hook. Run %s too, so Claude Code runs paws once.\n", other, fix)
 	}
 	return 0
 }
+
+// hookGuard reports whether init may wrap the hook command in the missing-binary guard, which needs sh.
+func hookGuard() bool { return runtime.GOOS != "windows" }
 
 // pawsCommandIn is the paws hook command a settings file registers for PreToolUse, or "".
 func pawsCommandIn(path string) string {

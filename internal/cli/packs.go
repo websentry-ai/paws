@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -123,6 +124,11 @@ func Add(args []string) int {
 	}
 	c, err := loadCatalog(f.catalog, f.args...)
 	if err != nil {
+		var unknown *unknownName
+		if errors.As(err, &unknown) {
+			fmt.Fprintf(os.Stderr, "paws: %v%s Run `%s search <word>` to look for it.\n", err, didYouMean(unknown.name), cliName)
+			return 1
+		}
 		fmt.Fprintf(os.Stderr, "paws: %v\n", err)
 		return 1
 	}
@@ -163,6 +169,27 @@ func Add(args []string) int {
 		}
 	}
 	return 0
+}
+
+// didYouMean is " Did you mean a, b?" for the catalog names nearest to name, or "" when none is close or the
+// catalog can't be listed.
+func didYouMean(name string) string {
+	api, err := catalogAPI()
+	if err != nil {
+		return ""
+	}
+	names, err := catalogNames(api)
+	if err != nil {
+		return "" // the nearest name might be on a page that failed to load
+	}
+	near := closestNames(name, names)
+	if len(near) == 0 {
+		return ""
+	}
+	for i, n := range near {
+		near[i] = printable(n) // the names come from the server
+	}
+	return " Did you mean " + strings.Join(near, ", ") + "?"
 }
 
 // askPick prompts for a pick_one option when stdin is a terminal; otherwise it takes the default.

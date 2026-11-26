@@ -16,6 +16,17 @@ import (
 // adapters are the harnesses paws runs in; the last is the fallback for a hook call no other one claims.
 var adapters = []harness.Adapter{hook.Claude{}}
 
+// A SKILL.md read loads a skill only from a folder some harness loads skills from.
+func init() {
+	gate.SkillRoots = func(cwd string) (dirs, trees []string) {
+		for _, a := range adapters {
+			dirs = append(dirs, a.SkillDirs(cwd)...)
+			trees = append(trees, a.SkillTrees()...)
+		}
+		return dirs, trees
+	}
+}
+
 // Gate is the hook entrypoint for a hook command that names no harness.
 func Gate() int { return GateFor(nil) }
 

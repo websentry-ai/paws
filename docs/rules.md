@@ -112,8 +112,10 @@ sends and everything the agent does to answer it, however many tool calls.
 On `session-start`, which can't be denied, it adds context naming the skill
 instead (`message` replaces that text).
 
-A skill is loaded by the Skill tool, or by reading its `SKILL.md`
-(`<dir>/skills/<skill>/SKILL.md`): the Read tool on the file, or a Bash command
+A skill is loaded by the Skill tool, or by reading its `SKILL.md` in a
+folder a harness loads skills from (`~/.claude/skills`, the project's
+`.claude/skills`, a Claude Code plugin's `skills/`): the Read tool on the
+file, or a Bash command
 that only prints it (`cat`, `sed -n '1,240p'`, `head`, `tail`, `nl`, `less`,
 `more`, `bat`, an `awk` print). A read chained with anything else
 (`cat SKILL.md && git push`) is not a load. A load is never gated, so a rule

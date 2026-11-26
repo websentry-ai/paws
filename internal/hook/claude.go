@@ -79,6 +79,9 @@ func (Claude) History() (history.Source, string) {
 
 func (Claude) SkillDirs(cwd string) []string { return gate.SkillTool.SkillDirs(cwd) }
 
+// SkillTrees: a plugin's skills sit at <config>/plugins/<...>/skills/<skill>/SKILL.md.
+func (Claude) SkillTrees() []string { return []string{filepath.Join(ConfigDir(), "plugins")} }
+
 // LoadSkills is the Skill tool sentence, plus the SKILL.md paths paws found: a skill installed after the session
 // started isn't in its skill list, so the Skill tool can't load it, and reading the file is the way in.
 func (Claude) LoadSkills(skills []gate.Skill, noun string) string {

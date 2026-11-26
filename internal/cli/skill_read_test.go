@@ -74,6 +74,28 @@ func TestReadingSKILLmdIsNeverGated(t *testing.T) {
 	}
 }
 
+// Only a SKILL.md in a folder a harness loads skills from is a load: a plugin's skill counts, and a SKILL.md the agent
+// wrote anywhere else (or a repo shipped) loads nothing and is gated like any read.
+func TestOnlyASKILLmdInASkillFolderLoads(t *testing.T) {
+	home := portalEnv(t, http.NotFoundHandler())
+	writeRule(t, filepath.Join(home, "catch-all.md"), "name: catch-all\nevent: pre-tool\naction:\n  type: require-skill\n  skill: deployer\n")
+	userHome, _ := os.UserHomeDir()
+	plugin := filepath.Join(userHome, ".claude", "plugins", "cache", "acme", "tools", "1.0.0", "skills", "deployer", "SKILL.md")
+	fake := filepath.Join(t.TempDir(), "x", "skills", "deployer", "SKILL.md")
+	for _, p := range []string{plugin, fake} {
+		writeFile(t, p, "---\nname: deployer\n---\n")
+	}
+	if out := gateCall(t, "Bash", map[string]any{"command": "cat " + plugin}, ""); out != "{}" {
+		t.Errorf("a plugin's SKILL.md is a skill: its read must not be gated, got %s", out)
+	}
+	if out := gateCall(t, "Bash", map[string]any{"command": "cat " + fake}, ""); !strings.Contains(out, `"deny"`) {
+		t.Errorf("a SKILL.md outside every skill folder is no load and is gated, got %s", out)
+	}
+	if out := gateCall(t, "Read", map[string]any{"file_path": fake}, ""); !strings.Contains(out, `"deny"`) {
+		t.Errorf("a Read of a fake SKILL.md is gated too, got %s", out)
+	}
+}
+
 // After a successful read of SKILL.md, the skill counts as loaded for the window; a failed read does not.
 func TestReadingSKILLmdClearsTheGate(t *testing.T) {
 	home := portalEnv(t, http.NotFoundHandler())

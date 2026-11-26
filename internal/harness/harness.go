@@ -23,6 +23,9 @@ type Adapter interface {
 	Title() string
 	// History is the harness's past sessions for `paws scan`, and where they are; nil when scan can't read them.
 	History() (history.Source, string)
+	// SkillTrees are folders where any skills/<skill>/SKILL.md below is one of this harness's skills (Claude Code's
+	// plugins), beside its SkillDirs.
+	SkillTrees() []string
 }
 
 // Codec turns one hook call into the canonical form and the engine's decision back into the harness's reply.

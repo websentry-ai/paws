@@ -125,9 +125,18 @@ func (ev Event) skillFile(skill string) string {
 	return ""
 }
 
+// SkillRoots are where a SKILL.md read counts as a skill load, for cwd: dirs are skills folders (the file is
+// <dir>/<skill>/SKILL.md), trees are folders where any skills/<skill>/SKILL.md below counts (Claude Code's plugins).
+// The CLI sets it from every harness it knows; the default is Claude Code's folders.
+var SkillRoots = func(cwd string) (dirs, trees []string) {
+	dirs = SkillTool.SkillDirs(cwd)
+	return dirs, []string{filepath.Join(filepath.Dir(dirs[0]), "plugins")}
+}
+
 // SkillRead names the skill a call loads by reading its SKILL.md: the Read tool on <dir>/skills/<skill>/SKILL.md,
-// or a Bash line that does nothing but print that file (see rule.PlainRead). The file must exist; a relative path
-// is taken from cwd. "" for any other call.
+// or a Bash line that does nothing but print that file (see rule.PlainRead). The file must exist and sit under one
+// of the SkillRoots, so a SKILL.md the agent wrote somewhere else loads nothing. A relative path is taken from cwd.
+// "" for any other call.
 func SkillRead(tool, target, cwd string) string {
 	var p string
 	switch tool {
@@ -155,8 +164,40 @@ func SkillRead(tool, target, cwd string) string {
 	if filepath.Base(p) != "SKILL.md" || filepath.Base(filepath.Dir(dir)) != "skills" || skill == "skills" {
 		return ""
 	}
-	if st, err := os.Stat(p); err != nil || !st.Mode().IsRegular() {
+	if st, err := os.Stat(p); err != nil || !st.Mode().IsRegular() || !underSkillRoot(filepath.Dir(dir), cwd) {
 		return ""
 	}
 	return skill
+}
+
+// underSkillRoot reports whether skills, the folder holding a skill's folder, is one of the SkillRoots dirs or lies
+// under one of its trees, as written or with symlinks resolved.
+func underSkillRoot(skills, cwd string) bool {
+	dirs, trees := SkillRoots(cwd)
+	for _, p := range forms(skills) {
+		for _, d := range dirs {
+			for _, r := range forms(d) {
+				if p == r {
+					return true
+				}
+			}
+		}
+		for _, t := range trees {
+			for _, r := range forms(t) {
+				if strings.HasPrefix(p, r+string(filepath.Separator)) {
+					return true
+				}
+			}
+		}
+	}
+	return false
+}
+
+// forms is p cleaned, and with its symlinks resolved when that differs (macOS's /var is /private/var).
+func forms(p string) []string {
+	p = filepath.Clean(p)
+	if r, err := filepath.EvalSymlinks(p); err == nil && r != p {
+		return []string{p, r}
+	}
+	return []string{p}
 }

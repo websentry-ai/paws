@@ -14,7 +14,9 @@ import (
 // A read of a skill's SKILL.md answers a deny the way the Skill tool does: it is neither the retry of a catch-all
 // Bash rule nor another route.
 func TestGradingTreatsASKILLmdReadAsTheAnswer(t *testing.T) {
-	md := filepath.Join(t.TempDir(), "skills", "git", "SKILL.md")
+	t.Setenv("HOME", t.TempDir())
+	t.Setenv("CLAUDE_CONFIG_DIR", "")
+	md := filepath.Join(os.Getenv("HOME"), ".claude", "skills", "git", "SKILL.md")
 	if err := os.MkdirAll(filepath.Dir(md), 0o755); err != nil {
 		t.Fatal(err)
 	}

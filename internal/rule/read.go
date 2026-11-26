@@ -66,15 +66,17 @@ func literalWord(w *syntax.Word) (string, bool) {
 }
 
 var (
-	// sedPrint is a sed -n script that only prints a line range: p, 5p, 1,240p, 10,$p.
-	sedPrint = regexp.MustCompile(`^\s*(\d+|\$)?\s*(,\s*(\d+|\$))?\s*p\s*$`)
-	// awkPrint is an awk program that only prints: 1, {print}, {print $0}, NR<=200, NR<=200{print}.
-	awkPrint = regexp.MustCompile(`^\s*(1|\{\s*print(\s+\$0)?\s*;?\s*\}|NR\s*(<|<=|>|>=|==)\s*\d+(\s*\{\s*print(\s+\$0)?\s*;?\s*\})?)\s*$`)
+	// sedPrint is a sed -n script that prints the file from its first line: p, 1,240p, 1,$p. A range that starts
+	// later can print nothing.
+	sedPrint = regexp.MustCompile(`^\s*(1\s*,\s*([1-9]\d*|\$)\s*)?p\s*$`)
+	// awkPrint is an awk program that prints the file from its first line: 1, {print}, {print $0}, NR<=200,
+	// NR<=200{print}.
+	awkPrint = regexp.MustCompile(`^\s*(1|\{\s*print(\s+\$0)?\s*;?\s*\}|NR\s*(<=\s*[1-9]\d*|<\s*([2-9]|[1-9]\d+))(\s*\{\s*print(\s+\$0)?\s*;?\s*\})?)\s*$`)
 	// valueFlags take the next word as their value, per reader.
 	valueFlags = map[string]map[string]bool{
 		"head": {"-n": true, "-c": true},
 		"tail": {"-n": true, "-c": true},
-		"bat":  {"-r": true, "-l": true, "--line-range": true, "--language": true},
+		"bat":  {"-l": true, "--language": true},
 		"sed":  {"-e": true},
 		"awk":  {"-F": true},
 	}
@@ -87,7 +89,7 @@ var (
 		"tail": regexp.MustCompile(`^(-[nc]|-[qv]|-[1-9]\d*|-[nc]\+?[1-9]\d*|-[nc]\+0|--(lines|bytes)=\+?[1-9]\d*)$`),
 		"less": regexp.MustCompile(`^-[RNSXF]+$`),
 		"more": regexp.MustCompile(`^-[RNSXF]+$`),
-		"bat":  regexp.MustCompile(`^(-[pnA]+|--(plain|number|show-all)|--paging=never|--(style|color)=[a-z,-]+|-[lr]|--(language|line-range)(=\S+)?)$`),
+		"bat":  regexp.MustCompile(`^(-[pnA]+|--(plain|number|show-all)|--paging=never|--(style|color)=[a-z,-]+|-l|--language(=\S+)?)$`),
 		"sed":  regexp.MustCompile(`^(-[nEr]+|-[esu]|--(quiet|silent))$`),
 		"awk":  regexp.MustCompile(`^-F$`),
 	}

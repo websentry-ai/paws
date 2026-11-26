@@ -774,3 +774,40 @@ func TestAnUnreadableTranscriptLeavesDeniesEligible(t *testing.T) {
 		t.Errorf("%d outcomes; want the deny graded once the transcript could be read", n)
 	}
 }
+
+// An outcome carries the model of the blocked call, not the one the session runs on at Stop (after a /model switch).
+func TestOutcomeKeepsTheBlockedCallsModel(t *testing.T) {
+	home, _ := syncEnv(t)
+	cwd, _ := os.Getwd()
+	writeRule(t, filepath.Join(cwd, ".paws", "pre-tool", "rm-gate.md"), rmRule)
+	transcript := filepath.Join(t.TempDir(), "sess-m.jsonl")
+	os.WriteFile(transcript, []byte(`{"type":"assistant","message":{"model":"claude-opus-4-7","content":[]}}`+"\n"), 0o600)
+	event := map[string]any{"hook_event_name": "PreToolUse", "session_id": "sess-m", "transcript_path": transcript, "cwd": cwd,
+		"tool_name": "Bash", "tool_input": map[string]any{"command": "rm -rf build"}}
+	if out := runGate(t, event); !strings.Contains(out, `"deny"`) {
+		t.Fatalf("the rule didn't deny: %s", out)
+	}
+	start := time.Now().Add(-20 * time.Second)
+	transcriptLines(t, transcript, start, []struct {
+		cmd    string
+		result string
+		isErr  bool
+	}{
+		{"rm -rf build", "PreToolUse:Bash hook error: paws (rm-gate): load coreutils first", true},
+		{"rm -rf build", "", false},
+	})
+	f, _ := os.OpenFile(transcript, os.O_APPEND|os.O_WRONLY, 0o600)
+	f.WriteString(`{"type":"assistant","timestamp":"` + start.Add(5*time.Second).UTC().Format(time.RFC3339Nano) + `","message":{"model":"claude-haiku-4-5","content":[{"type":"text","text":"done"}]}}` + "\n")
+	f.Close()
+	denyAt(t, home, start.Add(1100*time.Millisecond))
+	runGate(t, map[string]any{"hook_event_name": "Stop", "session_id": "sess-m", "transcript_path": transcript, "cwd": cwd})
+	for _, rec := range auditLines(t, home) {
+		if rec["event"] == "outcome" {
+			if rec["model"] != "claude-opus-4-7" || rec["harness"] != "claude-code" {
+				t.Errorf("want the deny's model and harness, got %v", rec)
+			}
+			return
+		}
+	}
+	t.Fatal("no outcome record")
+}

@@ -31,7 +31,7 @@ func ToEvent(in *Input) gate.Event {
 		AgentID:    in.AgentID,
 		AgentType:  in.AgentType,
 	}
-	ev.Log = gate.TranscriptLog(ev.Transcript, ev.Own)
+	ev.Log = gate.TranscriptLog(ev.Transcript, ev.Own, in.CWD)
 	ev.Harness = Claude{}
 	switch in.HookEventName {
 	case "PreToolUse":

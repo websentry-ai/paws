@@ -46,12 +46,13 @@ type Skill struct {
 }
 
 // TranscriptLog is the Session read from Claude Code's session log at transcript, and own, a subagent's own log when
-// the call comes from one ("" for the main thread).
-func TranscriptLog(transcript, own string) Session {
-	return transcriptLog{transcript: transcript, own: own}
+// the call comes from one ("" for the main thread). cwd is the session's working directory: a relative SKILL.md read
+// in a record that names no cwd (a request blob) is taken from it.
+func TranscriptLog(transcript, own, cwd string) Session {
+	return transcriptLog{transcript: transcript, own: own, cwd: cwd}
 }
 
-type transcriptLog struct{ transcript, own string }
+type transcriptLog struct{ transcript, own, cwd string }
 
 // ownLog is the log of the thread making the call: where its own skill loads and the denies it was shown are.
 // Session-wide conditions (agent-count, edits) read the transcript.
@@ -63,7 +64,7 @@ func (t transcriptLog) ownLog() string {
 }
 
 func (t transcriptLog) SkillLoaded(skill string, window int) bool {
-	return SkillLoaded(t.ownLog(), skill, window)
+	return skillLoaded(t.ownLog(), skill, window, t.cwd)
 }
 
 func (t transcriptLog) DenyDelivered(marker string, window int) bool {
@@ -104,7 +105,7 @@ func (ev Event) session() Session {
 	if ev.Log != nil {
 		return ev.Log
 	}
-	return TranscriptLog(ev.Transcript, ev.Own)
+	return TranscriptLog(ev.Transcript, ev.Own, ev.Cwd)
 }
 
 func (ev Event) harness() Harness {

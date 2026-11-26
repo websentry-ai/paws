@@ -68,6 +68,9 @@ func TestReadingSKILLmdIsNeverGated(t *testing.T) {
 		"bat pager":        "bat --pager='sh -c x' " + md,
 		"less log":         "less -o out.txt " + md,
 		"head nothing":     "head -n 0 " + md,
+		"sed past the top": "sed -n '9999,$p' " + md,
+		"awk past the top": "awk 'NR>9999' " + md,
+		"bat line range":   "bat -r 9999: " + md,
 		"own cat":          "/tmp/cat " + md,
 		"local cat":        "./cat " + md,
 	} {

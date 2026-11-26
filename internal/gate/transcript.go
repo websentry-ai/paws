@@ -2,6 +2,7 @@ package gate
 
 import (
 	"bytes"
+	"cmp"
 	"encoding/json"
 	"errors"
 	"io"
@@ -102,13 +103,16 @@ type skillResult struct {
 // window exhausted, or a context compaction between the load and now — because
 // the caller gates on false. A compaction ends the search: the skill's text was
 // dropped from the agent's context, so the load no longer means it has the guidance.
-func SkillLoaded(path, skill string, window int) bool {
+func SkillLoaded(path, skill string, window int) bool { return skillLoaded(path, skill, window, "") }
+
+// skillLoaded is SkillLoaded with the session's cwd, for a relative SKILL.md read in a record that names none.
+func skillLoaded(path, skill string, window int, cwd string) bool {
 	if skill == "" {
 		return false
 	}
 	lines := windowLines(path, window)
 	calls := skillCalls(lines, path, skill)
-	reads := readCalls(lines, path, skill)
+	reads := readCalls(lines, path, skill, cwd)
 	// Only a line with the skill's result record or one of its calls' ids (a blob answering it) can match.
 	name, _ := json.Marshal(skill)
 	needles := [][]byte{append([]byte(`"commandName":`), name...)}
@@ -168,7 +172,7 @@ func skillCalls(lines [][]byte, path, skill string) map[string]bool {
 }
 
 // readCalls returns the ids of the log's own Read and Bash tool_use blocks that read skill's SKILL.md.
-func readCalls(lines [][]byte, path, skill string) map[string]bool {
+func readCalls(lines [][]byte, path, skill, cwd string) map[string]bool {
 	calls := map[string]bool{}
 	file := []byte("SKILL.md") // skips every line that can't name the file; a relative `cat SKILL.md` names it too
 	for _, l := range lines {
@@ -199,7 +203,7 @@ func readCalls(lines [][]byte, path, skill string) map[string]bool {
 				target = b.Input.FilePath
 			}
 			// The file may be gone since: a read that succeeded put the skill in the agent's context all the same.
-			if b.Type == "tool_use" && skillRead(b.Name, target, m.Cwd, false) == skill {
+			if b.Type == "tool_use" && skillRead(b.Name, target, cmp.Or(m.Cwd, cwd), false) == skill {
 				calls[b.ID] = true
 			}
 		}

@@ -153,8 +153,8 @@ func hookCommand(bin string) string {
 	return shellQuote(bin) + " gate"
 }
 
-// Uninstall removes every paws hook entry from the target settings.json.
-func Uninstall(args []string) int {
+// uninstallHookOnly removes every paws hook entry from the target settings.json, and the paws skill beside it.
+func uninstallHookOnly(args []string) int {
 	settingsPath, code := settingsTarget(args)
 	if code >= 0 {
 		return code

@@ -364,6 +364,27 @@ func readMarker(dir string) marker {
 	return m
 }
 
+// PawsSkill is a skill directory that carries paws's install marker, so paws put it there.
+type PawsSkill struct {
+	Name   string
+	Edited bool // its content no longer matches what paws wrote, so paws won't delete it
+}
+
+// PawsSkills lists the skills in skillsDir that paws installed, by the marker file. A directory without the
+// marker is the user's and never appears here.
+func PawsSkills(skillsDir string) []PawsSkill {
+	entries, _ := os.ReadDir(skillsDir)
+	var out []PawsSkill
+	for _, e := range entries {
+		dir := filepath.Join(skillsDir, e.Name())
+		if st, err := os.Stat(dir); err != nil || !st.IsDir() || !catalog.ValidSkillName(e.Name()) || !pawsOwned(dir) {
+			continue
+		}
+		out = append(out, PawsSkill{Name: e.Name(), Edited: !replaceable(dir)})
+	}
+	return out
+}
+
 // RemoveBundledSkill removes a bundled skill paws installed and nobody edited; it reports
 // whether it did.
 func RemoveBundledSkill(skillsDir, name string) (bool, error) { return removeSkill(skillsDir, name) }

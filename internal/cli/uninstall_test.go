@@ -318,3 +318,43 @@ func TestUninstallHandlesANullPackRecord(t *testing.T) {
 	}
 	gone(t, filepath.Join(f.repo, ".paws", "packs", "writing"), filepath.Join(f.repo, ".paws", "installed.yaml"))
 }
+
+// A cloned repo can commit .paws itself as a link to a folder that has its own packs.
+func TestUninstallRefusesAProjectDotPawsThatIsALink(t *testing.T) {
+	f := setupUninstall(t)
+	outside := filepath.Join(f.home, "outside")
+	writeFile(t, filepath.Join(outside, "packs", "writing", "keep.md"), "x")
+	writeFile(t, filepath.Join(outside, "installed.yaml"), "packs:\n  writing:\n    bindings: [a.md]\n    at: now\n")
+	os.RemoveAll(filepath.Join(f.repo, ".paws"))
+	if err := os.Symlink(outside, filepath.Join(f.repo, ".paws")); err != nil {
+		t.Skip(err)
+	}
+	capture(t, &os.Stderr, func() int {
+		c, _ := captureStdout(t, func() int { return Uninstall([]string{"--project", "--yes"}) })
+		return c
+	})
+	kept(t, filepath.Join(outside, "packs", "writing", "keep.md"), filepath.Join(outside, "installed.yaml"))
+}
+
+// In the home folder with no repo, the project's files are the global ones: --project must not take them.
+func TestUninstallProjectScopeInTheHomeFolder(t *testing.T) {
+	f := setupUninstall(t)
+	t.Chdir(f.home)
+	code, errOut := capture(t, &os.Stderr, func() int {
+		c, _ := captureStdout(t, func() int { return Uninstall([]string{"--project", "--yes"}) })
+		return c
+	})
+	if code != 2 || !strings.Contains(errOut, "not in a repo") {
+		t.Errorf("exit %d, stderr %q", code, errOut)
+	}
+	kept(t, filepath.Join(f.pawsHome, "packs"), filepath.Join(f.pawsHome, "credentials.json"))
+	if !hasPawsHook(filepath.Join(f.home, ".claude", "settings.json")) {
+		t.Error("--project took the global hook")
+	}
+	// With both scopes, the shared files are listed and removed once.
+	code, out := captureStdout(t, func() int { return Uninstall([]string{"--yes"}) })
+	if code != 0 || strings.Count(out, "~/.claude/settings.json") != 1 {
+		t.Errorf("exit %d:\n%s", code, out)
+	}
+	gone(t, filepath.Join(f.pawsHome, "packs"))
+}

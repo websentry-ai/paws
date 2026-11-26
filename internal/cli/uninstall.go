@@ -74,6 +74,14 @@ func Uninstall(args []string) int {
 	var plan []removal
 	var keep []string
 	cwd, _ := os.Getwd()
+	// Outside a repo, in the home folder, the project's files are the global ones.
+	if root := projectRoot(cwd); f.project && sameFolder(pack.ProjectTarget(root), pack.UserTarget(gate.UserDir()), root) {
+		if !f.global {
+			fmt.Fprintln(os.Stderr, "paws: this folder is not in a repo, so its project files are your global ones. Run --project from a repo, or use --global.")
+			return 2
+		}
+		f.project = false // --global covers them
+	}
 	if f.project {
 		root := projectRoot(cwd)
 		hooks := []string{filepath.Join(root, ".claude", "settings.json"), filepath.Join(root, ".claude", "settings.local.json")}
@@ -147,6 +155,13 @@ A repo that committed the paws hook keeps it until you remove it there (unbound-
 	return code
 }
 
+// sameFolder reports whether a project target (at root) points at any of the files the user target does.
+func sameFolder(project, user pack.Target, root string) bool {
+	return filepath.Clean(project.StateFile) == filepath.Clean(user.StateFile) ||
+		filepath.Clean(project.SkillsDir) == filepath.Clean(user.SkillsDir) ||
+		filepath.Clean(filepath.Join(root, ".claude")) == filepath.Clean(userClaudeDir())
+}
+
 // planScope adds the removals for one scope: the hook in its settings files, the packs the state file lists, and
 // the skills paws installed. Nothing is listed that paws didn't create.
 func planScope(plan []removal, keep []string, scope string, settings []string, t pack.Target, keepSkills bool) ([]removal, []string) {
@@ -169,7 +184,7 @@ func planScope(plan []removal, keep []string, scope string, settings []string, t
 				continue // a name in the state file that points outside the packs folder is not paws's to delete
 			}
 			plan = append(plan, removal{fmt.Sprintf("pack      %s (%s) in %s", n, count(len(st.Packs[n].Bindings), "rule"), tilde(dir)), func() error {
-				if err := removePackDir(t.PacksDir, dir); err != nil {
+				if err := removePackDir(t.PacksDir, dir, scope == "project"); err != nil {
 					packFailed = true
 					return err
 				}
@@ -323,13 +338,18 @@ func pruneUp(dir, stop string) {
 
 // removePackDir deletes a pack's folder under packs. The state file can come from a cloned repo, so it refuses to
 // walk through a symbolic link: a link inside the folder could point at anything.
-func removePackDir(packs, dir string) error {
+func removePackDir(packs, dir string, project bool) error {
 	rel, err := filepath.Rel(packs, dir)
 	if err != nil || !filepath.IsLocal(rel) || rel == "." {
 		return fmt.Errorf("%s is not inside %s", tilde(dir), tilde(packs))
 	}
 	cur := packs
-	for _, part := range append([]string{""}, strings.Split(rel, string(filepath.Separator))...) {
+	parts := append([]string{""}, strings.Split(rel, string(filepath.Separator))...)
+	if project {
+		// A cloned repo can commit .paws itself as a link, too.
+		cur, parts = filepath.Dir(packs), append([]string{"", filepath.Base(packs)}, parts[1:]...)
+	}
+	for _, part := range parts {
 		cur = filepath.Join(cur, part)
 		st, err := os.Lstat(cur)
 		if errors.Is(err, os.ErrNotExist) {

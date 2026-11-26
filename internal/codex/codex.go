@@ -94,6 +94,10 @@ func (a Adapter) Parse(stdin []byte) (*harness.Hook, error) {
 	for _, c := range p.calls {
 		ev := base
 		ev.Tool, ev.Target = c.tool, c.target
+		if s, ok := ev.Log.(session); ok && c.tool == "Agent" {
+			s.spawning = true // this call is a spawn the ledger doesn't hold yet
+			ev.Log = s
+		}
 		switch in.HookEventName {
 		case "PreToolUse":
 			ev.Kind = rule.KindTool
@@ -358,12 +362,12 @@ func (Adapter) Events() []string {
 }
 
 // Entry is a hooks.json entry: an explicit 15 s timeout (Codex's default is 600 s), async where nothing waits on the
-// answer, and matcher * on tool events. PostToolUse is not async: the ledger must hold a call's result before the
-// next call is gated, since a skill read or an edit counts only once it succeeded.
+// answer, and matcher * on tool events. PostToolUse and PostCompact are not async: the ledger must hold a call's
+// result, or a compaction, before the next call is gated.
 func (Adapter) Entry(event, command string) map[string]any {
 	h := map[string]any{"type": "command", "command": command, "timeout": 15}
 	switch event {
-	case "UserPromptSubmit", "Stop", "PostCompact":
+	case "UserPromptSubmit", "Stop":
 		h["async"] = true
 	}
 	if event == "PreToolUse" || event == "PostToolUse" {

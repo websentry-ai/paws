@@ -230,6 +230,10 @@ func TestLedgerDenyEditsAndAgents(t *testing.T) {
 	if log.AgentsSinceUserTurn() != 1 {
 		t.Errorf("one spawn this turn, got %d", log.AgentsSinceUserTurn())
 	}
+	spawn := parse(t, stdin(t, "PreToolUse", "t1", map[string]any{"tool_name": "spawn_agent", "tool_use_id": "a2", "tool_input": map[string]any{"message": "y"}}))
+	if n := spawn.Calls[0].Log.AgentsSinceUserTurn(); n != 2 {
+		t.Errorf("a spawn being gated counts itself, as on Claude Code: want 2, got %d", n)
+	}
 	if n := parse(t, stdin(t, "PreToolUse", "t2", bashCall("c3", "ls"))).Calls[0].Log.AgentsSinceUserTurn(); n != 0 {
 		t.Errorf("a new turn has no spawns yet, got %d", n)
 	}
@@ -268,7 +272,8 @@ func TestLedgerMasksSecrets(t *testing.T) {
 	secret := "sk-ant-abcdefghijklmnopqrstuvwx"
 	observe(t, stdin(t, "PreToolUse", "t1", bashCall("c1", `curl -H "Authorization: Bearer `+secret+`" x`)), gate.Decision{})
 	observe(t, stdin(t, "PreToolUse", "t1", map[string]any{"tool_name": "mcp__x__send", "tool_use_id": "m1",
-		"tool_input": map[string]any{"to": "a", "body": map[string]any{"key": secret}}}), gate.Decision{})
+		"tool_input": map[string]any{"to": "a", "body": map[string]any{"key": secret, "token=" + secret: "v"}}}), gate.Decision{})
+	observe(t, stdin(t, "PreToolUse", "t1", bashCall("c2", "ls")), gate.Decision{Verdict: gate.Deny, Reason: "paws: no. Bearer " + secret})
 	data, _ := os.ReadFile(ledgerPath("01a218bf-886e", ""))
 	if strings.Contains(string(data), secret) || !strings.Contains(string(data), "***") {
 		t.Errorf("a secret reached the ledger: %s", data)

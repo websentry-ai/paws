@@ -75,6 +75,9 @@ func appendRecords(path string, recs []record) {
 		// target still finds it.
 		r.Text, r.Target = gate.AuditTarget(r.Text), gate.AuditTarget(r.Target)
 		r.Input, _ = masked(r.Input).(map[string]any)
+		for i, d := range r.Denied {
+			r.Denied[i] = gate.AuditTarget(d)
+		}
 		if len(r.Text) > maxRecordText {
 			r.Text = r.Text[:maxRecordText]
 		}
@@ -120,7 +123,7 @@ func masked(v any) any {
 	case map[string]any:
 		out := make(map[string]any, len(x))
 		for k, e := range x {
-			out[k] = masked(e)
+			out[gate.AuditTarget(k)] = masked(e)
 		}
 		return out
 	case []any:
@@ -195,6 +198,7 @@ type session struct {
 	own, main string
 	turn      string // the calling call's turn
 	model     string
+	spawning  bool // the call being gated starts a subagent
 }
 
 var _ gate.Session = session{}
@@ -268,9 +272,13 @@ func (s session) EditedMatching(glob *regexp.Regexp) bool {
 	return false
 }
 
-// AgentsSinceUserTurn counts the subagents the main thread spawned in the current turn.
+// AgentsSinceUserTurn counts the subagents the main thread spawned in the current turn, the spawn being gated
+// included, as Claude Code's transcript holds it.
 func (s session) AgentsSinceUserTurn() int {
 	n := 0
+	if s.spawning {
+		n++
+	}
 	for _, r := range readLedger(s.main) {
 		if r.Kind == "call" && r.Turn == s.turn && (r.Tool == "Agent" || r.Tool == "Task") {
 			n++

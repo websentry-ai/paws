@@ -17,7 +17,9 @@ On Codex, paws also keeps a ledger per session thread, because Codex's own sessi
 `$PAWS_HOME/sessions/codex/<session>.jsonl` (`<session>.<agent>.jsonl` for a subagent), 0600. It holds each tool
 call with paws's verdict and its input (secrets masked as in the audit log), whether it succeeded, a marker per
 turn (never the prompt) and per compaction. The gate reads it for skill loads, delivered digests, `when:` conditions
-and outcome grading. It never leaves the machine, and a ledger nobody wrote for 7 days is deleted.
+and outcome grading. It never leaves the machine, and a ledger nobody wrote for 7 days is deleted. Like Claude Code's
+transcript, it is a file the agent's own user can write: paws guides an agent that follows its rules, it does not
+stop code running as that user from forging a load.
 
 **Rule records** (a rule matched): `rule`, `action`, `skill` (the skill
 the rule requires), `verdict` (`allow` or `deny`), `tool`, `target` (the

@@ -143,8 +143,13 @@ func TestCodexInitUninstallAndSkill(t *testing.T) {
 			t.Errorf("%s: %+v", ev, last)
 		}
 	}
-	if pre := doc.Hooks["PreToolUse"][0]; pre.Matcher != "*" || pre.Hooks[0].Async {
-		t.Errorf("PreToolUse runs on every tool and waits for the answer: %+v", pre)
+	for _, ev := range []string{"PreToolUse", "PostToolUse", "PostCompact"} {
+		if h := doc.Hooks[ev][0]; h.Hooks[0].Async {
+			t.Errorf("%s must finish before the next call is gated: %+v", ev, h)
+		}
+	}
+	if pre := doc.Hooks["PreToolUse"][0]; pre.Matcher != "*" {
+		t.Errorf("PreToolUse runs on every tool: %+v", pre)
 	}
 	if _, again := captureStdout(t, func() int { return Init([]string{"--agent", "codex"}) }); !strings.Contains(again, "already registered") {
 		t.Errorf("init twice changes nothing: %s", again)

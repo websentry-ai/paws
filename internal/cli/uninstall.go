@@ -2,6 +2,7 @@ package cli
 
 import (
 	"bufio"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io/fs"
@@ -78,6 +79,7 @@ func Uninstall(args []string) int {
 
 	var plan []removal
 	var keep []string
+	requiredCache = nil
 	cwd, _ := os.Getwd()
 	root := projectRoot(cwd)
 	user := pack.UserTarget(gate.UserDir())
@@ -300,6 +302,10 @@ func planPortal(plan []removal) []removal {
 					// Deleting a file paws can't read would leave this laptop's login live in the portal.
 					return fmt.Errorf("can't read %s (%v); kept it. Disconnect this laptop in the portal, then delete the file", tilde(path), err)
 				}
+				if c == nil && credentialsHaveToken(path) {
+					// loadCredentials passes over a file with a token but no portal address; the device is still registered.
+					return fmt.Errorf("%s has a token but no portal address; kept it. Disconnect this laptop in the portal, then delete the file", tilde(path))
+				}
 				if c != nil && logout(true) != 0 {
 					return errors.New("logout failed; credentials.json is still there")
 				}
@@ -413,6 +419,18 @@ func removePackDir(packs, dir string, project bool) error {
 	return os.RemoveAll(dir)
 }
 
+// credentialsHaveToken reports whether a credentials file holds a token, whatever else is missing from it.
+func credentialsHaveToken(path string) bool {
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return false
+	}
+	var c struct {
+		Token string `json:"token"`
+	}
+	return json.Unmarshal(data, &c) == nil && c.Token != ""
+}
+
 // unreadableWithPaws reports whether a settings file exists, can't be parsed, and mentions paws, so a hook may be
 // hiding in it.
 func unreadableWithPaws(path string) bool {
@@ -437,6 +455,9 @@ func isLink(path string) bool {
 // removals, so this sees only rules that stay: user-written ones, portal rules of a scope that stays, and the packs
 // of a scope whose state couldn't be read.
 func requiredSkills() map[string]bool {
+	if requiredCache != nil {
+		return requiredCache
+	}
 	cwd, _ := os.Getwd()
 	need := map[string]bool{}
 	collect := func(dir string) {
@@ -447,20 +468,30 @@ func requiredSkills() map[string]bool {
 		}
 	}
 	collect(cwd)
-	// Rules in nested folders of the repo (a monorepo package's own .paws) use the same project skills.
-	filepath.WalkDir(projectRoot(cwd), func(p string, d fs.DirEntry, err error) error {
-		switch {
-		case err != nil:
+	// Rules in nested folders of the repo (a monorepo package's own .paws) use the same project skills. Only a
+	// real repo is walked: outside one, the root is the folder you ran this in, maybe your whole home folder.
+	if root := projectRoot(cwd); fileExists(filepath.Join(root, ".git")) {
+		filepath.WalkDir(root, func(p string, d fs.DirEntry, err error) error {
+			switch {
+			case err != nil:
+				return nil
+			case d.IsDir() && (d.Name() == ".git" || d.Name() == "node_modules"):
+				return filepath.SkipDir
+			case d.Name() == ".paws": // a folder or a link to one: the gate loads both
+				collect(filepath.Dir(p))
+				if d.IsDir() {
+					return filepath.SkipDir
+				}
+			}
 			return nil
-		case d.IsDir() && (d.Name() == ".git" || d.Name() == "node_modules"):
-			return filepath.SkipDir
-		case d.IsDir() && d.Name() == ".paws":
-			collect(filepath.Dir(p))
-		}
-		return nil
-	})
+		})
+	}
+	requiredCache = need
 	return need
 }
+
+// requiredCache holds requiredSkills for one run, so the walk happens once however many skills are removed.
+var requiredCache map[string]bool
 
 // hasOtherCopy reports whether the skill also exists in the other skills folder (user or project). The gate looks
 // in both, so a rule that needs the skill is still served by that copy.

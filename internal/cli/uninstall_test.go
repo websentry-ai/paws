@@ -655,3 +655,35 @@ func TestUninstallStopsWhenAHookFileCannotBeOpened(t *testing.T) {
 	}
 	kept(t, filepath.Join(f.pawsHome, "credentials.json"))
 }
+
+func TestUninstallKeepsACredentialsFileWithATokenAndNoAddress(t *testing.T) {
+	f := setupUninstall(t)
+	creds := filepath.Join(f.pawsHome, "credentials.json")
+	writeFile(t, creds, `{"token":"tok"}`)
+	code, _ := capture(t, &os.Stderr, func() int {
+		c, _ := captureStdout(t, func() int { return Uninstall([]string{"--global", "--yes"}) })
+		return c
+	})
+	if code != 1 || f.logouts.Load() != 0 {
+		t.Errorf("exit %d, %d logouts", code, f.logouts.Load())
+	}
+	kept(t, creds)
+}
+
+// Outside a repo nothing is walked: the folder could be the whole home folder.
+func TestRequiredSkillsDoesNotWalkOutsideARepo(t *testing.T) {
+	f := setupUninstall(t)
+	os.RemoveAll(filepath.Join(f.repo, ".git"))
+	writeFile(t, filepath.Join(f.repo, "deep", ".paws", "pre-tool", "x.md"), requireSkillRule("x", "walked"))
+	t.Chdir(f.repo)
+	requiredCache = nil
+	if requiredSkills()["walked"] {
+		t.Error("walked a folder that is not a repo")
+	}
+	os.MkdirAll(filepath.Join(f.repo, ".git"), 0o755)
+	requiredCache = nil
+	if !requiredSkills()["walked"] {
+		t.Error("did not find a nested .paws in a repo")
+	}
+	requiredCache = nil
+}

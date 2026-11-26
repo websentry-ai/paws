@@ -60,7 +60,7 @@ func Init(args []string) int {
 	}
 	// A committed `unbound-paws gate` runs on teammates' machines too: guard it so a missing binary says how to
 	// install paws. The copied binary under ~/.paws/bin is not guarded, because `npm i -g` would not create it.
-	guard := hookGuard() && command == cliName+" gate"
+	guard := hookGuard() && command == a.HookCommand(cliName+" gate")
 	written := command
 	if guard {
 		written = guardedCommand(command, "PreToolUse")

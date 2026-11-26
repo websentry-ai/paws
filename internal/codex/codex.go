@@ -125,7 +125,7 @@ func canonical(in *Input) []call {
 		// also edits files: those are gated too, as Codex's apply_patch tool is.
 		cmd := str("command")
 		calls := []call{{tool: "Bash", target: cmd, text: cmd, input: map[string]any{"command": cmd}}}
-		if strings.Contains(cmd, "*** Begin Patch") {
+		if before, _, ok := strings.Cut(cmd, "*** Begin Patch"); ok && strings.Contains(before, "apply_patch") {
 			calls = append(calls, patchCalls(cmd, patchDir(cmd, in.CWD))...)
 		}
 		return calls
@@ -168,7 +168,7 @@ func patchDir(cmd, cwd string) string {
 		return cwd
 	}
 	for _, part := range chainSep.Split(before, -1) {
-		m := cdStep.FindStringSubmatch(strings.TrimSpace(part))
+		m := cdStep.FindStringSubmatch(strings.TrimLeft(strings.TrimSpace(part), "( ")) // (cd x && apply_patch ...)
 		if m == nil {
 			continue
 		}

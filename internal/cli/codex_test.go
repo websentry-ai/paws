@@ -213,3 +213,31 @@ func TestScanRefusesCodex(t *testing.T) {
 		t.Errorf("exit %d: %s", code, errOut)
 	}
 }
+
+// A project hook from the unbound-paws on PATH is guarded like Claude Code's: a teammate without paws is told how
+// to install it, and init and uninstall still know the entry as paws's.
+func TestCodexProjectHookIsGuarded(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	t.Setenv("CODEX_HOME", "")
+	t.Setenv("PAWS_HOME", filepath.Join(home, ".paws"))
+	bin := filepath.Join(home, "bin")
+	self, _ := os.Executable()
+	os.MkdirAll(bin, 0o755)
+	os.Symlink(self, filepath.Join(bin, "unbound-paws"))
+	t.Setenv("PATH", bin+string(os.PathListSeparator)+os.Getenv("PATH"))
+	repo := filepath.Join(home, "repo")
+	os.MkdirAll(filepath.Join(repo, ".git"), 0o755)
+	t.Chdir(repo)
+	if !onPath(self) {
+		t.Skip("the test binary isn't seen as the unbound-paws on PATH here")
+	}
+	captureStdout(t, func() int { return Init([]string{"--agent", "codex"}) })
+	data, _ := os.ReadFile(filepath.Join(repo, ".codex", "hooks.json"))
+	if !strings.Contains(string(data), "command -v unbound-paws") || !strings.Contains(string(data), "; unbound-paws gate --agent codex") {
+		t.Errorf("want the guarded command: %s", data)
+	}
+	if !hasPawsHook(filepath.Join(repo, ".codex", "hooks.json")) {
+		t.Error("a guarded Codex entry is still paws's")
+	}
+}

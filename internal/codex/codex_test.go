@@ -359,3 +359,17 @@ func TestLedgerShellPatchResultAfterCd(t *testing.T) {
 		t.Error("src/a_test.go was edited")
 	}
 }
+
+// Patch text that apply_patch doesn't run (written to a file, say) edits nothing; a subshell's cd still counts.
+func TestShellPatchNeedsApplyPatch(t *testing.T) {
+	h := parse(t, stdin(t, "PreToolUse", "t1", map[string]any{"tool_name": "Bash", "tool_input": map[string]any{
+		"command": "cat > fix.patch <<'EOF'\n*** Begin Patch\n*** Add File: migrations/1.sql\n+x\n*** End Patch\nEOF"}}))
+	if len(h.Calls) != 1 || h.Calls[0].Tool != "Bash" {
+		t.Errorf("only a Bash call, got %+v", h.Calls)
+	}
+	h = parse(t, stdin(t, "PreToolUse", "t1", map[string]any{"tool_name": "Bash", "tool_input": map[string]any{
+		"command": "(cd migrations && apply_patch <<'EOF'\n*** Begin Patch\n*** Add File: 1.sql\n+x\n*** End Patch\nEOF\n)"}}))
+	if len(h.Calls) != 2 || h.Calls[1].Target != "/repo/migrations/1.sql" {
+		t.Errorf("want /repo/migrations/1.sql, got %+v", h.Calls)
+	}
+}

@@ -290,7 +290,8 @@ func guardedCommand(command, event string) string {
 	if event == "PreToolUse" {
 		exit = "2"
 	}
-	return "command -v " + strings.TrimSuffix(command, " gate") + guardMid(exit) + command
+	prog, _, _ := strings.Cut(command, " gate") // `unbound-paws gate --agent codex` runs unbound-paws too
+	return "command -v " + prog + guardMid(exit) + command
 }
 
 // unguard returns the plain `<prog> gate` inside a command guardedCommand wrote, or command itself.
@@ -302,7 +303,7 @@ func unguard(command string) string {
 	for _, exit := range []string{"1", "2"} {
 		mid := guardMid(exit)
 		if i := strings.Index(rest, mid); i >= 0 {
-			if prog, plain := rest[:i], rest[i+len(mid):]; plain == prog+" gate" {
+			if prog, plain := rest[:i], rest[i+len(mid):]; plain == prog+" gate" || strings.HasPrefix(plain, prog+" gate --agent ") {
 				return plain
 			}
 		}

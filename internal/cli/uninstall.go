@@ -201,6 +201,13 @@ func planScope(plan []removal, keep []string, scope string, settings []string, t
 				keep = append(keep, "project   "+tilde(path)+" (a symbolic link; left alone)")
 				continue
 			}
+			if unreadableWithPaws(path) {
+				// Skipping it would leave the hook registered with everything it needs removed: fail instead.
+				plan = append(plan, removal{what: "hook      " + tilde(path) + " (can't be read)", run: func() error {
+					return fmt.Errorf("can't read %s, which mentions paws; fix or remove the file, then run uninstall again", tilde(path))
+				}})
+				continue
+			}
 			if hasPawsHook(path) {
 				plan = append(plan, removal{what: "hook      " + tilde(path), run: func() error {
 					err := unregisterHook(path)
@@ -403,6 +410,20 @@ func removePackDir(packs, dir string, project bool) error {
 		}
 	}
 	return os.RemoveAll(dir)
+}
+
+// unreadableWithPaws reports whether a settings file exists, can't be parsed, and mentions paws, so a hook may be
+// hiding in it.
+func unreadableWithPaws(path string) bool {
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return false
+	}
+	doc, err := readSettings(path)
+	if err == nil {
+		_, err = hooksBlock(doc)
+	}
+	return err != nil && strings.Contains(string(data), "paws")
 }
 
 // isLink reports whether path is a symbolic link.

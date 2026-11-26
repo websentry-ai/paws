@@ -611,3 +611,17 @@ func TestUninstallKeepsSkillsASurvivingRuleRequires(t *testing.T) {
 	})
 	kept(t, filepath.Join(f.repo, ".claude", "skills", "humanizer"))
 }
+
+// A settings file that can't be parsed and mentions paws may hold the hook: nothing that hook needs is removed.
+func TestUninstallStopsWhenAHookFileCannotBeRead(t *testing.T) {
+	f := setupUninstall(t)
+	writeFile(t, filepath.Join(f.home, ".claude", "settings.json"), `{"hooks": {"PreToolUse": [ {"command": "unbound-paws gate"} `)
+	code, _ := capture(t, &os.Stderr, func() int {
+		c, _ := captureStdout(t, func() int { return Uninstall([]string{"--global", "--yes"}) })
+		return c
+	})
+	if code != 1 {
+		t.Errorf("exit %d, want 1", code)
+	}
+	kept(t, filepath.Join(f.pawsHome, "credentials.json"), filepath.Join(f.home, ".claude", "skills", "humanizer"), filepath.Join(f.pawsHome, "installed.yaml"))
+}

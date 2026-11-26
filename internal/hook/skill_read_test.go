@@ -46,6 +46,11 @@ func TestGradingTreatsASKILLmdReadAsTheAnswer(t *testing.T) {
 	if res := outcome.Grade(r, []outcome.Call{at(0, blocked), at(1, read)}, 0); res.Outcome != outcome.Stopped {
 		t.Errorf("read then nothing: want stopped, got %s", res.Outcome)
 	}
+	// Graded at Stop after the file was removed: the read still answered the deny.
+	os.Remove(md)
+	if gone := CallOf("Bash", map[string]any{"command": "sed -n '1,240p' " + md}); gone.SkillLoad != "git" {
+		t.Errorf("a past read of a SKILL.md removed since still loads, got %q", gone.SkillLoad)
+	}
 }
 
 // A relative SKILL.md read in the transcript is resolved from the session's own cwd, not the hook's.

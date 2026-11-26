@@ -140,6 +140,10 @@ var SkillRoots = func(cwd string) (dirs, trees []string) {
 // "" for any other call.
 func SkillRead(tool, target, cwd string) string { return skillRead(tool, target, cwd, true) }
 
+// PastSkillRead is SkillRead for a call already made: the file may be gone since, and the read still put the skill
+// in the agent's context.
+func PastSkillRead(tool, target, cwd string) string { return skillRead(tool, target, cwd, false) }
+
 // skillRead is SkillRead; with exists false the file may be gone since (a past read, still in the agent's context).
 func skillRead(tool, target, cwd string, exists bool) string {
 	if cwd == "" {

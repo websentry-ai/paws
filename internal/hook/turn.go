@@ -269,7 +269,7 @@ func toCall(b turnBlock, at time.Time, agent, cwd string) outcome.Call {
 	if b.Name == "Skill" {
 		c.SkillLoad, _ = b.Input["skill"].(string)
 	} else {
-		c.SkillLoad = gate.SkillRead(b.Name, c.Target, cwd)
+		c.SkillLoad = gate.PastSkillRead(b.Name, c.Target, cwd)
 	}
 	if server, tool, ok := gate.MCPParts(b.Name); ok {
 		c.MCP = map[string]any{"server": server, "tool": tool, "class": rule.MCPAction(b.Name)}

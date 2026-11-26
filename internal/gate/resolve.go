@@ -235,7 +235,8 @@ func sessionSkillContext(r *rule.Rule) string {
 
 // skillReason is the default require-skill deny: it says paws sent it and which rules, so a person
 // reading the chat knows where the block came from, and names every missing skill in one sentence.
-// e.g. paws (rule git--git): this command needs the "git" skill. Load it with the Skill tool, then retry this exact command.
+// It opens by saying nothing is broken, because Claude Code labels every deny "hook error".
+// e.g. paws (rule git--git): this is paws working as intended, nothing is broken. This command needs the "git" skill. Load it with the Skill tool, then retry this exact command.
 func skillReason(names, skills []string, ev Event) string {
 	label := "rule " + names[0]
 	if len(names) > 1 {
@@ -250,7 +251,7 @@ func skillReason(names, skills []string, ev Event) string {
 		need, pronoun = fmt.Sprintf("the %s and %s skills", strings.Join(quoted[:len(quoted)-1], ", "), quoted[len(quoted)-1]), "them"
 	}
 	noun := actionNoun(ev)
-	return fmt.Sprintf("paws (%s): this %s needs %s. Load %s with the Skill tool, then retry this exact %s.", label, noun, need, pronoun, noun)
+	return fmt.Sprintf("paws (%s): this is paws working as intended, nothing is broken. This %s needs %s. Load %s with the Skill tool, then retry this exact %s.", label, noun, need, pronoun, noun)
 }
 
 // actionNoun names the call a deny blocks: Claude retries "this exact command" for Bash, and the

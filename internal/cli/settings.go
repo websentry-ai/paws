@@ -37,17 +37,31 @@ func readSettings(path string) (settingsDoc, error) {
 }
 
 // writeSettings writes atomically: temp file in the same dir, then rename.
+// marshalPlain is json.Marshal (or MarshalIndent, with indent) that leaves < > & as they are. Go escapes them as
+// \u003c \u003e \u0026 by default, which makes the guard command unreadable in a committed settings.json. Every
+// step that wraps a hook command in JSON must use it, because each json.Marshal of a RawMessage escapes it again.
+func marshalPlain(v any, indent string) ([]byte, error) {
+	var buf bytes.Buffer
+	enc := json.NewEncoder(&buf)
+	enc.SetEscapeHTML(false)
+	if indent != "" {
+		enc.SetIndent("", indent)
+	}
+	if err := enc.Encode(v); err != nil {
+		return nil, err
+	}
+	return bytes.TrimRight(buf.Bytes(), "\n"), nil
+}
+
 func writeSettings(path string, doc settingsDoc) error {
 	dir := filepath.Dir(path)
 	if err := os.MkdirAll(dir, 0o755); err != nil {
 		return err
 	}
-	b, err := json.MarshalIndent(doc, "", "  ")
+	b, err := marshalPlain(doc, "  ")
 	if err != nil {
 		return err
 	}
-	// Go escapes < > & as \u003c \u003e \u0026. The guard command has `>` and `&`; keep them readable in a file that is committed.
-	b = []byte(strings.NewReplacer(`\u003c`, "<", `\u003e`, ">", `\u0026`, "&").Replace(string(b)))
 	f, err := os.CreateTemp(dir, ".settings-*.json")
 	if err != nil {
 		return err
@@ -112,7 +126,7 @@ func ensureHooks(doc settingsDoc, command string, guard bool) (bool, error) {
 			}
 		}
 		changed = true
-		b, err := json.Marshal(list)
+		b, err := marshalPlain(list, "")
 		if err != nil {
 			return false, err
 		}
@@ -145,7 +159,7 @@ func removeHooks(doc settingsDoc) (bool, error) {
 			delete(hooks, event)
 			continue
 		}
-		b, err := json.Marshal(kept)
+		b, err := marshalPlain(kept, "")
 		if err != nil {
 			return false, err
 		}
@@ -172,7 +186,7 @@ func hooksBlock(doc settingsDoc) (map[string]json.RawMessage, error) {
 }
 
 func setHooksBlock(doc settingsDoc, hooks map[string]json.RawMessage) error {
-	b, err := json.Marshal(hooks)
+	b, err := marshalPlain(hooks, "")
 	if err != nil {
 		return err
 	}
@@ -243,8 +257,8 @@ func withoutPawsHooks(entry json.RawMessage) (rest json.RawMessage, had bool) {
 	if len(kept) == 0 {
 		return nil, true
 	}
-	e["hooks"], _ = json.Marshal(kept)
-	rest, _ = json.Marshal(e)
+	e["hooks"], _ = marshalPlain(kept, "")
+	rest, _ = marshalPlain(e, "")
 	return rest, true
 }
 

@@ -54,9 +54,9 @@ func Init(args []string) int {
 		fmt.Fprintf(os.Stderr, "paws: %v\n", err)
 		return 1
 	}
-	// A committed hook runs on teammates' machines too: guard it so a missing binary says how to install paws.
-	// The guard needs sh, so Windows keeps the plain command.
-	guard := hookGuard()
+	// A committed `unbound-paws gate` runs on teammates' machines too: guard it so a missing binary says how to
+	// install paws. The copied binary under ~/.paws/bin is not guarded, because `npm i -g` would not create it.
+	guard := hookGuard() && command == cliName+" gate"
 	written := command
 	if guard {
 		written = guardedCommand(command, "PreToolUse")
@@ -91,7 +91,7 @@ func Init(args []string) int {
 	return 0
 }
 
-// hookGuard reports whether init wraps the hook command in the missing-binary guard, which needs sh.
+// hookGuard reports whether init may wrap the hook command in the missing-binary guard, which needs sh.
 func hookGuard() bool { return runtime.GOOS != "windows" }
 
 // pawsCommandIn is the paws hook command a settings file registers for PreToolUse, or "".

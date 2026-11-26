@@ -340,3 +340,68 @@ func TestWriteSettingsKeepsTheGuardReadable(t *testing.T) {
 		t.Error("the file with the guard no longer reads as a paws hook")
 	}
 }
+
+// A sibling hook with a literal backslash-u0026 in its command must come back byte for byte, not as an invalid escape.
+func TestWriteSettingsKeepsEscapedBackslashesInOtherHooks(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "settings.json")
+	u := "\\" + "u0026" // a backslash, then u0026, as text
+	sibling := "printf '" + u + "' > /dev/null 2>&1"
+	src := `{"hooks":{"PreToolUse":[{"matcher":"*","hooks":[{"type":"command","command":"printf '\\` + "u0026" + `' > /dev/null 2>&1"}]}]}}`
+	if err := os.WriteFile(path, []byte(src), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	doc, err := readSettings(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := ensureHooks(doc, "unbound-paws gate", true); err != nil {
+		t.Fatal(err)
+	}
+	if err := writeSettings(path, doc); err != nil {
+		t.Fatal(err)
+	}
+	data, _ := os.ReadFile(path)
+	var back struct {
+		Hooks map[string][]struct {
+			Hooks []struct {
+				Command string `json:"command"`
+			} `json:"hooks"`
+		} `json:"hooks"`
+	}
+	if err := json.Unmarshal(data, &back); err != nil {
+		t.Fatalf("settings.json is no longer valid JSON: %v\n%s", err, data)
+	}
+	found := false
+	for _, e := range back.Hooks["PreToolUse"] {
+		for _, h := range e.Hooks {
+			found = found || h.Command == sibling
+		}
+	}
+	if !found {
+		t.Errorf("the sibling hook changed:\n%s", data)
+	}
+	if strings.Contains(string(data), "\\"+"u003e") {
+		t.Errorf("a > was escaped:\n%s", data)
+	}
+}
+
+func TestInitGuardsOnlyTheUnboundPawsOnPathCommand(t *testing.T) {
+	if !hookGuard() {
+		t.Skip("no guard on this OS")
+	}
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	t.Setenv("PAWS_HOME", filepath.Join(home, ".paws"))
+	t.Setenv("CLAUDE_CONFIG_DIR", "")
+	t.Setenv("PATH", "") // off PATH: init copies the binary and registers "$HOME/.paws/bin/paws" gate
+	repo := filepath.Join(home, "repo")
+	os.MkdirAll(filepath.Join(repo, ".git"), 0o755)
+	t.Chdir(repo)
+	if code, _ := captureStdout(t, func() int { return Init(nil) }); code != 0 {
+		t.Fatalf("init exit %d", code)
+	}
+	got := pawsCommandIn(filepath.Join(repo, ".claude", "settings.json"))
+	if strings.Contains(got, "command -v") || !strings.HasSuffix(got, ` gate`) {
+		t.Errorf("a copied binary can't be installed by npm; the hint would not help, so no guard: %q", got)
+	}
+}

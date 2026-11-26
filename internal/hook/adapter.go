@@ -1,6 +1,7 @@
 package hook
 
 import (
+	"bytes"
 	"encoding/json"
 	"os"
 	"path/filepath"
@@ -99,6 +100,10 @@ func SettingsEntry(event, command string) map[string]any {
 
 // RawEntry is SettingsEntry marshaled, for splicing into a settings document.
 func RawEntry(event, command string) json.RawMessage {
-	b, _ := json.Marshal(SettingsEntry(event, command))
-	return b
+	// Not json.Marshal: it would write the guard command's > and & as \u003e and \u0026.
+	var buf bytes.Buffer
+	enc := json.NewEncoder(&buf)
+	enc.SetEscapeHTML(false)
+	enc.Encode(SettingsEntry(event, command))
+	return bytes.TrimRight(buf.Bytes(), "\n")
 }

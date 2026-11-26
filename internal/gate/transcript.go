@@ -170,7 +170,7 @@ func skillCalls(lines [][]byte, path, skill string) map[string]bool {
 // readCalls returns the ids of the log's own Read and Bash tool_use blocks that read skill's SKILL.md.
 func readCalls(lines [][]byte, path, skill string) map[string]bool {
 	calls := map[string]bool{}
-	file := []byte("/" + skill + "/SKILL.md") // skips every line that can't name the file
+	file := []byte("SKILL.md") // skips every line that can't name the file; a relative `cat SKILL.md` names it too
 	for _, l := range lines {
 		var e transcriptEntry
 		if !bytes.Contains(l, file) || !bytes.Contains(l, toolUseType) || json.Unmarshal(l, &e) != nil || foreign(e, path) || (e.Type != "assistant" && e.Type != requestBlob) {

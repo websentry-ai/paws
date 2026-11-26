@@ -134,6 +134,13 @@ func TestReadingSKILLmdClearsTheGate(t *testing.T) {
 	if out := gateCall(t, "Bash", push, transcript("Bash", string(catInput), false)); out != "{}" {
 		t.Errorf("a sed -n read of SKILL.md should clear the gate, got %s", out)
 	}
+	// A read from inside the skill's folder names the file alone; the record's cwd places it.
+	rel := transcript("Bash", `{"command":"cat SKILL.md"}`, false)
+	data, _ := os.ReadFile(rel)
+	os.WriteFile(rel, []byte(strings.ReplaceAll(string(data), `"type":"assistant",`, `"type":"assistant","cwd":"`+filepath.Dir(md)+`",`)), 0o600)
+	if out := gateCall(t, "Bash", push, rel); out != "{}" {
+		t.Errorf("cat SKILL.md run in the skill's folder should clear the gate, got %s", out)
+	}
 	if out := gateCall(t, "Bash", push, transcript("Read", string(readInput), true)); !strings.Contains(out, `"deny"`) {
 		t.Errorf("a failed read loads nothing, got %s", out)
 	}

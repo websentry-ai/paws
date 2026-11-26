@@ -173,6 +173,9 @@ func readTarget(prog string, args []string) (string, Lines, bool) {
 			if m[1] == "<" {
 				n--
 			}
+			if n < 1 {
+				return "", Lines{}, false // NR<1 prints nothing
+			}
 			lines = Lines{From: 1, To: n}
 		}
 		operands = operands[1:]

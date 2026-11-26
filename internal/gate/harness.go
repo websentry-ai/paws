@@ -161,6 +161,9 @@ type FileRead struct {
 	Lines rule.Lines
 }
 
+// readLimit is how many lines Claude Code's Read prints when the call sets no limit.
+const readLimit = 2000
+
 // ReadOf is the SKILL.md read a call makes (see SkillRead), with the lines it prints: a Read's offset and limit from
 // input, a Bash reader's range. With exists false the file may be gone since.
 func ReadOf(tool, target string, input map[string]any, cwd string, exists bool) (FileRead, bool) {
@@ -172,13 +175,14 @@ func ReadOf(tool, target string, input map[string]any, cwd string, exists bool) 
 	switch tool {
 	case "Read":
 		p = target
-		// Without a limit, a Read prints the file to its end (Claude Code cuts only files past 2000 lines).
+		// Without a limit, a Read prints readLimit lines: Claude Code cuts a longer file there.
 		offset, _ := input["offset"].(float64)
 		limit, _ := input["limit"].(float64)
-		lines = rule.Lines{From: max(int(offset), 1)}
-		if limit > 0 {
-			lines.To = lines.From + int(limit) - 1
+		if limit <= 0 {
+			limit = readLimit
 		}
+		lines = rule.Lines{From: max(int(offset), 1)}
+		lines.To = lines.From + int(limit) - 1
 	case "Bash":
 		p, lines, _ = rule.PlainRead(target)
 	}
@@ -228,10 +232,11 @@ func Covered(reads []FileRead) bool {
 	return false
 }
 
-// covers reports whether ranges hold lines 1 through n; with n unknown, only a range of the whole file does.
+// covers reports whether ranges hold lines 1 through n. With n unknown (the file is gone), only a read of the whole
+// file does: one to its end, or a default Read, which prints any skill short of readLimit lines whole.
 func covers(ranges []rule.Lines, n int, known bool) bool {
 	if !known {
-		return slices.ContainsFunc(ranges, func(l rule.Lines) bool { return l.From == 1 && l.To == 0 })
+		return slices.ContainsFunc(ranges, func(l rule.Lines) bool { return l.From == 1 && (l.To == 0 || l.To >= readLimit) })
 	}
 	type span struct{ from, to int }
 	var spans []span

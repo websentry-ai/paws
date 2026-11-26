@@ -242,6 +242,16 @@ func TestSKILLmdReadsLoadWhenTheyCoverTheFile(t *testing.T) {
 		return p
 	}
 	bash := func(cmd string) map[string]any { return map[string]any{"command": cmd} }
+	// Past 2000 lines, a Read without a limit is cut: it doesn't cover a longer file.
+	long := skillMD(t, "long-skill")
+	os.WriteFile(long, []byte(strings.Repeat("x\n", 2500)), 0o644)
+	writeRule(t, filepath.Join(home, "long.md"), "name: long\nevent: pre-tool\nmatcher:\n  tool: Bash\n  command_regex: make long\naction:\n  type: require-skill\n  skill: long-skill\n")
+	if out := gateCall(t, "Bash", map[string]any{"command": "make long"}, reads(map[string]any{"file_path": long})); !strings.Contains(out, `"deny"`) {
+		t.Errorf("a default Read of a 2500-line skill stops at 2000 lines: not loaded, got %s", out)
+	}
+	if out := gateCall(t, "Bash", map[string]any{"command": "make long"}, reads(map[string]any{"file_path": long}, map[string]any{"file_path": long, "offset": 2001})); out != "{}" {
+		t.Errorf("a second Read from line 2001 covers the rest, got %s", out)
+	}
 	push := map[string]any{"command": "git push"}
 	for name, c := range map[string]struct {
 		calls  []map[string]any
@@ -257,6 +267,7 @@ func TestSKILLmdReadsLoadWhenTheyCoverTheFile(t *testing.T) {
 		"Read in two parts":       {[]map[string]any{{"file_path": md, "limit": 150}, {"file_path": md, "offset": 151, "limit": 150}}, true},
 		"Read of a part":          {[]map[string]any{{"file_path": md, "offset": 100}}, false},
 		"Read of the whole file":  {[]map[string]any{{"file_path": md}}, true},
+		"awk NR<1 prints nothing": {[]map[string]any{bash("awk 'NR<1' " + md)}, false},
 	} {
 		out := gateCall(t, "Bash", push, reads(c.calls...))
 		if loaded := out == "{}"; loaded != c.loaded {

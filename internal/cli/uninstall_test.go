@@ -244,7 +244,8 @@ func TestUninstallDoesNotFollowSymlinksOutOfThePacksFolder(t *testing.T) {
 	if code != 1 {
 		t.Errorf("exit %d, want 1: a pack could not be removed", code)
 	}
-	kept(t, filepath.Join(victim, "docs", "keep.txt"), filepath.Join(packs, "evil"), state)
+	kept(t, filepath.Join(victim, "docs", "keep.txt"), filepath.Join(packs, "evil"), state,
+		filepath.Join(f.repo, ".claude", "skills", "git")) // a pack that stays may need its skills
 }
 
 func TestUninstallKeepsSkillsWithHiddenFilesAndUnreadableLogin(t *testing.T) {
@@ -280,7 +281,6 @@ func TestUninstallGlobalKeepsTheBinaryAHookHereStillRuns(t *testing.T) {
 
 func TestUninstallKeepsTheLoginWhenThePortalCannotRetireTheDevice(t *testing.T) {
 	var status atomic.Int32
-	status.Store(503)
 	pawsHome := portalEnv(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path == "/paws/v1/device/logout" {
 			w.WriteHeader(int(status.Load()))
@@ -291,14 +291,17 @@ func TestUninstallKeepsTheLoginWhenThePortalCannotRetireTheDevice(t *testing.T) 
 	}))
 	creds := filepath.Join(pawsHome, "credentials.json")
 	writeFile(t, creds, `{"api":"`+strings.TrimSuffix(os.Getenv("PAWS_PORTAL_API"), "/")+`","token":"tok"}`)
-	code, errOut := capture(t, &os.Stderr, func() int {
-		c, _ := captureStdout(t, func() int { return Uninstall([]string{"--global", "--yes"}) })
-		return c
-	})
-	if code != 1 || !strings.Contains(errOut, "couldn't disconnect this laptop") {
-		t.Errorf("exit %d, stderr %q", code, errOut)
+	for _, bad := range []int{503, 429, 403, 400} {
+		status.Store(int32(bad))
+		code, errOut := capture(t, &os.Stderr, func() int {
+			c, _ := captureStdout(t, func() int { return Uninstall([]string{"--global", "--yes"}) })
+			return c
+		})
+		if code != 1 || !strings.Contains(errOut, "couldn't disconnect this laptop") {
+			t.Errorf("status %d: exit %d, stderr %q", bad, code, errOut)
+		}
+		kept(t, creds)
 	}
-	kept(t, creds)
 
 	status.Store(401) // the portal already forgot this device: nothing left to retire
 	if code, out := captureStdout(t, func() int { return Uninstall([]string{"--global", "--yes"}) }); code != 0 {

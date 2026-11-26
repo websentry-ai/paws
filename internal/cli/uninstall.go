@@ -150,6 +150,7 @@ A repo that committed the paws hook keeps it until you remove it there (unbound-
 // planScope adds the removals for one scope: the hook in its settings files, the packs the state file lists, and
 // the skills paws installed. Nothing is listed that paws didn't create.
 func planScope(plan []removal, keep []string, scope string, settings []string, t pack.Target, keepSkills bool) ([]removal, []string) {
+	packFailed := false // a pack that stays may still need its skills, so they stay too
 	for _, path := range settings {
 		path := path
 		if hasPawsHook(path) {
@@ -157,7 +158,6 @@ func planScope(plan []removal, keep []string, scope string, settings []string, t
 		}
 	}
 	if st, err := pack.LoadState(t.StateFile); err == nil && len(st.Packs) > 0 {
-		packFailed := false
 		var names []string
 		for n := range st.Packs {
 			names = append(names, n)
@@ -169,12 +169,12 @@ func planScope(plan []removal, keep []string, scope string, settings []string, t
 				continue // a name in the state file that points outside the packs folder is not paws's to delete
 			}
 			plan = append(plan, removal{fmt.Sprintf("pack      %s (%s) in %s", n, count(len(st.Packs[n].Bindings), "rule"), tilde(dir)), func() error {
-				err := removePackDir(t.PacksDir, dir)
-				if err != nil {
+				if err := removePackDir(t.PacksDir, dir); err != nil {
 					packFailed = true
+					return err
 				}
 				pruneUp(filepath.Dir(dir), t.PacksDir)
-				return err
+				return nil
 			}})
 		}
 		plan = append(plan, removal{"packs     " + tilde(t.StateFile), func() error {
@@ -199,6 +199,9 @@ func planScope(plan []removal, keep []string, scope string, settings []string, t
 			keep = append(keep, fmt.Sprintf("skill     %s (paws installed it, but it was edited since)", tilde(dir)))
 		default:
 			plan = append(plan, removal{"skill     " + tilde(dir), func() error {
+				if packFailed {
+					return fmt.Errorf("kept %s: a pack that may need it could not be removed", tilde(dir))
+				}
 				_, err := pack.RemoveBundledSkill(t.SkillsDir, s.Name)
 				pruneEmpty(t.SkillsDir)
 				return err

@@ -468,7 +468,13 @@ func Logout(args []string) int {
 	return logout(false)
 }
 
-// logout is Logout. With strict, a portal that can't be reached (or answers 5xx) keeps the credentials and the
+// retired reports whether a device/logout status means nothing is left to retire: success, a login the portal
+// already forgot (401), or a portal from before the endpoint (404).
+func retired(status int) bool {
+	return status/100 == 2 || status == http.StatusUnauthorized || status == http.StatusNotFound
+}
+
+// logout is Logout. With strict, a portal that can't be reached or that answers anything else keeps the credentials and the
 // rules and returns 1, so the laptop's device is never left registered with no credential to retry from.
 func logout(strict bool) int {
 	path := credentialsPath()
@@ -480,7 +486,7 @@ func logout(strict bool) int {
 	// Offline, or a portal from before this endpoint, logs out locally all the same.
 	if c, err := loadCredentials(); err == nil && c != nil && c.Token != "" {
 		status, _, err := postJSON(strings.TrimSuffix(c.API, "/")+"/paws/v1/device/logout", c.Token, map[string]string{})
-		if strict && (err != nil || status >= 500) {
+		if strict && (err != nil || !retired(status)) {
 			fmt.Fprintln(os.Stderr, "paws: couldn't disconnect this laptop in the portal; kept your login so you can run this again when the portal answers")
 			return 1
 		}

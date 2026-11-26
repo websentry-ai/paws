@@ -225,8 +225,8 @@ func ReadOf(tool, target string, input map[string]any, cwd string, exists bool) 
 func Covered(reads []FileRead) bool {
 	byFile := map[string][]rule.Lines{}
 	for _, r := range reads {
-		if st, err := os.Stat(r.File); err == nil && !r.At.IsZero() && r.At.Before(st.ModTime().Add(-time.Second)) {
-			continue // a second's slack: transcript times and file times come from different clocks
+		if st, err := os.Stat(r.File); err == nil && !r.At.IsZero() && r.At.Before(st.ModTime()) {
+			continue // both times come from this machine's clock
 		}
 		byFile[r.File] = append(byFile[r.File], r.Lines)
 	}

@@ -257,12 +257,16 @@ func (Adapter) Observe(h *harness.Hook, d gate.Decision) {
 		appendRecords(own, recs)
 	case in.HookEventName == "PostToolUse":
 		ok := resultOK(in.ToolResponse)
-		if in.ToolName == "Bash" && len(p.calls) > 1 {
-			// A patch through the shell: Bash shows no exit code, so only apply_patch's own success line says the
-			// files changed.
-			ok = strings.Contains(string(in.ToolResponse), "Success. Updated the following files")
+		var files []string
+		if in.ToolName == "apply_patch" || in.ToolName == "Bash" && len(p.calls) > 1 {
+			// A patch: the files it changed are the ones apply_patch lists after its success line. Through the shell
+			// there is no exit code, so that line is the only sign it applied.
+			files = patchedFiles(in.ToolResponse, in.CWD)
+			if in.ToolName == "Bash" {
+				ok = len(files) > 0
+			}
 		}
-		appendRecords(own, []record{{Kind: "result", At: p.at, Turn: in.TurnID, ID: in.ToolUseID, OK: &ok, Agent: in.AgentID}})
+		appendRecords(own, []record{{Kind: "result", At: p.at, Turn: in.TurnID, ID: in.ToolUseID, OK: &ok, Files: files, Agent: in.AgentID}})
 	case in.HookEventName == "UserPromptSubmit":
 		appendRecords(own, []record{{Kind: "turn", At: p.at, Turn: in.TurnID}})
 	case in.HookEventName == "PostCompact", in.HookEventName == "SessionStart" && in.Source == "compact":
@@ -270,6 +274,31 @@ func (Adapter) Observe(h *harness.Hook, d gate.Decision) {
 	case in.HookEventName == "SessionStart":
 		pruneLedgers(own)
 	}
+}
+
+// patchedFiles are the files apply_patch says it changed: the "A path", "M path" and "D path" lines after its
+// "Success. Updated the following files:" line, absolute.
+func patchedFiles(raw json.RawMessage, cwd string) []string {
+	var s string
+	if json.Unmarshal(raw, &s) != nil {
+		s = string(raw)
+	}
+	_, list, ok := strings.Cut(s, "Success. Updated the following files:")
+	if !ok {
+		return nil
+	}
+	var files []string
+	for _, line := range strings.Split(list, "\n") {
+		op, path, ok := strings.Cut(strings.TrimSpace(line), " ")
+		if !ok || len(op) != 1 || !strings.Contains("AMD", op) {
+			continue
+		}
+		if !filepath.IsAbs(path) {
+			path = filepath.Join(cwd, path)
+		}
+		files = append(files, filepath.Clean(path))
+	}
+	return files
 }
 
 // resultOK reads a PostToolUse tool_response: apply_patch's starts "Exit code: N"; a Bash result is the output alone,

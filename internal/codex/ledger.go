@@ -8,6 +8,7 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"slices"
 	"sort"
 	"strconv"
 	"strings"
@@ -39,9 +40,10 @@ type record struct {
 	ReadFile  string         `json:"read_file,omitempty"`  // that SKILL.md, and the lines the read prints
 	ReadFrom  int            `json:"read_from,omitempty"`  // (read_to 0: to the end; read_from < 0: the last lines)
 	ReadTo    int            `json:"read_to,omitempty"`
-	Denied    []string       `json:"denied,omitempty"`     // a deny's paragraph openings, to find a digest's marker
-	OK        *bool          `json:"ok,omitempty"`         // result: the call succeeded
-	Agent     string         `json:"agent,omitempty"`      // the subagent's id; "" on the main thread
+	Denied    []string       `json:"denied,omitempty"` // a deny's paragraph openings, to find a digest's marker
+	OK        *bool          `json:"ok,omitempty"`     // result: the call succeeded
+	Files     []string       `json:"files,omitempty"`  // result of a patch: the files it changed
+	Agent     string         `json:"agent,omitempty"`  // the subagent's id; "" on the main thread
 }
 
 // maxRecordText bounds a call's text and input in the ledger: a patch can be megabytes.
@@ -264,12 +266,22 @@ func (s session) DenyDelivered(marker string, window int) bool {
 	return false
 }
 
-// EditedMatching: the main thread wrote or edited a matching file, and the call succeeded.
+// EditedMatching: the main thread wrote or edited a matching file, the call succeeded and, for a patch, that file is
+// one apply_patch says it changed.
 func (s session) EditedMatching(glob *regexp.Regexp) bool {
 	recs := readLedger(s.main)
 	ok := results(recs)
+	changed := map[string][]string{}
 	for _, r := range recs {
-		if r.Kind == "call" && r.Verdict == "allow" && (r.Tool == "Edit" || r.Tool == "Write") && glob.MatchString(r.Target) && ok[r.ID] {
+		if r.Kind == "result" && r.Files != nil {
+			changed[r.ID] = r.Files
+		}
+	}
+	for _, r := range recs {
+		if r.Kind != "call" || r.Verdict != "allow" || r.Tool != "Edit" && r.Tool != "Write" || !glob.MatchString(r.Target) || !ok[r.ID] {
+			continue
+		}
+		if files, listed := changed[r.ID]; !listed || slices.Contains(files, filepath.Clean(r.Target)) {
 			return true
 		}
 	}

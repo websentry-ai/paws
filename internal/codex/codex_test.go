@@ -332,4 +332,8 @@ func TestLedgerShellPatchNeedsSuccess(t *testing.T) {
 	if !edited("p2", "Success. Updated the following files:\nM /repo/src/a_test.go\n") {
 		t.Error("a patch apply_patch reports done is an edit")
 	}
+	ledgerEnv(t)
+	if edited("p3", "Success. Updated the following files:\nM /repo/src/other.go\n") {
+		t.Error("a file the patch didn't change, by apply_patch's own list, is no edit")
+	}
 }

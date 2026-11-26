@@ -232,11 +232,11 @@ func Covered(reads []FileRead) bool {
 	return false
 }
 
-// covers reports whether ranges hold lines 1 through n. With n unknown (the file is gone), only a read of the whole
-// file does: one to its end, or a default Read, which prints any skill short of readLimit lines whole.
+// covers reports whether ranges hold lines 1 through n. With n unknown (the file is gone), only a read to the end
+// of the file from its first line does: a bounded one, a Read's 2000 lines included, may have missed the rest.
 func covers(ranges []rule.Lines, n int, known bool) bool {
 	if !known {
-		return slices.ContainsFunc(ranges, func(l rule.Lines) bool { return l.From == 1 && (l.To == 0 || l.To >= readLimit) })
+		return slices.ContainsFunc(ranges, func(l rule.Lines) bool { return l.From == 1 && l.To == 0 })
 	}
 	type span struct{ from, to int }
 	var spans []span

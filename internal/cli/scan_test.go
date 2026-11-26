@@ -354,3 +354,28 @@ func TestScanReadsTheAuditLogAfterTheTranscripts(t *testing.T) {
 		t.Errorf("calls %v in %d sessions; want only the skill load c2, in 1 session", got, n)
 	}
 }
+
+// The hook logs a read of a SKILL.md as a Skill action, and sync uploads it: scan pairs the transcript's Bash read
+// with that record and leaves it out, so it isn't counted twice.
+func TestScanPairsASKILLmdReadWithItsSkillAction(t *testing.T) {
+	home, srv := syncEnv(t)
+	srv.triggers = scanTriggersJSON
+	fixScanClock(t)
+	userHome, _ := os.UserHomeDir()
+	md := filepath.Join(userHome, ".claude", "skills", "coreutils", "SKILL.md")
+	writeFile(t, md, "# coreutils\n")
+	cmd := "cat " + md
+	in, _ := json.Marshal(map[string]string{"command": cmd})
+	writeFile(t, filepath.Join(userHome, ".claude", "projects", "-Users-alice-acme", "sess-1.jsonl"),
+		`{"type":"assistant","timestamp":"2026-11-03T09:00:00Z","message":{"content":[{"type":"tool_use","id":"r1","name":"Bash","input":`+string(in)+`}]}}`+"\n")
+	api := strings.TrimSuffix(os.Getenv("PAWS_PORTAL_API"), "/")
+	writePrivate(filepath.Join(home, "credentials.json"), credentials{API: api, Token: "tok-abc", CreatedAt: "2026-11-02T12:00:00Z"})
+	appendLines(t, filepath.Join(home, "audit.log"),
+		`{"v":2,"ts":"2026-11-03T09:00:01Z","agent":"claude-code","event":"action","session":"sess-1","tool":"Skill","action":"skill","target_hash":"`+gate.TargetHash(cmd)+`"}`)
+	code, dry := captureStdout(t, func() int { return Scan([]string{"--dry-run"}) })
+	var got historyUpload
+	json.Unmarshal([]byte(dry), &got)
+	if code != 0 || got.ToolCalls != 0 {
+		t.Errorf("the read the hook logged as a Skill action counted again: exit %d, %d calls", code, got.ToolCalls)
+	}
+}

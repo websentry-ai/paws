@@ -4,12 +4,14 @@ import (
 	"context"
 	"encoding/base64"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"io/fs"
 	"net/http"
 	"net/url"
 	"path"
+	"sort"
 	"strings"
 	"testing/fstest"
 
@@ -53,10 +55,25 @@ func fetchCatalog(ctx context.Context, rawURL string, limit int64, out any) erro
 	if int64(len(body)) > limit {
 		return fmt.Errorf("the paws catalog sent more than %d bytes", limit)
 	}
+	if resp.StatusCode == http.StatusNotFound {
+		return &catalogNotFound{err: portalError(resp.StatusCode, body)}
+	}
 	if resp.StatusCode != http.StatusOK {
 		return portalError(resp.StatusCode, body)
 	}
 	return json.Unmarshal(body, out)
+}
+
+// catalogNotFound is a 404 from the catalog. It prints as the portal error it wraps.
+type catalogNotFound struct{ err error }
+
+func (e *catalogNotFound) Error() string { return e.err.Error() }
+
+// unknownName is what `add` reports when the catalog has no pack, rule file or skill of that name.
+type unknownName struct{ name string }
+
+func (e *unknownName) Error() string {
+	return fmt.Sprintf("No pack, rule file or skill named %s.", printable(e.name))
 }
 
 // remoteFile is a file as the backend sends it: base64, and whether it is a runnable script.
@@ -133,6 +150,10 @@ func remoteCatalog(api string, names []string) (*catalog.Catalog, error) {
 	for _, name := range names {
 		var s catalogSlice
 		if err := fetchCatalog(portalCtx, api+"/paws/v1/catalog/source?name="+url.QueryEscape(name), maxPortalResponse, &s); err != nil {
+			var missing *catalogNotFound
+			if errors.As(err, &missing) {
+				return nil, &unknownName{name: name}
+			}
 			return nil, fmt.Errorf("%s: %w", name, err)
 		}
 		for _, p := range s.Packs {
@@ -204,6 +225,85 @@ func searchCatalog(api, query string) ([]catalogRow, int, error) {
 	}
 	err := fetchCatalog(portalCtx, api+"/paws/v1/catalog/skills?limit=20&q="+url.QueryEscape(query), maxPortalResponse, &page)
 	return page.Skills, page.Total, err
+}
+
+// catalogNames lists every name `add` accepts that the catalog listing shows: each skill's name and each target of
+// its install command (a pack such as "writing", or a rule file such as "testing/tdd"). It pages through the listing.
+func catalogNames(api string) ([]string, error) {
+	seen := map[string]bool{}
+	var names []string
+	offset := 0
+	for page := 0; page < 20; page++ {
+		var rows struct {
+			Skills     []catalogRow `json:"skills"`
+			NextOffset *int         `json:"next_offset"`
+		}
+		if err := fetchCatalog(portalCtx, fmt.Sprintf("%s/paws/v1/catalog/skills?limit=50&offset=%d", api, offset), maxPortalResponse, &rows); err != nil {
+			return names, err
+		}
+		for _, r := range rows.Skills {
+			cands := append([]string{r.Name}, strings.Fields(strings.TrimPrefix(r.Add, cliName+" add"))...)
+			for _, n := range cands {
+				if n != "" && !seen[n] {
+					seen[n] = true
+					names = append(names, n)
+				}
+			}
+		}
+		if rows.NextOffset == nil {
+			break
+		}
+		offset = *rows.NextOffset
+	}
+	return names, nil
+}
+
+// closestNames gives up to three of names within a small edit distance of name, nearest first.
+func closestNames(name string, names []string) []string {
+	name = strings.ToLower(name)
+	limit := max(2, len(name)/3)
+	type hit struct {
+		name string
+		dist int
+	}
+	var hits []hit
+	for _, n := range names {
+		if d := editDistance(name, strings.ToLower(n)); d <= limit {
+			hits = append(hits, hit{n, d})
+		}
+	}
+	sort.Slice(hits, func(i, j int) bool {
+		if hits[i].dist != hits[j].dist {
+			return hits[i].dist < hits[j].dist
+		}
+		return hits[i].name < hits[j].name
+	})
+	var out []string
+	for i := 0; i < len(hits) && i < 3; i++ {
+		out = append(out, hits[i].name)
+	}
+	return out
+}
+
+// editDistance is the Levenshtein distance between a and b, counted in bytes.
+func editDistance(a, b string) int {
+	prev := make([]int, len(b)+1)
+	for j := range prev {
+		prev[j] = j
+	}
+	for i := 1; i <= len(a); i++ {
+		cur := make([]int, len(b)+1)
+		cur[0] = i
+		for j := 1; j <= len(b); j++ {
+			cost := 1
+			if a[i-1] == b[j-1] {
+				cost = 0
+			}
+			cur[j] = min(prev[j]+1, cur[j-1]+1, prev[j-1]+cost)
+		}
+		prev = cur
+	}
+	return prev[len(b)]
 }
 
 // skillFilesFor gives the skill-file source for a backend; tests replace it with files of their own.

@@ -1,6 +1,10 @@
 package cli
 
 import (
+	"encoding/json"
+	"fmt"
+	"net/http"
+	"os"
 	"strings"
 	"testing"
 )
@@ -24,5 +28,77 @@ func TestParsePackFlagsEqualsForm(t *testing.T) {
 	f, err := parsePackFlags([]string{"--pick=prose=plain", "--catalog=/tmp/c", "writing"}, "--pick", "--catalog")
 	if err != nil || f.picks["prose"] != "plain" || f.catalog != "/tmp/c" || len(f.args) != 1 {
 		t.Errorf("got %+v, %v", f, err)
+	}
+}
+
+// addNotFoundBackend answers like paws-backend: 404 for a name it doesn't know, a paged listing of its skills.
+func addNotFoundBackend(t *testing.T) {
+	t.Helper()
+	rows := []catalogRow{
+		{Name: "humanizer", Add: "unbound-paws add writing"},
+		{Name: "writing-plans", Add: "unbound-paws add planning/writing-plans"},
+		{Name: "tdd", Add: "unbound-paws add testing/tdd"},
+	}
+	portalEnv(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/paws/v1/catalog/source":
+			w.WriteHeader(http.StatusNotFound)
+			fmt.Fprintf(w, `{"error": "No pack, rule file or skill named %s in the catalog"}`, r.URL.Query().Get("name"))
+		case "/paws/v1/catalog/skills":
+			// Two pages of two and one, to prove the CLI follows next_offset.
+			if r.URL.Query().Get("offset") == "2" {
+				json.NewEncoder(w).Encode(map[string]any{"skills": rows[2:], "next_offset": nil})
+				return
+			}
+			json.NewEncoder(w).Encode(map[string]any{"skills": rows[:2], "next_offset": 2})
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+}
+
+func TestAddUnknownNameSuggestsNearestNames(t *testing.T) {
+	addNotFoundBackend(t)
+	code, out := capture(t, &os.Stderr, func() int { return Add([]string{"writting"}) })
+	if code != 1 {
+		t.Errorf("exit %d, want 1", code)
+	}
+	want := "paws: No pack, rule file or skill named writting. Did you mean writing? Run `unbound-paws search <word>` to look for it.\n"
+	if out != want {
+		t.Errorf("got %q\nwant %q", out, want)
+	}
+	if strings.Contains(out, "portal:") || strings.Contains(out, "HTTP 404") {
+		t.Errorf("developer-facing text leaked: %q", out)
+	}
+}
+
+func TestAddUnknownNameWithNothingCloseStillHints(t *testing.T) {
+	addNotFoundBackend(t)
+	code, out := capture(t, &os.Stderr, func() int { return Add([]string{"writing/nope"}) })
+	if code != 1 {
+		t.Errorf("exit %d, want 1", code)
+	}
+	want := "paws: No pack, rule file or skill named writing/nope. Run `unbound-paws search <word>` to look for it.\n"
+	if out != want {
+		t.Errorf("got %q\nwant %q", out, want)
+	}
+}
+
+func TestClosestNames(t *testing.T) {
+	names := []string{"writing", "writing-plans", "testing", "tdd", "planning", "waiting", "wrting"}
+	got := closestNames("writting", names)
+	if len(got) != 3 || got[0] != "writing" {
+		t.Errorf("closest to writting: %v", got)
+	}
+	if got := closestNames("zzzzzz", names); len(got) != 0 {
+		t.Errorf("nothing is close to zzzzzz, got %v", got)
+	}
+	for _, c := range []struct {
+		a, b string
+		want int
+	}{{"", "abc", 3}, {"abc", "abc", 0}, {"writting", "writing", 1}, {"kitten", "sitting", 3}} {
+		if d := editDistance(c.a, c.b); d != c.want {
+			t.Errorf("editDistance(%q, %q) = %d, want %d", c.a, c.b, d, c.want)
+		}
 	}
 }

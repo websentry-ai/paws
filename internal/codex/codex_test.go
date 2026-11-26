@@ -313,3 +313,23 @@ func TestLedgerLoadsWhenReadsCoverTheSkill(t *testing.T) {
 		t.Error("1-240 and 241-480 cover the skill: loaded")
 	}
 }
+
+// A patch run through the shell counts as an edit only when apply_patch says it succeeded.
+func TestLedgerShellPatchNeedsSuccess(t *testing.T) {
+	ledgerEnv(t)
+	cmd := "apply_patch <<'EOF'\n*** Begin Patch\n*** Update File: /repo/src/a_test.go\n@@\n+x\n*** End Patch\nEOF"
+	glob := regexp.MustCompile(`_test\.go$`)
+	edited := func(id, response string) bool {
+		observe(t, stdin(t, "PreToolUse", "t1", bashCall(id, cmd)), gate.Decision{})
+		post := bashCall(id, cmd) // Codex sends the call's input with its result
+		post["tool_response"] = response
+		observe(t, stdin(t, "PostToolUse", "t1", post), gate.Decision{})
+		return parse(t, stdin(t, "PreToolUse", "t1", bashCall("c9", "ls"))).Calls[0].Log.EditedMatching(glob)
+	}
+	if edited("p1", "Failed to find expected lines in /repo/src/a_test.go:\nold\n") {
+		t.Error("a rejected patch is no edit")
+	}
+	if !edited("p2", "Success. Updated the following files:\nM /repo/src/a_test.go\n") {
+		t.Error("a patch apply_patch reports done is an edit")
+	}
+}

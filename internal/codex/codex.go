@@ -257,6 +257,11 @@ func (Adapter) Observe(h *harness.Hook, d gate.Decision) {
 		appendRecords(own, recs)
 	case in.HookEventName == "PostToolUse":
 		ok := resultOK(in.ToolResponse)
+		if in.ToolName == "Bash" && len(p.calls) > 1 {
+			// A patch through the shell: Bash shows no exit code, so only apply_patch's own success line says the
+			// files changed.
+			ok = strings.Contains(string(in.ToolResponse), "Success. Updated the following files")
+		}
 		appendRecords(own, []record{{Kind: "result", At: p.at, Turn: in.TurnID, ID: in.ToolUseID, OK: &ok, Agent: in.AgentID}})
 	case in.HookEventName == "UserPromptSubmit":
 		appendRecords(own, []record{{Kind: "turn", At: p.at, Turn: in.TurnID}})
@@ -312,11 +317,12 @@ func (Adapter) LoadSkills(skills []gate.Skill, noun string) string {
 	if noun == "command" {
 		verb = "run the command"
 	}
-	return fmt.Sprintf("Read %s in full, follow %s, then %s again, changed if %s so", readList(skills), it, verb, says)
+	// "On its own": a read chained with other commands isn't a load, and Codex likes to chain.
+	return fmt.Sprintf("Read %s in full on its own, follow %s, then %s again, changed if %s so", readList(skills), it, verb, says)
 }
 
 func (Adapter) LoadAtStart(s gate.Skill) string {
-	return fmt.Sprintf("Read %s in full and follow it before you start work.", readList([]gate.Skill{s}))
+	return fmt.Sprintf("Read %s in full on its own and follow it before you start work.", readList([]gate.Skill{s}))
 }
 
 func readList(skills []gate.Skill) string {

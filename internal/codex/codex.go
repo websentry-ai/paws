@@ -154,23 +154,25 @@ func canonical(in *Input) []call {
 	return []call{{tool: in.ToolName, target: in.ToolName, text: in.ToolName, input: ti}}
 }
 
-// leadingCd is a `cd <dir> &&` (or `;`) in front of a command.
-var leadingCd = regexp.MustCompile(`^\s*cd\s+(?:'([^']*)'|"([^"]*)"|(\S+))\s*(?:&&|;)`)
+// cdStep is one `cd <dir>` command of a chain.
+var cdStep = regexp.MustCompile(`^cd\s+(?:'([^']*)'|"([^"]*)"|(\S+))$`)
 
-// patchDir is where a shell patch runs: the hook's cwd, or the folder a leading `cd` moves to, so a relative path in
-// `cd migrations && apply_patch ...` is a file in migrations/.
+// chainSep splits a command line into its commands.
+var chainSep = regexp.MustCompile(`&&|\|\||[;\n]`)
+
+// patchDir is where a shell patch runs: the hook's cwd, moved by each `cd` in the commands before apply_patch, so a
+// relative path in `ls && cd migrations && apply_patch ...` is a file in migrations/.
 func patchDir(cmd, cwd string) string {
-	for {
-		m := leadingCd.FindStringSubmatchIndex(cmd)
+	before, _, ok := strings.Cut(cmd, "apply_patch")
+	if !ok {
+		return cwd
+	}
+	for _, part := range chainSep.Split(before, -1) {
+		m := cdStep.FindStringSubmatch(strings.TrimSpace(part))
 		if m == nil {
-			return cwd
+			continue
 		}
-		dir := ""
-		for g := 2; g <= 6; g += 2 { // whichever of the quoted or bare forms matched
-			if m[g] >= 0 {
-				dir = cmd[m[g]:m[g+1]]
-			}
-		}
+		dir := m[1] + m[2] + m[3]
 		if rest, ok := strings.CutPrefix(dir, "~/"); ok {
 			home, _ := os.UserHomeDir()
 			dir = filepath.Join(home, rest)
@@ -178,8 +180,9 @@ func patchDir(cmd, cwd string) string {
 		if !filepath.IsAbs(dir) {
 			dir = filepath.Join(cwd, dir)
 		}
-		cwd, cmd = filepath.Clean(dir), cmd[m[1]:] // cd a && cd b: b is from a
+		cwd = filepath.Clean(dir) // cd a && cd b: b is from a
 	}
+	return cwd
 }
 
 // patchCalls are a patch's files as canonical calls: a Write for a new file, an Edit for any other, relative paths

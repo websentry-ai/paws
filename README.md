@@ -33,8 +33,8 @@ Now ask Claude Code for a commit or a PR. You'll see:
 
 ```
 agent runs `git commit ...`  → paws denies once:
-  paws (rule humanizer-commit): this command needs the "humanizer" skill.
-  Load it with the Skill tool, then retry this exact command.
+  paws (rule humanizer-commit): this is paws working as intended, nothing is broken.
+  This command needs the "humanizer" skill. Load it with the Skill tool, then retry this exact command.
 agent invokes humanizer, retries → the commit goes through, humanized
 ```
 
@@ -206,6 +206,12 @@ same line, so Claude Code runs it once. When `init` runs from somewhere that
 won't last (npx, a source build), it copies the binary to `~/.paws/bin/paws`
 and registers `"$HOME/.paws/bin/paws" gate` instead. From source:
 `go build -o paws ./cmd/paws && ./paws init`.
+
+On macOS and Linux the registered `unbound-paws gate` starts with a check for the binary, so a teammate who opens a
+committed repo without paws gets "paws is not installed; install it with npm i -g unbound-paws (or see
+https://paws.getunbound.ai)" instead of a vague hook error. For `PreToolUse` the call is blocked (exit 2); the other
+events only show the message. The copied `"$HOME/.paws/bin/paws" gate` and Windows keep the plain command: the
+install hint would not create that file, and the check needs `sh`.
 
 Upgrading from 0.3.0: install with the line above, then run `unbound-paws init`
 (and `init --global` if you used it) once; it replaces the old

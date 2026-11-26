@@ -246,9 +246,13 @@ func (Adapter) Observe(h *harness.Hook, d gate.Decision) {
 		}
 		var recs []record
 		for i, c := range p.calls {
-			recs = append(recs, record{Kind: "call", At: p.at, Turn: in.TurnID, ID: in.ToolUseID, Part: i, Tool: c.tool,
+			rec := record{Kind: "call", At: p.at, Turn: in.TurnID, ID: in.ToolUseID, Part: i, Tool: c.tool,
 				Target: c.target, Text: c.text, Input: c.input, Verdict: verdict, SkillLoad: h.Calls[i].SkillLoad,
-				Denied: heads, Agent: in.AgentID})
+				Denied: heads, Agent: in.AgentID}
+			if r, ok := gate.ReadOf(c.tool, c.target, c.input, in.CWD, true); ok {
+				rec.ReadFile, rec.ReadFrom, rec.ReadTo = r.File, r.Lines.From, r.Lines.To
+			}
+			recs = append(recs, rec)
 		}
 		appendRecords(own, recs)
 	case in.HookEventName == "PostToolUse":

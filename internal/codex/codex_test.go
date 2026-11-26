@@ -288,3 +288,28 @@ func TestParseShellApplyPatch(t *testing.T) {
 		t.Errorf("want the Bash call and a Write of the file, got %+v", h.Calls)
 	}
 }
+
+// Codex reads a long skill in chunks: it loads once the chunks that succeeded cover every line.
+func TestLedgerLoadsWhenReadsCoverTheSkill(t *testing.T) {
+	md := ledgerEnv(t)
+	os.WriteFile(md, []byte(strings.Repeat("rule line\n", 300)), 0o644)
+	loaded := func() bool {
+		return parse(t, stdin(t, "PreToolUse", "t1", bashCall("c9", "git push"))).Calls[0].Log.SkillLoaded("git", 20)
+	}
+	read := func(id, cmd string) {
+		observe(t, stdin(t, "PreToolUse", "t1", bashCall(id, cmd)), gate.Decision{})
+		observe(t, stdin(t, "PostToolUse", "t1", result(id, "rule line\n")), gate.Decision{})
+	}
+	read("c1", "sed -n '1,240p' "+md)
+	if loaded() {
+		t.Error("lines 1-240 of a 300-line skill don't load it")
+	}
+	read("c2", "head -n 5 "+md)
+	if loaded() {
+		t.Error("head -n 5 adds nothing past line 240")
+	}
+	read("c3", "sed -n '241,480p' "+md)
+	if !loaded() {
+		t.Error("1-240 and 241-480 cover the skill: loaded")
+	}
+}

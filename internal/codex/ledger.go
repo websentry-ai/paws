@@ -35,7 +35,10 @@ type record struct {
 	Text      string         `json:"text,omitempty"`
 	Input     map[string]any `json:"input,omitempty"`
 	Verdict   string         `json:"verdict,omitempty"`    // allow | deny
-	SkillLoad string         `json:"skill_load,omitempty"` // the skill the call loads by reading its SKILL.md
+	SkillLoad string         `json:"skill_load,omitempty"` // the skill whose SKILL.md the call reads
+	ReadFile  string         `json:"read_file,omitempty"`  // that SKILL.md, and the lines the read prints
+	ReadFrom  int            `json:"read_from,omitempty"`  // (read_to 0: to the end; read_from < 0: the last lines)
+	ReadTo    int            `json:"read_to,omitempty"`
 	Denied    []string       `json:"denied,omitempty"`     // a deny's paragraph openings, to find a digest's marker
 	OK        *bool          `json:"ok,omitempty"`         // result: the call succeeded
 	Agent     string         `json:"agent,omitempty"`      // the subagent's id; "" on the main thread
@@ -229,19 +232,20 @@ func (s session) window(n int) []record {
 	return out
 }
 
-// SkillLoaded: a read of the skill's SKILL.md that paws let through in the window and that succeeded. A read still
-// running (a call made alongside it) doesn't count yet.
+// SkillLoaded: the reads of the skill's SKILL.md in the window that succeeded print every line of it together (see
+// gate.Covered). A read still running (a call made alongside it) doesn't count yet.
 func (s session) SkillLoaded(skill string, window int) bool {
 	if skill == "" {
 		return false
 	}
 	ok := results(readLedger(s.own))
+	var reads []gate.FileRead
 	for _, r := range s.window(window) {
-		if r.SkillLoad == skill && r.Verdict == "allow" && ok[r.ID] {
-			return true
+		if r.SkillLoad == skill && r.ReadFile != "" && r.Verdict == "allow" && ok[r.ID] {
+			reads = append(reads, gate.FileRead{Skill: skill, File: r.ReadFile, Lines: rule.Lines{From: r.ReadFrom, To: r.ReadTo}})
 		}
 	}
-	return false
+	return gate.Covered(reads)
 }
 
 // DenyDelivered: a paws deny in the window opened a paragraph with marker. Codex shows a PreToolUse deny to the model

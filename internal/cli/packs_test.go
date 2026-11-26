@@ -149,3 +149,27 @@ func TestAddNoSuggestionWhenALaterCatalogPageFails(t *testing.T) {
 		t.Errorf("suggested from a partial catalog: %q", out)
 	}
 }
+
+// A 404 with no catalog message is a missing route (a proxy, an older backend), not a mistyped name.
+func TestAddRouteNotFoundIsNotReportedAsATypo(t *testing.T) {
+	portalEnv(t, http.NotFoundHandler())
+	code, out := capture(t, &os.Stderr, func() int { return Add([]string{"writing"}) })
+	if code != 1 || strings.Contains(out, "No pack, rule file or skill named") {
+		t.Errorf("exit %d, stderr %q", code, out)
+	}
+}
+
+func TestAddNoSuggestionWhenTheListingNeverEnds(t *testing.T) {
+	portalEnv(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/paws/v1/catalog/source" {
+			w.WriteHeader(http.StatusNotFound)
+			fmt.Fprint(w, `{"error": "none"}`)
+			return
+		}
+		json.NewEncoder(w).Encode(map[string]any{"skills": []catalogRow{{Name: "x", Add: "unbound-paws add waiting"}}, "next_offset": 1})
+	}))
+	_, out := capture(t, &os.Stderr, func() int { return Add([]string{"writing"}) })
+	if !strings.Contains(out, "No pack, rule file or skill named writing.") || strings.Contains(out, "Did you mean") {
+		t.Errorf("stderr %q", out)
+	}
+}

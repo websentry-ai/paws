@@ -56,7 +56,12 @@ func fetchCatalog(ctx context.Context, rawURL string, limit int64, out any) erro
 		return fmt.Errorf("the paws catalog sent more than %d bytes", limit)
 	}
 	if resp.StatusCode == http.StatusNotFound {
-		return &catalogNotFound{err: portalError(resp.StatusCode, body)}
+		var e struct {
+			Error string `json:"error"`
+		}
+		// Only the catalog's own "no such name" answer carries an error message; a proxy or an older backend that
+		// lacks the route does not, and that is not a typo.
+		return &catalogNotFound{err: portalError(resp.StatusCode, body), named: json.Unmarshal(body, &e) == nil && e.Error != ""}
 	}
 	if resp.StatusCode != http.StatusOK {
 		return portalError(resp.StatusCode, body)
@@ -65,7 +70,10 @@ func fetchCatalog(ctx context.Context, rawURL string, limit int64, out any) erro
 }
 
 // catalogNotFound is a 404 from the catalog. It prints as the portal error it wraps.
-type catalogNotFound struct{ err error }
+type catalogNotFound struct {
+	err   error
+	named bool // the body said which name was missing
+}
 
 func (e *catalogNotFound) Error() string { return e.err.Error() }
 
@@ -151,7 +159,7 @@ func remoteCatalog(api string, names []string) (*catalog.Catalog, error) {
 		var s catalogSlice
 		if err := fetchCatalog(portalCtx, api+"/paws/v1/catalog/source?name="+url.QueryEscape(name), maxPortalResponse, &s); err != nil {
 			var missing *catalogNotFound
-			if errors.As(err, &missing) {
+			if errors.As(err, &missing) && missing.named {
 				return nil, &unknownName{name: name}
 			}
 			return nil, fmt.Errorf("%s: %w", name, err)
@@ -268,11 +276,11 @@ func catalogNames(api string) ([]string, error) {
 			}
 		}
 		if rows.NextOffset == nil {
-			break
+			return names, nil
 		}
 		offset = *rows.NextOffset
 	}
-	return names, nil
+	return names, errors.New("the catalog listing is longer than 20 pages") // suggestions from part of it could miss the nearest name
 }
 
 // closestNames gives up to three of names within a small edit distance of name, nearest first.

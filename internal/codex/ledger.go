@@ -71,18 +71,10 @@ func appendRecords(path string, recs []record) {
 	var buf bytes.Buffer
 	for _, r := range recs {
 		r.End = end
-		raw := r.Text
-		r.Text = gate.AuditTarget(r.Text) // secrets masked, as in the audit log
-		if r.Text != raw {
-			in := map[string]any{}
-			for k, v := range r.Input {
-				if v == raw {
-					v = r.Text
-				}
-				in[k] = v
-			}
-			r.Input = in
-		}
+		// Secrets masked, as in the audit log. Masking twice changes nothing, so the grader's own masking of a
+		// target still finds it.
+		r.Text, r.Target = gate.AuditTarget(r.Text), gate.AuditTarget(r.Target)
+		r.Input, _ = masked(r.Input).(map[string]any)
 		if len(r.Text) > maxRecordText {
 			r.Text = r.Text[:maxRecordText]
 		}
@@ -118,6 +110,27 @@ func pruneLedgers(path string) {
 			os.Remove(f)
 		}
 	}
+}
+
+// masked is v with every string in it masked.
+func masked(v any) any {
+	switch x := v.(type) {
+	case string:
+		return gate.AuditTarget(x)
+	case map[string]any:
+		out := make(map[string]any, len(x))
+		for k, e := range x {
+			out[k] = masked(e)
+		}
+		return out
+	case []any:
+		out := make([]any, len(x))
+		for i, e := range x {
+			out[i] = masked(e)
+		}
+		return out
+	}
+	return v
 }
 
 // ledgerCache holds ledgers already read in this process (paws gate is one process per hook call).

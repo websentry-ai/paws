@@ -30,6 +30,9 @@ var _ harness.Adapter = Adapter{}
 func (Adapter) Name() string  { return Name }
 func (Adapter) Title() string { return "Codex" }
 
+// SkillTrees is nil: Codex's skills sit directly in its SkillDirs.
+func (Adapter) SkillTrees() []string { return nil }
+
 // History is nil: Codex's rollout format isn't stable, so scan doesn't read it.
 func (Adapter) History() (history.Source, string) { return nil, "" }
 
@@ -113,10 +116,11 @@ func canonical(in *Input) []call {
 	switch {
 	case in.ToolName == "":
 		return []call{{}}
-	case in.ToolName == "Bash":
+	case in.ToolName == "Bash" && !strings.HasPrefix(strings.TrimSpace(str("command")), "apply_patch"):
 		cmd := str("command")
 		return []call{{tool: "Bash", target: cmd, text: cmd, input: map[string]any{"command": cmd}}}
-	case in.ToolName == "apply_patch":
+	case in.ToolName == "Bash", in.ToolName == "apply_patch":
+		// apply_patch, or the same patch through the shell (apply_patch <<'EOF' ... EOF): one call per file.
 		var calls []call
 		patch := cmp.Or(str("command"), str("input"), str("patch"))
 		for _, f := range parsePatch(patch) {
@@ -278,13 +282,22 @@ func (Adapter) SkillDirs(cwd string) []string {
 		gate.SkillTool.SkillDirs(cwd)...)
 }
 
-// LoadSkills tells Codex to read each SKILL.md in full, then retry. Codex has no Skill tool.
+// LoadSkills tells Codex to read each SKILL.md in full and follow it, then make the call again, changed if the skill
+// says so. Codex has no Skill tool, and told to retry "this exact command" it re-runs the blocked call unchanged.
 func (Adapter) LoadSkills(skills []gate.Skill, noun string) string {
-	return fmt.Sprintf("Read %s in full, then retry this exact %s", readList(skills), noun)
+	it, says := "it", "the skill says"
+	if len(skills) > 1 {
+		it, says = "them", "the skills say"
+	}
+	verb := "make the " + noun
+	if noun == "command" {
+		verb = "run the command"
+	}
+	return fmt.Sprintf("Read %s in full, follow %s, then %s again, changed if %s so", readList(skills), it, verb, says)
 }
 
 func (Adapter) LoadAtStart(s gate.Skill) string {
-	return fmt.Sprintf("Read %s in full before you start work.", readList([]gate.Skill{s}))
+	return fmt.Sprintf("Read %s in full and follow it before you start work.", readList([]gate.Skill{s}))
 }
 
 func readList(skills []gate.Skill) string {

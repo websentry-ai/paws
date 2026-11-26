@@ -137,8 +137,12 @@ func TestRenderDenyForCodex(t *testing.T) {
 func ledgerEnv(t *testing.T) string {
 	t.Helper()
 	t.Setenv("PAWS_HOME", t.TempDir())
+	t.Setenv("HOME", t.TempDir())
 	ledgerCache = map[string][]record{}
-	md := filepath.Join(t.TempDir(), "skills", "git", "SKILL.md")
+	old := gate.SkillRoots
+	gate.SkillRoots = func(cwd string) ([]string, []string) { return Adapter{}.SkillDirs(cwd), nil }
+	t.Cleanup(func() { gate.SkillRoots = old })
+	md := filepath.Join(os.Getenv("HOME"), ".agents", "skills", "git", "SKILL.md")
 	os.MkdirAll(filepath.Dir(md), 0o755)
 	os.WriteFile(md, []byte("# git\n"), 0o644)
 	return md
@@ -255,5 +259,27 @@ func TestLedgerTurnCalls(t *testing.T) {
 	}
 	if strings.Contains(calls[0].ID, "c0") {
 		t.Error("turn t1's call is not in t2")
+	}
+}
+
+// The ledger masks secrets in every field it keeps, as the audit log does.
+func TestLedgerMasksSecrets(t *testing.T) {
+	ledgerEnv(t)
+	secret := "sk-ant-abcdefghijklmnopqrstuvwx"
+	observe(t, stdin(t, "PreToolUse", "t1", bashCall("c1", `curl -H "Authorization: Bearer `+secret+`" x`)), gate.Decision{})
+	observe(t, stdin(t, "PreToolUse", "t1", map[string]any{"tool_name": "mcp__x__send", "tool_use_id": "m1",
+		"tool_input": map[string]any{"to": "a", "body": map[string]any{"key": secret}}}), gate.Decision{})
+	data, _ := os.ReadFile(ledgerPath("01a218bf-886e", ""))
+	if strings.Contains(string(data), secret) || !strings.Contains(string(data), "***") {
+		t.Errorf("a secret reached the ledger: %s", data)
+	}
+}
+
+// Codex can run a patch through the shell; it is the same edit, one call per file.
+func TestParseShellApplyPatch(t *testing.T) {
+	h := parse(t, stdin(t, "PreToolUse", "t1", map[string]any{"tool_name": "Bash", "tool_input": map[string]any{
+		"command": "apply_patch <<'EOF'\n*** Begin Patch\n*** Add File: migrations/1.sql\n+x\n*** End Patch\nEOF"}}))
+	if len(h.Calls) != 1 || h.Calls[0].Tool != "Write" || h.Calls[0].Target != "/repo/migrations/1.sql" {
+		t.Errorf("got %+v", h.Calls)
 	}
 }

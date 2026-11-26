@@ -219,7 +219,7 @@ func planPortal(plan []removal) []removal {
 					// Deleting a file paws can't read would leave this laptop's login live in the portal.
 					return fmt.Errorf("can't read %s (%v); kept it. Disconnect this laptop in the portal, then delete the file", tilde(path), err)
 				}
-				if c != nil && Logout(nil) != 0 {
+				if c != nil && logout(true) != 0 {
 					return errors.New("logout failed; credentials.json is still there")
 				}
 				if err := os.Remove(path); err != nil && !errors.Is(err, os.ErrNotExist) {

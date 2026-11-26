@@ -465,6 +465,12 @@ func Logout(args []string) int {
 		fmt.Fprintln(os.Stderr, "usage: unbound-paws logout")
 		return 2
 	}
+	return logout(false)
+}
+
+// logout is Logout. With strict, a portal that can't be reached (or answers 5xx) keeps the credentials and the
+// rules and returns 1, so the laptop's device is never left registered with no credential to retry from.
+func logout(strict bool) int {
 	path := credentialsPath()
 	if path == "" {
 		fmt.Println("Not logged in.")
@@ -473,7 +479,11 @@ func Logout(args []string) int {
 	// Best effort: the portal retires this laptop's device, so its history scan and laptop slot stop counting.
 	// Offline, or a portal from before this endpoint, logs out locally all the same.
 	if c, err := loadCredentials(); err == nil && c != nil && c.Token != "" {
-		postJSON(strings.TrimSuffix(c.API, "/")+"/paws/v1/device/logout", c.Token, map[string]string{})
+		status, _, err := postJSON(strings.TrimSuffix(c.API, "/")+"/paws/v1/device/logout", c.Token, map[string]string{})
+		if strict && (err != nil || status >= 500) {
+			fmt.Fprintln(os.Stderr, "paws: couldn't disconnect this laptop in the portal; kept your login so you can run this again when the portal answers")
+			return 1
+		}
 	}
 	if err := clearPortal(); err != nil {
 		fmt.Fprintf(os.Stderr, "paws: removing portal rules: %v\n", err)

@@ -277,3 +277,41 @@ func TestUninstallGlobalKeepsTheBinaryAHookHereStillRuns(t *testing.T) {
 		t.Error("--global left the global hook")
 	}
 }
+
+func TestUninstallKeepsTheLoginWhenThePortalCannotRetireTheDevice(t *testing.T) {
+	var status atomic.Int32
+	status.Store(503)
+	pawsHome := portalEnv(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/paws/v1/device/logout" {
+			w.WriteHeader(int(status.Load()))
+			w.Write([]byte("{}"))
+			return
+		}
+		http.NotFound(w, r)
+	}))
+	creds := filepath.Join(pawsHome, "credentials.json")
+	writeFile(t, creds, `{"api":"`+strings.TrimSuffix(os.Getenv("PAWS_PORTAL_API"), "/")+`","token":"tok"}`)
+	code, errOut := capture(t, &os.Stderr, func() int {
+		c, _ := captureStdout(t, func() int { return Uninstall([]string{"--global", "--yes"}) })
+		return c
+	})
+	if code != 1 || !strings.Contains(errOut, "couldn't disconnect this laptop") {
+		t.Errorf("exit %d, stderr %q", code, errOut)
+	}
+	kept(t, creds)
+
+	status.Store(401) // the portal already forgot this device: nothing left to retire
+	if code, out := captureStdout(t, func() int { return Uninstall([]string{"--global", "--yes"}) }); code != 0 {
+		t.Fatalf("exit %d: %s", code, out)
+	}
+	gone(t, creds)
+}
+
+func TestUninstallHandlesANullPackRecord(t *testing.T) {
+	f := setupUninstall(t)
+	writeFile(t, filepath.Join(f.repo, ".paws", "installed.yaml"), "packs:\n  writing: null\n")
+	if code, out := captureStdout(t, func() int { return Uninstall([]string{"--project", "--yes"}) }); code != 0 {
+		t.Fatalf("exit %d: %s", code, out)
+	}
+	gone(t, filepath.Join(f.repo, ".paws", "packs", "writing"), filepath.Join(f.repo, ".paws", "installed.yaml"))
+}

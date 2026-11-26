@@ -388,8 +388,12 @@ func TestUninstallProjectLeavesALinkedDotClaudeAlone(t *testing.T) {
 	if err := os.Symlink(filepath.Join(f.home, ".claude"), filepath.Join(f.repo, ".claude")); err != nil {
 		t.Skip(err)
 	}
-	if code, out := captureStdout(t, func() int { return Uninstall([]string{"--project", "--yes"}) }); code != 0 {
-		t.Fatalf("exit %d: %s", code, out)
+	// Exit 1: the linked hook stays, so the run stops before the later tiers.
+	if code, _ := capture(t, &os.Stderr, func() int {
+		c, _ := captureStdout(t, func() int { return Uninstall([]string{"--project", "--yes"}) })
+		return c
+	}); code != 1 {
+		t.Fatalf("exit %d, want 1", code)
 	}
 	if !hasPawsHook(filepath.Join(f.home, ".claude", "settings.json")) {
 		t.Error("--project removed the global hook through a linked .claude")
@@ -698,4 +702,26 @@ func TestUninstallKeepsAUserSkillASurvivingUserRuleRequires(t *testing.T) {
 	captureStdout(t, func() int { return Uninstall([]string{"--yes"}) })
 	kept(t, filepath.Join(f.home, ".claude", "skills", "humanizer"))
 	gone(t, filepath.Join(f.repo, ".claude", "skills", "humanizer")) // the user copy serves it
+}
+
+// A hook behind a link stays registered, so the pack rules it enforces stay.
+func TestUninstallKeepsPackRulesWhenALinkedHookStays(t *testing.T) {
+	f := setupUninstall(t)
+	elsewhere := filepath.Join(f.home, "elsewhere")
+	os.MkdirAll(elsewhere, 0o755)
+	os.Rename(filepath.Join(f.repo, ".claude"), filepath.Join(elsewhere, ".claude"))
+	if err := os.Symlink(filepath.Join(elsewhere, ".claude"), filepath.Join(f.repo, ".claude")); err != nil {
+		t.Skip(err)
+	}
+	code, _ := capture(t, &os.Stderr, func() int {
+		c, _ := captureStdout(t, func() int { return Uninstall([]string{"--project", "--yes"}) })
+		return c
+	})
+	if code != 1 {
+		t.Errorf("exit %d, want 1", code)
+	}
+	kept(t, filepath.Join(f.repo, ".paws", "packs"), filepath.Join(f.repo, ".paws", "installed.yaml"))
+	if !hasPawsHook(filepath.Join(elsewhere, ".claude", "settings.json")) {
+		t.Error("the linked hook should stay")
+	}
 }

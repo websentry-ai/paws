@@ -194,6 +194,19 @@ func planScope(plan []removal, keep []string, scope string, settings []string, t
 	if pawsLinked {
 		keep = append(keep, "project   "+tilde(pawsDir)+" (a symbolic link; left alone)")
 	}
+	// A hook behind a link stays registered, so the rules it enforces must stay: fail, which skips the later tiers.
+	failLinked := func(path string) {
+		if hasPawsHook(path) {
+			plan = append(plan, removal{what: "hook      " + tilde(path) + " (behind a symbolic link)", run: func() error {
+				return fmt.Errorf("kept %s: a symbolic link to a hook this run won't follow, so its rules stay too", tilde(path))
+			}})
+		}
+	}
+	if claudeLinked {
+		for _, path := range settings {
+			failLinked(path)
+		}
+	}
 	if !claudeLinked {
 		for _, path := range settings {
 			path := path
@@ -202,6 +215,7 @@ func planScope(plan []removal, keep []string, scope string, settings []string, t
 			}
 			if project && isLink(path) {
 				keep = append(keep, "project   "+tilde(path)+" (a symbolic link; left alone)")
+				failLinked(path)
 				continue
 			}
 			if unreadableWithPaws(path) {

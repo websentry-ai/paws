@@ -116,7 +116,7 @@ func ensureHooksFor(a harness.Adapter, doc settingsDoc, command string, guard bo
 		if guard {
 			entry = a.Entry(event, guardedCommand(command, event))
 		}
-		desired, err := json.Marshal(entry)
+		desired, err := marshalPlain(entry, "")
 		if err != nil {
 			return false, err
 		}

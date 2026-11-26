@@ -49,7 +49,7 @@ func TestCodexRequireSkillRound(t *testing.T) {
 	}
 	runGate(t, codexCall("UserPromptSubmit", "t1", nil))
 	r := reasonOf(t, runGate(t, codexCall("PreToolUse", "t1", bash("c1", "git push"))))
-	want := `paws (rule push): this command needs the "git" skill. Read ` + md + ` in full on its own, follow it, then run the command again, changed if the skill says so`
+	want := `paws (rule push): this is paws working as intended, nothing is broken. This command needs the "git" skill. Read ` + md + ` in full on its own, follow it, then run the command again, changed if the skill says so`
 	if r != want {
 		t.Fatalf("deny:\n got %q\nwant %q", r, want)
 	}
@@ -95,7 +95,7 @@ func TestCodexPatchMatchesFileRules(t *testing.T) {
 		}
 		return map[string]any{"tool_name": "apply_patch", "tool_use_id": "p1", "tool_input": map[string]any{"command": body + "*** End Patch"}}
 	}
-	if r := reasonOf(t, runGate(t, codexCall("PreToolUse", "t1", patch("src/a.go", "migrations/0001.sql")))); !strings.Contains(r, "this edit needs the \"db\" skill") || strings.HasSuffix(r, ".") {
+	if r := reasonOf(t, runGate(t, codexCall("PreToolUse", "t1", patch("src/a.go", "migrations/0001.sql")))); !strings.Contains(r, "This edit needs the \"db\" skill") || strings.HasSuffix(r, ".") {
 		t.Errorf("a patch touching a migration is gated once, without a trailing period: %q", r)
 	}
 	if out := runGate(t, codexCall("PreToolUse", "t1", patch("src/a.go"))); out != "{}" {

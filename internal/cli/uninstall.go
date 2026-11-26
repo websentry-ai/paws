@@ -91,7 +91,7 @@ func Uninstall(args []string) int {
 	var portalSkillsToKeep map[string]bool
 	if !f.global {
 		portalSkillsToKeep = map[string]bool{}
-		for _, name := range loadPortalState().Skills {
+		for _, name := range portalSkillNames() {
 			portalSkillsToKeep[name] = true
 		}
 	}
@@ -109,7 +109,10 @@ func Uninstall(args []string) int {
 		keepBin := false
 		for _, name := range []string{"settings.json", "settings.local.json"} {
 			path := filepath.Join(root, ".claude", name)
-			if hasPawsHook(path) && !shared.hooks && (!f.project || isLink(filepath.Dir(path)) || isLink(path)) {
+			if shared.hooks && path == filepath.Join(userClaudeDir(), "settings.json") {
+				continue // removed with the global scope
+			}
+			if hasPawsHook(path) && (!f.project || isLink(filepath.Dir(path)) || isLink(path)) {
 				keepBin = true
 			}
 		}
@@ -208,9 +211,12 @@ func planScope(plan []removal, keep []string, scope string, settings []string, t
 	if pawsLinked {
 		keep = append(keep, "project   "+tilde(pawsDir)+" (a symbolic link; left alone)")
 	}
-	if !claudeLinked && !shared.hooks {
+	if !claudeLinked {
 		for _, path := range settings {
 			path := path
+			if shared.hooks && path == filepath.Join(userClaudeDir(), "settings.json") {
+				continue // the global scope has this file
+			}
 			if project && isLink(path) {
 				keep = append(keep, "project   "+tilde(path)+" (a symbolic link; left alone)")
 				continue
@@ -329,19 +335,19 @@ func planPortal(plan []removal) []removal {
 	return plan
 }
 
-// planUserFiles adds the files paws writes in its own folder as it runs: the audit log, the sync cursors and the
-// binary copy init makes. Rule files the user wrote there are not on the list.
+// planUserFiles adds the binary copy init makes in paws's own folder. Rule files the user wrote there are not on
+// the list, and the audit history is kept.
 func planUserFiles(plan []removal, keep []string, keepBin bool) ([]removal, []string) {
 	dir := gate.UserDir()
 	if dir == "" {
 		return plan, keep
 	}
+	// The audit log is the record of what the gate did, and the sync cursors belong to it. One unattended
+	// `uninstall --yes` must not destroy that record, so they stay; delete them by hand if you want them gone.
 	for _, name := range []string{"audit.log", "audit.log.1", "sync-state.json", "sync-from.json"} {
-		path := filepath.Join(dir, name)
-		if _, err := os.Stat(path); err != nil {
-			continue
+		if path := filepath.Join(dir, name); fileExists(path) {
+			keep = append(keep, "file      "+tilde(path)+" (the audit history; delete it yourself if you want it gone)")
 		}
-		plan = append(plan, removal{what: "file      " + tilde(path), late: true, run: func() error { return os.Remove(path) }})
 	}
 	bin := filepath.Join(dir, "bin")
 	if entries, _ := os.ReadDir(bin); len(entries) > 0 {
@@ -436,4 +442,22 @@ func removePackDir(packs, dir string, project bool) error {
 func isLink(path string) bool {
 	st, err := os.Lstat(path)
 	return err == nil && st.Mode()&os.ModeSymlink != 0
+}
+
+// portalSkillNames are the skills the applied portal config uses: the ones state.json lists, and those the rule files
+// in the portal folder are named for (<skill>--<action>.md), so an unreadable state.json hides none of them.
+func portalSkillNames() []string {
+	names := loadPortalState().Skills
+	if dir := portalDir(); dir != "" {
+		rules, _ := filepath.Glob(filepath.Join(dir, "*--*.md"))
+		for _, r := range rules {
+			names = append(names, strings.SplitN(filepath.Base(r), "--", 2)[0])
+		}
+	}
+	return names
+}
+
+func fileExists(path string) bool {
+	_, err := os.Stat(path)
+	return err == nil
 }

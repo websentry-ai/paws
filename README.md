@@ -194,7 +194,7 @@ rm ~/.local/bin/unbound-paws      # then the binary itself (npm rm -g unbound-pa
 `uninstall` takes `--project` or `--global` to limit the scope, `--keep-skills` to leave the skills paws
 installed, and `--yes` to skip the question. It removes the hook, the packs and skills paws installed (a skill
 you wrote or edited stays), and `credentials.json` after logging out of the portal. Rule files you wrote
-in `.paws/` stay.
+in `.paws/` stay, and so does the audit history in `~/.paws`.
 
 `install.sh` downloads the release archive for your OS and CPU from GitHub,
 checks it against the release's `checksums.txt`, installs it as

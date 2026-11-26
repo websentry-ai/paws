@@ -112,7 +112,7 @@ func TestUninstallRemovesEverythingPawsAddedAndNothingElse(t *testing.T) {
 		filepath.Join(f.repo, ".paws", "packs"), filepath.Join(f.repo, ".paws", "installed.yaml"),
 		filepath.Join(f.repo, ".claude", "skills", "git"), filepath.Join(f.repo, ".claude", "skills", "humanizer"),
 		filepath.Join(f.pawsHome, "packs"), filepath.Join(f.pawsHome, "installed.yaml"), filepath.Join(f.pawsHome, "bin"),
-		filepath.Join(f.pawsHome, "credentials.json"), filepath.Join(f.pawsHome, "audit.log"), filepath.Join(f.pawsHome, "portal"),
+		filepath.Join(f.pawsHome, "credentials.json"), filepath.Join(f.pawsHome, "portal"),
 		filepath.Join(f.home, ".claude", "skills", "git"))
 	if hasPawsHook(filepath.Join(f.home, ".claude", "settings.json")) {
 		t.Error("the global hook is still registered")
@@ -126,6 +126,7 @@ func TestUninstallRemovesEverythingPawsAddedAndNothingElse(t *testing.T) {
 		filepath.Join(f.repo, ".claude", "skills", "ours", "SKILL.md"),
 		filepath.Join(f.pawsHome, "pre-tool", "mine.md"),
 		filepath.Join(f.repo, ".paws", "pre-tool", "ours.md"),
+		filepath.Join(f.pawsHome, "audit.log"), // the audit history is not deleted by an unattended command
 		editedSkill)
 	if data, _ := os.ReadFile(filepath.Join(f.home, ".claude", "settings.json")); !strings.Contains(string(data), `"A"`) {
 		t.Errorf("the user's settings were lost: %s", data)
@@ -558,4 +559,29 @@ func TestUninstallHookOnlyRejectsProject(t *testing.T) {
 	if code, _ := capture(t, &os.Stderr, func() int { return Uninstall([]string{"--hook-only", "--project"}) }); code != 2 {
 		t.Errorf("exit %d, want 2", code)
 	}
+}
+
+// In the home folder the project's .claude is the global one: its settings.local.json is still a separate file.
+func TestUninstallHomeFolderLocalSettingsHookKeepsItsBinary(t *testing.T) {
+	f := setupUninstall(t)
+	t.Chdir(f.home)
+	local := filepath.Join(f.home, ".claude", "settings.local.json")
+	doc := settingsDoc{}
+	ensureHooks(doc, "unbound-paws gate", false)
+	writeSettings(local, doc)
+	if code, out := captureStdout(t, func() int { return Uninstall([]string{"--yes"}) }); code != 0 {
+		t.Fatalf("exit %d: %s", code, out)
+	}
+	if hasPawsHook(local) || hasPawsHook(filepath.Join(f.home, ".claude", "settings.json")) {
+		t.Error("a hook is left in ~/.claude")
+	}
+}
+
+// An unreadable state.json must not hide which skills the portal rules use.
+func TestUninstallProjectKeepsPortalSkillsWhenStateIsUnreadable(t *testing.T) {
+	f := setupUninstall(t)
+	writeFile(t, filepath.Join(f.pawsHome, "portal", "state.json"), "not json")
+	writeFile(t, filepath.Join(f.pawsHome, "portal", "humanizer--pr.md"), "---\nname: humanizer--pr\n---\n")
+	captureStdout(t, func() int { return Uninstall([]string{"--project", "--yes"}) })
+	kept(t, filepath.Join(f.repo, ".claude", "skills", "humanizer"))
 }

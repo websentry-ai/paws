@@ -178,7 +178,10 @@ func didYouMean(name string) string {
 	if err != nil {
 		return ""
 	}
-	names, _ := catalogNames(api)
+	names, err := catalogNames(api)
+	if err != nil {
+		return "" // the nearest name might be on a page that failed to load
+	}
 	near := closestNames(name, names)
 	if len(near) == 0 {
 		return ""

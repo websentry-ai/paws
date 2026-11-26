@@ -131,3 +131,21 @@ func TestClosestNames(t *testing.T) {
 		}
 	}
 }
+
+func TestAddNoSuggestionWhenALaterCatalogPageFails(t *testing.T) {
+	portalEnv(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case r.URL.Path == "/paws/v1/catalog/source":
+			w.WriteHeader(http.StatusNotFound)
+			fmt.Fprint(w, `{"error": "none"}`)
+		case r.URL.Query().Get("offset") == "2":
+			w.WriteHeader(http.StatusInternalServerError)
+		default:
+			json.NewEncoder(w).Encode(map[string]any{"skills": []catalogRow{{Name: "x", Add: "unbound-paws add waiting"}}, "next_offset": 2})
+		}
+	}))
+	_, out := capture(t, &os.Stderr, func() int { return Add([]string{"writing"}) })
+	if strings.Contains(out, "Did you mean") {
+		t.Errorf("suggested from a partial catalog: %q", out)
+	}
+}

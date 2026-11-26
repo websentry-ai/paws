@@ -2,6 +2,7 @@ package cli
 
 import (
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -47,6 +48,7 @@ func TestReadingSKILLmdIsNeverGated(t *testing.T) {
 		"tail +1":            {"Bash", map[string]any{"command": "tail -n +1 " + md}},
 		"sed -e":             {"Bash", map[string]any{"command": "sed -n -e '1,240p' " + md}},
 		"bat -p":             {"Bash", map[string]any{"command": "bat -p --paging=never " + md}},
+		"a later range":      {"Bash", map[string]any{"command": "sed -n '241,480p' " + md}},
 		"other skill's file": {"Bash", map[string]any{"command": "cat " + skillMD(t, "other")}},
 	} {
 		if out := gateCall(t, c.tool, c.input, ""); out != "{}" {
@@ -68,7 +70,6 @@ func TestReadingSKILLmdIsNeverGated(t *testing.T) {
 		"bat pager":        "bat --pager='sh -c x' " + md,
 		"less log":         "less -o out.txt " + md,
 		"head nothing":     "head -n 0 " + md,
-		"sed past the top": "sed -n '9999,$p' " + md,
 		"awk past the top": "awk 'NR>9999' " + md,
 		"bat line range":   "bat -r 9999: " + md,
 		"own cat":          "/tmp/cat " + md,
@@ -84,7 +85,7 @@ func TestReadingSKILLmdIsNeverGated(t *testing.T) {
 			audit = append(audit, rec["skill"].(string))
 		}
 	}
-	if len(audit) != 9 {
+	if len(audit) != 10 {
 		t.Errorf("every read of a SKILL.md logs skill_invoked, got %v", audit)
 	}
 }
@@ -209,5 +210,57 @@ func TestSKILLmdReadLogsASkillAction(t *testing.T) {
 	}
 	if n != 1 {
 		t.Errorf("want one action record, got %d", n)
+	}
+}
+
+// A skill counts as loaded once the reads that succeeded print every line of its SKILL.md, in any order.
+func TestSKILLmdReadsLoadWhenTheyCoverTheFile(t *testing.T) {
+	home := portalEnv(t, http.NotFoundHandler())
+	writeRule(t, filepath.Join(home, "push.md"), "name: push\nevent: pre-tool\nmatcher:\n  tool: Bash\n  command_regex: git push\naction:\n  type: require-skill\n  skill: deployer\n")
+	md := skillMD(t, "deployer")
+	var body strings.Builder
+	for i := 1; i <= 300; i++ {
+		fmt.Fprintf(&body, "line %d\n", i)
+	}
+	os.WriteFile(md, []byte(body.String()), 0o644)
+	// reads writes a transcript of successful calls, each a Bash command or a Read input as JSON.
+	reads := func(calls ...map[string]any) string {
+		p := filepath.Join(t.TempDir(), "s.jsonl")
+		lines := []string{`{"type":"user","isSidechain":false,"message":{"role":"user","content":"push it"}}`}
+		for i, c := range calls {
+			name := "Bash"
+			if _, ok := c["file_path"]; ok {
+				name = "Read"
+			}
+			in, _ := json.Marshal(c)
+			id := fmt.Sprintf("toolu_%d", i)
+			lines = append(lines,
+				`{"type":"assistant","isSidechain":false,"message":{"content":[{"type":"tool_use","id":"`+id+`","name":"`+name+`","input":`+string(in)+`}]}}`,
+				`{"type":"user","isSidechain":false,"message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"`+id+`","is_error":false,"content":"x"}]}}`)
+		}
+		os.WriteFile(p, []byte(strings.Join(lines, "\n")+"\n"), 0o600)
+		return p
+	}
+	bash := func(cmd string) map[string]any { return map[string]any{"command": cmd} }
+	push := map[string]any{"command": "git push"}
+	for name, c := range map[string]struct {
+		calls  []map[string]any
+		loaded bool
+	}{
+		"1,240p then 241,480p":    {[]map[string]any{bash("sed -n '1,240p' " + md), bash("sed -n '241,480p' " + md)}, true},
+		"the chunks out of order": {[]map[string]any{bash("sed -n '241,480p' " + md), bash("sed -n '1,240p' " + md)}, true},
+		"1,240p alone":            {[]map[string]any{bash("sed -n '1,240p' " + md)}, false},
+		"head -n 5":               {[]map[string]any{bash("head -n 5 " + md)}, false},
+		"a gap between chunks":    {[]map[string]any{bash("sed -n '1,100p' " + md), bash("sed -n '102,300p' " + md)}, false},
+		"head, then tail +201":    {[]map[string]any{bash("head -n 200 " + md), bash("tail -n +201 " + md)}, true},
+		"full cat":                {[]map[string]any{bash("cat " + md)}, true},
+		"Read in two parts":       {[]map[string]any{{"file_path": md, "limit": 150}, {"file_path": md, "offset": 151, "limit": 150}}, true},
+		"Read of a part":          {[]map[string]any{{"file_path": md, "offset": 100}}, false},
+		"Read of the whole file":  {[]map[string]any{{"file_path": md}}, true},
+	} {
+		out := gateCall(t, "Bash", push, reads(c.calls...))
+		if loaded := out == "{}"; loaded != c.loaded {
+			t.Errorf("%s: loaded %v, want %v (%s)", name, loaded, c.loaded, out)
+		}
 	}
 }

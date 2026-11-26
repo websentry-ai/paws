@@ -1,10 +1,12 @@
 package gate
 
 import (
+	"bytes"
 	"fmt"
 	"os"
 	"path/filepath"
 	"regexp"
+	"slices"
 	"strings"
 
 	"github.com/websentry-ai/paws/internal/pack"
@@ -137,33 +139,56 @@ var SkillRoots = func(cwd string) (dirs, trees []string) {
 // SkillRead names the skill a call loads by reading its SKILL.md: the Read tool on <dir>/skills/<skill>/SKILL.md,
 // or a Bash line that does nothing but print that file (see rule.PlainRead). The file must exist and sit under one
 // of the SkillRoots, so a SKILL.md the agent wrote somewhere else loads nothing. A relative path is taken from cwd,
-// or from the hook's own working directory (the session's) when the record names none.
-// "" for any other call.
-func SkillRead(tool, target, cwd string) string { return skillRead(tool, target, cwd, true) }
+// or from the hook's own working directory (the session's) when the record names none. "" for any other call.
+// Such a read is never gated, whatever part of the file it prints; the skill counts as loaded once successful
+// reads cover the whole file (Covered).
+func SkillRead(tool, target, cwd string) string {
+	r, _ := ReadOf(tool, target, nil, cwd, true)
+	return r.Skill
+}
 
 // PastSkillRead is SkillRead for a call already made: the file may be gone since, and the read still put the skill
 // in the agent's context.
-func PastSkillRead(tool, target, cwd string) string { return skillRead(tool, target, cwd, false) }
+func PastSkillRead(tool, target, cwd string) string {
+	r, _ := ReadOf(tool, target, nil, cwd, false)
+	return r.Skill
+}
 
-// skillRead is SkillRead; with exists false the file may be gone since (a past read, still in the agent's context).
-func skillRead(tool, target, cwd string, exists bool) string {
+// FileRead is a read of a skill's SKILL.md: the skill, the file, and the lines the read printed.
+type FileRead struct {
+	Skill string
+	File  string
+	Lines rule.Lines
+}
+
+// ReadOf is the SKILL.md read a call makes (see SkillRead), with the lines it prints: a Read's offset and limit from
+// input, a Bash reader's range. With exists false the file may be gone since.
+func ReadOf(tool, target string, input map[string]any, cwd string, exists bool) (FileRead, bool) {
 	if cwd == "" {
 		cwd, _ = os.Getwd()
 	}
 	var p string
+	var lines rule.Lines
 	switch tool {
 	case "Read":
 		p = target
+		// Without a limit, a Read prints the file to its end (Claude Code cuts only files past 2000 lines).
+		offset, _ := input["offset"].(float64)
+		limit, _ := input["limit"].(float64)
+		lines = rule.Lines{From: max(int(offset), 1)}
+		if limit > 0 {
+			lines.To = lines.From + int(limit) - 1
+		}
 	case "Bash":
-		p, _ = rule.PlainRead(target)
+		p, lines, _ = rule.PlainRead(target)
 	}
 	if p == "" {
-		return ""
+		return FileRead{}, false
 	}
 	if rest, ok := strings.CutPrefix(p, "~/"); ok {
 		home, err := os.UserHomeDir()
 		if err != nil {
-			return ""
+			return FileRead{}, false
 		}
 		p = filepath.Join(home, rest)
 	}
@@ -174,17 +199,74 @@ func skillRead(tool, target, cwd string, exists bool) string {
 	dir := filepath.Dir(p)
 	skill := filepath.Base(dir)
 	if filepath.Base(p) != "SKILL.md" || filepath.Base(filepath.Dir(dir)) != "skills" || skill == "skills" {
-		return ""
+		return FileRead{}, false
 	}
 	if exists {
 		if st, err := os.Stat(p); err != nil || !st.Mode().IsRegular() {
-			return ""
+			return FileRead{}, false
 		}
 	}
 	if !underSkillRoot(filepath.Dir(dir), cwd) {
-		return ""
+		return FileRead{}, false
 	}
-	return skill
+	return FileRead{Skill: skill, File: p, Lines: lines}, true
+}
+
+// Covered reports whether successful reads together printed every line of one SKILL.md, in any order: 1,240p then
+// 241,480p of a 300-line file covers it, 1,240p alone doesn't. A file gone since counts as covered only by a read of
+// the whole of it.
+func Covered(reads []FileRead) bool {
+	byFile := map[string][]rule.Lines{}
+	for _, r := range reads {
+		byFile[r.File] = append(byFile[r.File], r.Lines)
+	}
+	for file, ranges := range byFile {
+		if n, ok := lineCount(file); covers(ranges, n, ok) {
+			return true
+		}
+	}
+	return false
+}
+
+// covers reports whether ranges hold lines 1 through n; with n unknown, only a range of the whole file does.
+func covers(ranges []rule.Lines, n int, known bool) bool {
+	if !known {
+		return slices.ContainsFunc(ranges, func(l rule.Lines) bool { return l.From == 1 && l.To == 0 })
+	}
+	type span struct{ from, to int }
+	var spans []span
+	for _, l := range ranges {
+		from, to := l.From, l.To
+		if from < 0 {
+			from = max(n+from+1, 1) // the last -From lines
+		}
+		if to == 0 || to > n {
+			to = n
+		}
+		spans = append(spans, span{from, to})
+	}
+	slices.SortFunc(spans, func(a, b span) int { return a.from - b.from })
+	next := 1 // the first line not yet printed
+	for _, sp := range spans {
+		if sp.from > next {
+			break
+		}
+		next = max(next, sp.to+1)
+	}
+	return next > n
+}
+
+// lineCount is how many lines the file at p has; ok is false when it can't be read.
+func lineCount(p string) (int, bool) {
+	data, err := os.ReadFile(p)
+	if err != nil {
+		return 0, false
+	}
+	n := bytes.Count(data, []byte("\n"))
+	if len(data) > 0 && data[len(data)-1] != '\n' {
+		n++
+	}
+	return n, true
 }
 
 // underSkillRoot reports whether skills, the folder holding a skill's folder, is one of the SkillRoots dirs or lies

@@ -112,34 +112,22 @@ func skillLoaded(path, skill string, window int, cwd string) bool {
 	}
 	lines := windowLines(path, window)
 	calls := skillCalls(lines, path, skill)
-	reads := readCalls(lines, path, skill, cwd)
 	// Only a line with the skill's result record or one of its calls' ids (a blob answering it) can match.
 	name, _ := json.Marshal(skill)
 	needles := [][]byte{append([]byte(`"commandName":`), name...)}
 	for id := range calls {
 		needles = append(needles, []byte(id))
 	}
-	for id := range reads {
-		needles = append(needles, []byte(id))
-	}
-	return scanLines(lines, path, needles, func(e transcriptEntry) bool {
+	loaded := scanLines(lines, path, needles, func(e transcriptEntry) bool {
 		if e.Type == requestBlob {
 			// A tool_result answering a Skill tool_use for this skill, not an error. The pairing
 			// by id is what keeps a command that prints "Launching skill: x" from counting.
 			for _, b := range e.blocks() {
-				if b.Type == "tool_result" && !b.IsError && (calls[b.ToolUseID] || reads[b.ToolUseID]) {
+				if b.Type == "tool_result" && !b.IsError && calls[b.ToolUseID] {
 					return true
 				}
 			}
 			return false
-		}
-		if e.Type == "user" && len(reads) > 0 {
-			// A read of the skill's SKILL.md that succeeded: its tool_result, paired by id.
-			for _, b := range e.blocks() {
-				if b.Type == "tool_result" && !b.IsError && reads[b.ToolUseID] {
-					return true
-				}
-			}
 		}
 		if e.Type != "user" || len(e.ToolUseResult) == 0 || e.ToolUseResult[0] != '{' {
 			return false
@@ -147,6 +135,35 @@ func skillLoaded(path, skill string, window int, cwd string) bool {
 		var sr skillResult
 		return json.Unmarshal(e.ToolUseResult, &sr) == nil && sr.Success && sr.CommandName == skill
 	})
+	if loaded {
+		return true
+	}
+	// Reads of the skill's SKILL.md load it once those that succeeded cover the whole file.
+	reads := readCalls(lines, path, skill, cwd)
+	return len(reads) > 0 && Covered(succeededReads(lines, path, reads))
+}
+
+// succeededReads are the reads whose tool_result, paired by id, is not an error: in a user record or a request blob.
+func succeededReads(lines [][]byte, path string, reads map[string]FileRead) []FileRead {
+	var needles [][]byte
+	for id := range reads {
+		needles = append(needles, []byte(id))
+	}
+	var ok []FileRead
+	done := map[string]bool{}
+	scanLines(lines, path, needles, func(e transcriptEntry) bool {
+		if e.Type != "user" && e.Type != requestBlob {
+			return false
+		}
+		for _, b := range e.blocks() {
+			if r, isRead := reads[b.ToolUseID]; isRead && b.Type == "tool_result" && !b.IsError && !done[b.ToolUseID] {
+				done[b.ToolUseID] = true
+				ok = append(ok, r)
+			}
+		}
+		return false // read every line: the reads add up
+	})
+	return ok
 }
 
 var skillToolName = []byte(`"name":"Skill"`)
@@ -171,9 +188,10 @@ func skillCalls(lines [][]byte, path, skill string) map[string]bool {
 	return calls
 }
 
-// readCalls returns the ids of the log's own Read and Bash tool_use blocks that read skill's SKILL.md.
-func readCalls(lines [][]byte, path, skill, cwd string) map[string]bool {
-	calls := map[string]bool{}
+// readCalls returns the log's own Read and Bash tool_use blocks that read skill's SKILL.md, by id, with the lines
+// each one printed.
+func readCalls(lines [][]byte, path, skill, cwd string) map[string]FileRead {
+	calls := map[string]FileRead{}
 	file := []byte("SKILL.md") // skips every line that can't name the file; a relative `cat SKILL.md` names it too
 	for _, l := range lines {
 		var e transcriptEntry
@@ -184,13 +202,10 @@ func readCalls(lines [][]byte, path, skill, cwd string) map[string]bool {
 			Cwd     string `json:"cwd"`
 			Message struct {
 				Content []struct {
-					Type  string `json:"type"`
-					ID    string `json:"id"`
-					Name  string `json:"name"`
-					Input struct {
-						FilePath string `json:"file_path"`
-						Command  string `json:"command"`
-					} `json:"input"`
+					Type  string         `json:"type"`
+					ID    string         `json:"id"`
+					Name  string         `json:"name"`
+					Input map[string]any `json:"input"`
 				} `json:"content"`
 			} `json:"message"`
 		}
@@ -198,13 +213,14 @@ func readCalls(lines [][]byte, path, skill, cwd string) map[string]bool {
 			continue
 		}
 		for _, b := range m.Message.Content {
-			target := b.Input.Command
+			key := "command"
 			if b.Name == "Read" {
-				target = b.Input.FilePath
+				key = "file_path"
 			}
+			target, _ := b.Input[key].(string)
 			// The file may be gone since: a read that succeeded put the skill in the agent's context all the same.
-			if b.Type == "tool_use" && skillRead(b.Name, target, cmp.Or(m.Cwd, cwd), false) == skill {
-				calls[b.ID] = true
+			if r, ok := ReadOf(b.Name, target, b.Input, cmp.Or(m.Cwd, cwd), false); b.Type == "tool_use" && ok && r.Skill == skill {
+				calls[b.ID] = r
 			}
 		}
 	}

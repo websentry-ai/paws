@@ -725,3 +725,30 @@ func TestUninstallKeepsPackRulesWhenALinkedHookStays(t *testing.T) {
 		t.Error("the linked hook should stay")
 	}
 }
+
+// A linked settings file that can't be read may hold the hook: the run stops like it does for a readable one.
+func TestUninstallStopsForAnUnreadableLinkedHookFile(t *testing.T) {
+	f := setupUninstall(t)
+	real := filepath.Join(f.home, "elsewhere", "settings.json")
+	writeFile(t, real, `{"hooks": {"PreToolUse": [ {"command": "unbound-paws gate"} `)
+	link := filepath.Join(f.repo, ".claude", "settings.json")
+	os.Remove(link)
+	if err := os.Symlink(real, link); err != nil {
+		t.Skip(err)
+	}
+	code, _ := capture(t, &os.Stderr, func() int {
+		c, _ := captureStdout(t, func() int { return Uninstall([]string{"--project", "--yes"}) })
+		return c
+	})
+	if code != 1 {
+		t.Errorf("exit %d, want 1", code)
+	}
+	kept(t, filepath.Join(f.repo, ".paws", "packs"))
+}
+
+func TestUninstallRemovesASkillWithOnlyADSStore(t *testing.T) {
+	f := setupUninstall(t)
+	writeFile(t, filepath.Join(f.repo, ".claude", "skills", "humanizer", ".DS_Store"), "finder")
+	captureStdout(t, func() int { return Uninstall([]string{"--project", "--yes"}) })
+	gone(t, filepath.Join(f.repo, ".claude", "skills", "humanizer"))
+}

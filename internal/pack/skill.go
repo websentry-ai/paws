@@ -258,7 +258,7 @@ func untouched(dir string) bool {
 		if err != nil || p == dir {
 			return nil
 		}
-		if rel, _ := filepath.Rel(dir, p); rel != markerFile && (strings.HasPrefix(d.Name(), ".") || !d.IsDir() && !d.Type().IsRegular()) {
+		if rel, _ := filepath.Rel(dir, p); rel != markerFile && d.Name() != ".DS_Store" && (strings.HasPrefix(d.Name(), ".") || !d.IsDir() && !d.Type().IsRegular()) {
 			ok = false
 			return filepath.SkipAll
 		}

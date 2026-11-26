@@ -75,7 +75,8 @@ func Uninstall(args []string) int {
 	var keep []string
 	cwd, _ := os.Getwd()
 	// Outside a repo, in the home folder, the project's files are the global ones.
-	if root := projectRoot(cwd); f.project && sameFolder(pack.ProjectTarget(root), pack.UserTarget(gate.UserDir()), root) {
+	overlap := sameFolder(pack.ProjectTarget(projectRoot(cwd)), pack.UserTarget(gate.UserDir()), projectRoot(cwd))
+	if f.project && overlap {
 		if !f.global {
 			fmt.Fprintln(os.Stderr, "paws: this folder is not in a repo, so its project files are your global ones. Run --project from a repo, or use --global.")
 			return 2
@@ -85,14 +86,16 @@ func Uninstall(args []string) int {
 	if f.project {
 		root := projectRoot(cwd)
 		hooks := []string{filepath.Join(root, ".claude", "settings.json"), filepath.Join(root, ".claude", "settings.local.json")}
-		plan, keep = planScope(plan, keep, "project", hooks, pack.ProjectTarget(root), f.keepSkills)
+		plan, keep = planScope(plan, keep, "project", hooks, pack.ProjectTarget(root), f.keepSkills, nil)
 	}
 	if f.global {
 		hooks := []string{filepath.Join(userClaudeDir(), "settings.json")}
-		plan, keep = planScope(plan, keep, "global", hooks, pack.UserTarget(gate.UserDir()), f.keepSkills)
-		plan = planPortal(plan)
+		// The login goes first: if it stays, the portal rules stay, and so must the skills they require.
+		var loginFailed *bool
+		plan, loginFailed = planPortal(plan)
+		plan, keep = planScope(plan, keep, "global", hooks, pack.UserTarget(gate.UserDir()), f.keepSkills, loginFailed)
 		// Without --project, this project's hook stays, and it may run the shared copy of the binary.
-		keepBin := !f.project && (hasPawsHook(filepath.Join(projectRoot(cwd), ".claude", "settings.json")) ||
+		keepBin := !f.project && !overlap && (hasPawsHook(filepath.Join(projectRoot(cwd), ".claude", "settings.json")) ||
 			hasPawsHook(filepath.Join(projectRoot(cwd), ".claude", "settings.local.json")))
 		plan, keep = planUserFiles(plan, keep, keepBin)
 	}
@@ -164,7 +167,7 @@ func sameFolder(project, user pack.Target, root string) bool {
 
 // planScope adds the removals for one scope: the hook in its settings files, the packs the state file lists, and
 // the skills paws installed. Nothing is listed that paws didn't create.
-func planScope(plan []removal, keep []string, scope string, settings []string, t pack.Target, keepSkills bool) ([]removal, []string) {
+func planScope(plan []removal, keep []string, scope string, settings []string, t pack.Target, keepSkills bool, loginFailed *bool) ([]removal, []string) {
 	packFailed := false // a pack that stays may still need its skills, so they stay too
 	// A cloned repo can commit .claude as a link to the global one; then nothing in it is the project's to remove.
 	claudeLinked := scope == "project" && isLink(filepath.Dir(settings[0]))
@@ -232,6 +235,9 @@ func planScope(plan []removal, keep []string, scope string, settings []string, t
 				if packFailed {
 					return fmt.Errorf("kept %s: a pack that may need it could not be removed", tilde(dir))
 				}
+				if loginFailed != nil && *loginFailed {
+					return fmt.Errorf("kept %s: the portal rules that stay may need it", tilde(dir))
+				}
 				_, err := pack.RemoveBundledSkill(t.SkillsDir, s.Name)
 				pruneEmpty(t.SkillsDir)
 				return err
@@ -242,20 +248,20 @@ func planScope(plan []removal, keep []string, scope string, settings []string, t
 }
 
 // planPortal adds logging out and clearing the portal's rules and state, the way `logout` does.
-func planPortal(plan []removal) []removal {
+func planPortal(plan []removal) ([]removal, *bool) {
 	dir := portalDir()
-	loginFailed := false // the portal rules go with the login: if it stays, so do they
+	loginFailed := new(bool) // the portal rules go with the login: if it stays, so do they
 	if path := credentialsPath(); path != "" {
 		if _, err := os.Stat(path); err == nil {
 			plan = append(plan, removal{"login     " + tilde(path) + " (logs this laptop out of the portal first)", func() error {
 				c, err := loadCredentials()
 				if err != nil {
 					// Deleting a file paws can't read would leave this laptop's login live in the portal.
-					loginFailed = true
+					*loginFailed = true
 					return fmt.Errorf("can't read %s (%v); kept it. Disconnect this laptop in the portal, then delete the file", tilde(path), err)
 				}
 				if c != nil && logout(true) != 0 {
-					loginFailed = true
+					*loginFailed = true
 					return errors.New("logout failed; credentials.json is still there")
 				}
 				if err := os.Remove(path); err != nil && !errors.Is(err, os.ErrNotExist) {
@@ -268,7 +274,7 @@ func planPortal(plan []removal) []removal {
 	if dir != "" {
 		if _, err := os.Stat(dir); err == nil {
 			plan = append(plan, removal{"portal    " + tilde(dir) + " (rules and state)", func() error {
-				if loginFailed {
+				if *loginFailed {
 					return fmt.Errorf("kept %s: the login is still there", tilde(dir))
 				}
 				if err := clearPortal(); err != nil {
@@ -280,7 +286,7 @@ func planPortal(plan []removal) []removal {
 			}})
 		}
 	}
-	return plan
+	return plan, loginFailed
 }
 
 // planUserFiles adds the files paws writes in its own folder as it runs: the audit log, the sync cursors and the

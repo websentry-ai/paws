@@ -264,8 +264,9 @@ func TestUninstallKeepsSkillsWithHiddenFilesAndUnreadableLogin(t *testing.T) {
 	if !strings.Contains(out, "can't read") || f.logouts.Load() != 0 {
 		t.Errorf("stderr %q, %d logouts", out, f.logouts.Load())
 	}
-	kept(t, filepath.Join(gitSkill, ".notes"), creds)
-	gone(t, filepath.Join(f.home, ".claude", "skills", "humanizer"), filepath.Join(f.pawsHome, "packs"))
+	// The login stays, so the portal rules stay, so the skills they require stay too.
+	kept(t, filepath.Join(gitSkill, ".notes"), creds, filepath.Join(f.home, ".claude", "skills", "humanizer"))
+	gone(t, filepath.Join(f.pawsHome, "packs"))
 }
 
 func TestUninstallGlobalKeepsTheBinaryAHookHereStillRuns(t *testing.T) {
@@ -388,4 +389,26 @@ func TestUninstallProjectLeavesALinkedDotClaudeAlone(t *testing.T) {
 		t.Error("--project removed the global hook through a linked .claude")
 	}
 	kept(t, filepath.Join(f.home, ".claude", "skills", "git"), filepath.Join(f.home, ".claude", "skills", "humanizer"))
+}
+
+// Portal rules stay with the login, and they require the global skills, so a failed logout keeps those too.
+func TestUninstallKeepsGlobalSkillsWhenTheLoginStays(t *testing.T) {
+	b := &fakeCatalogBackend{files: map[string][]pushFile{}}
+	pawsHome := portalEnv(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/paws/v1/device/logout" {
+			w.WriteHeader(http.StatusServiceUnavailable)
+			return
+		}
+		b.ServeHTTP(w, r)
+	}))
+	b.publish(t, writeTestCatalog(t))
+	captureStdout(t, func() int { return Add([]string{"writing"}) })
+	writeFile(t, filepath.Join(pawsHome, "credentials.json"), `{"api":"`+strings.TrimSuffix(os.Getenv("PAWS_PORTAL_API"), "/")+`","token":"tok"}`)
+	skill := filepath.Join(os.Getenv("HOME"), ".claude", "skills", "humanizer")
+	kept(t, skill)
+	capture(t, &os.Stderr, func() int {
+		c, _ := captureStdout(t, func() int { return Uninstall([]string{"--global", "--yes"}) })
+		return c
+	})
+	kept(t, skill, filepath.Join(pawsHome, "credentials.json"))
 }

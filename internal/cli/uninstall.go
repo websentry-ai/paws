@@ -104,19 +104,7 @@ func Uninstall(args []string) int {
 	}
 	if f.global {
 		plan, keep = planScope(plan, keep, "global", []string{filepath.Join(userClaudeDir(), "settings.json")}, user, f.keepSkills, overlap{}, nil)
-		// A project hook that stays (no --project, or a linked file this run won't follow) may run the shared copy
-		// of the binary.
-		keepBin := false
-		for _, name := range []string{"settings.json", "settings.local.json"} {
-			path := filepath.Join(root, ".claude", name)
-			if shared.hooks && path == filepath.Join(userClaudeDir(), "settings.json") {
-				continue // removed with the global scope
-			}
-			if hasPawsHook(path) && (!f.project || isLink(filepath.Dir(path)) || isLink(path)) {
-				keepBin = true
-			}
-		}
-		plan, keep = planUserFiles(plan, keep, keepBin)
+		keep = planUserFiles(keep)
 	}
 
 	if len(plan) == 0 {
@@ -335,42 +323,27 @@ func planPortal(plan []removal) []removal {
 	return plan
 }
 
-// planUserFiles adds the binary copy init makes in paws's own folder. Rule files the user wrote there are not on
-// the list, and the audit history is kept.
-func planUserFiles(plan []removal, keep []string, keepBin bool) ([]removal, []string) {
+// planUserFiles lists what stays in paws's own folder. The audit log is the record of what the gate did, and the sync
+// cursors belong to it, so one unattended `uninstall --yes` must not destroy them. The binary copy `init` made is
+// kept too: committed hooks in other repos may still run it, and no command here can find those repos.
+func planUserFiles(keep []string) []string {
 	dir := gate.UserDir()
 	if dir == "" {
-		return plan, keep
+		return keep
 	}
-	// The audit log is the record of what the gate did, and the sync cursors belong to it. One unattended
-	// `uninstall --yes` must not destroy that record, so they stay; delete them by hand if you want them gone.
 	for _, name := range []string{"audit.log", "audit.log.1", "sync-state.json", "sync-from.json"} {
 		if path := filepath.Join(dir, name); fileExists(path) {
 			keep = append(keep, "file      "+tilde(path)+" (the audit history; delete it yourself if you want it gone)")
 		}
 	}
 	bin := filepath.Join(dir, "bin")
-	if entries, _ := os.ReadDir(bin); len(entries) > 0 {
-		var paths []string
-		for _, e := range entries {
-			if n := e.Name(); n == "paws" || n == "paws.exe" || n == "paws.exe.old" {
-				paths = append(paths, filepath.Join(bin, n))
-			}
-		}
-		if len(paths) > 0 && keepBin {
-			keep = append(keep, "binary    "+tilde(bin)+" (the hook still registered in this project runs it)")
-		} else if len(paths) > 0 {
-			plan = append(plan, removal{what: "binary    " + tilde(bin) + " (the copy `init` made for the hook)", late: true, run: func() error {
-				var errs []error
-				for _, p := range paths {
-					errs = append(errs, os.Remove(p))
-				}
-				pruneEmpty(bin)
-				return errors.Join(errs...)
-			}})
+	for _, name := range []string{"paws", "paws.exe", "paws.exe.old"} {
+		if fileExists(filepath.Join(bin, name)) {
+			keep = append(keep, "binary    "+tilde(bin)+" (hooks in other repos may still run it; rm -rf it once none do)")
+			break
 		}
 	}
-	return plan, keep
+	return keep
 }
 
 // unregisterHook strips the paws hook entries from a settings file, deleting the file if nothing else was in it.

@@ -111,7 +111,7 @@ func TestUninstallRemovesEverythingPawsAddedAndNothingElse(t *testing.T) {
 		filepath.Join(f.repo, ".claude", "settings.json"),
 		filepath.Join(f.repo, ".paws", "packs"), filepath.Join(f.repo, ".paws", "installed.yaml"),
 		filepath.Join(f.repo, ".claude", "skills", "git"), filepath.Join(f.repo, ".claude", "skills", "humanizer"),
-		filepath.Join(f.pawsHome, "packs"), filepath.Join(f.pawsHome, "installed.yaml"), filepath.Join(f.pawsHome, "bin"),
+		filepath.Join(f.pawsHome, "packs"), filepath.Join(f.pawsHome, "installed.yaml"),
 		filepath.Join(f.pawsHome, "credentials.json"), filepath.Join(f.pawsHome, "portal"),
 		filepath.Join(f.home, ".claude", "skills", "git"))
 	if hasPawsHook(filepath.Join(f.home, ".claude", "settings.json")) {
@@ -127,6 +127,7 @@ func TestUninstallRemovesEverythingPawsAddedAndNothingElse(t *testing.T) {
 		filepath.Join(f.pawsHome, "pre-tool", "mine.md"),
 		filepath.Join(f.repo, ".paws", "pre-tool", "ours.md"),
 		filepath.Join(f.pawsHome, "audit.log"), // the audit history is not deleted by an unattended command
+		filepath.Join(f.pawsHome, "bin"),       // committed hooks in other repos may run the copy
 		editedSkill)
 	if data, _ := os.ReadFile(filepath.Join(f.home, ".claude", "settings.json")); !strings.Contains(string(data), `"A"`) {
 		t.Errorf("the user's settings were lost: %s", data)

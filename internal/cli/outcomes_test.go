@@ -469,7 +469,7 @@ func (l *liveTurn) bash(cmd string, gated bool) {
 	l.t.Helper()
 	l.n++
 	id := fmt.Sprintf("toolu_live%02d", l.n)
-	l.log("assistant", `"message":{"content":[{"type":"tool_use","id":"`+id+`","name":"Bash","input":{"command":`+jsonString(cmd)+`}}]}`)
+	l.log("assistant", `"message":{"id":"msg_`+id+`","content":[{"type":"tool_use","id":"`+id+`","name":"Bash","input":{"command":`+jsonString(cmd)+`}}]}`)
 	result, isErr := "ok", "false"
 	if gated {
 		out := runGate(l.t, map[string]any{"hook_event_name": "PreToolUse", "session_id": l.session, "transcript_path": l.path,
@@ -483,8 +483,22 @@ func (l *liveTurn) bash(cmd string, gated bool) {
 
 func (l *liveTurn) stop() {
 	l.t.Helper()
-	l.log("assistant", `"message":{"content":[{"type":"text","text":"done"}]}`)
-	runGate(l.t, map[string]any{"hook_event_name": "Stop", "session_id": l.session, "transcript_path": l.path, "cwd": l.cwd})
+	l.end("done")
+	l.stopHook("done")
+}
+
+// end logs the turn's final message.
+func (l *liveTurn) end(text string) {
+	l.t.Helper()
+	l.n++
+	l.log("assistant", fmt.Sprintf(`"message":{"id":"msg_end%02d","content":[{"type":"text","text":%s}]}`, l.n, jsonString(text)))
+}
+
+// stopHook runs the Stop hook as Claude Code does, with the turn's final message text.
+func (l *liveTurn) stopHook(last string) {
+	l.t.Helper()
+	runGate(l.t, map[string]any{"hook_event_name": "Stop", "session_id": l.session, "transcript_path": l.path, "cwd": l.cwd,
+		"last_assistant_message": last})
 }
 
 func jsonString(s string) string { b, _ := json.Marshal(s); return string(b) }
@@ -536,13 +550,41 @@ func TestAStopThatReadsAfterTheNextPromptGradesTheTurnBefore(t *testing.T) {
 	l.bash("rm -rf build", true)
 	l.bash("ls build", false)
 	l.bash("rm -rf build", false)
-	l.log("assistant", `"message":{"content":[{"type":"text","text":"done"}]}`)
-	l.prompt("now the dist folder") // in the log before the Stop hook reads it
-	runGate(t, map[string]any{"hook_event_name": "Stop", "session_id": l.session, "transcript_path": l.path, "cwd": cwd})
+	l.end("done")
+	l.prompt("now the dist folder")                                                                                       // in the log before the Stop hook reads it
+	runGate(t, map[string]any{"hook_event_name": "Stop", "session_id": l.session, "transcript_path": l.path, "cwd": cwd}) // no final text: an older Claude Code
 	if got := outcomesIn(t, home); len(got) != 1 || got[0] != "fixed rm -rf build" {
 		t.Fatalf("after the late Stop: outcomes %v; want [fixed rm -rf build]", got)
 	}
 	l.bash("rm -rf dist", true)
+	l.bash("rm -rf dist", false)
+	l.stop()
+	if got := outcomesIn(t, home); len(got) != 2 || got[1] != "same_retry rm -rf dist" {
+		t.Errorf("after the next turn's Stop: outcomes %v; want [fixed rm -rf build, same_retry rm -rf dist]", got)
+	}
+}
+
+// The async Stop hook can start after the next turn's prompt and its first denied call are in the log. The Stop names the
+// turn's final message, so grading ends there: the next turn's block waits for that turn's own Stop instead of being
+// graded stopped before its retry.
+func TestADelayedStopEndsAtTheMessageItNames(t *testing.T) {
+	home := portalEnv(t, http.NotFoundHandler())
+	cwd, _ := os.Getwd()
+	writeRule(t, filepath.Join(cwd, ".paws", "pre-tool", "rm-gate.md"), rmRule)
+	l := &liveTurn{t: t, session: "sess-delay", path: filepath.Join(t.TempDir(), "sess-delay.jsonl"), cwd: cwd}
+	l.prompt("clean up the build folder")
+	l.bash("rm -rf build", true)
+	l.bash("ls build", false)
+	l.bash("rm -rf build", false)
+	// The final message as Claude Code logs it: one record per content block, sharing the message id.
+	l.log("assistant", `"message":{"id":"msg_final","content":[{"type":"thinking","thinking":"all clean"}]}`)
+	l.log("assistant", `"message":{"id":"msg_final","content":[{"type":"text","text":"Cleaned the build folder."}]}`)
+	l.prompt("now the dist folder")
+	l.bash("rm -rf dist", true) // denied before the first turn's Stop hook started
+	l.stopHook("Cleaned the build folder.")
+	if got := outcomesIn(t, home); len(got) != 1 || got[0] != "fixed rm -rf build" {
+		t.Fatalf("after the delayed Stop: outcomes %v; want only [fixed rm -rf build]", got)
+	}
 	l.bash("rm -rf dist", false)
 	l.stop()
 	if got := outcomesIn(t, home); len(got) != 2 || got[1] != "same_retry rm -rf dist" {

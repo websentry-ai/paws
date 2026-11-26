@@ -28,8 +28,11 @@ func gradeTurn(in *hook.Input, ev gate.Event, stoppedAt time.Time) {
 		return
 	}
 	// The hook starts a moment after Claude Code fires Stop, and the next turn may already have made a call by then. The
-	// turn ended with the last record of its log, so that is when it stopped.
-	if at, ok := hook.LastRecordAt(in.TranscriptPath, stoppedAt); ok {
+	// turn ended with its final message, which the Stop names; without one (an older Claude Code), with its log's last
+	// record.
+	if at, ok := hook.StopRecordAt(in.TranscriptPath, in.LastAssistantMessage); ok && !at.After(stoppedAt) {
+		stoppedAt = at
+	} else if at, ok := hook.LastRecordAt(in.TranscriptPath, stoppedAt); ok {
 		stoppedAt = at
 	}
 	// Stop hooks run async and can overlap: one grader at a time, so two never grade the same block.

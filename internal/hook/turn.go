@@ -44,38 +44,102 @@ func TurnCalls(transcriptPath string, until time.Time) ([]outcome.Call, time.Tim
 	return calls, start, nil
 }
 
-// lastTail is how much of a log's end LastRecordAt reads: the last record sits in it.
+// lastTail is how much of a log's end LastRecordAt and StopRecordAt read: the turn's last records sit in it.
 const lastTail = 1 << 20
 
-// LastRecordAt is the timestamp of the last record in the log at or before until: the final message of the turn that is
-// stopping, since Claude Code writes it before it runs the Stop hook. The Stop hook has no time of its own and starts a
-// moment late, so a call the next turn makes in that gap is after this time, not part of the turn. ok is false when the
-// log can't be read or holds no timestamp.
-func LastRecordAt(path string, until time.Time) (at time.Time, ok bool) {
+// tailLines is the log's last lastTail bytes, split into whole lines.
+func tailLines(path string) ([][]byte, bool) {
 	f, err := os.Open(path)
 	if err != nil {
-		return time.Time{}, false
+		return nil, false
 	}
 	defer f.Close()
 	st, err := f.Stat()
 	if err != nil {
-		return time.Time{}, false
+		return nil, false
 	}
 	off := max(st.Size()-lastTail, 0)
 	buf := make([]byte, st.Size()-off)
 	if _, err := f.ReadAt(buf, off); err != nil && err != io.EOF {
-		return time.Time{}, false
+		return nil, false
 	}
 	lines := bytes.Split(buf, []byte("\n"))
 	if off > 0 {
 		lines = lines[1:] // the first line is cut
 	}
+	return lines, true
+}
+
+// LastRecordAt is the timestamp of the last record in the log at or before until: the final message of the turn that is
+// stopping, since Claude Code writes it before it runs the Stop hook. The Stop hook has no time of its own and starts a
+// moment late, so a call the next turn makes in that gap is after this time, not part of the turn. ok is false when the
+// log can't be read or holds no timestamp. StopRecordAt, which names the turn's final message, comes first.
+func LastRecordAt(path string, until time.Time) (at time.Time, ok bool) {
+	lines, ok := tailLines(path)
 	for i := len(lines) - 1; i >= 0; i-- {
 		var rec struct {
 			Timestamp time.Time `json:"timestamp"`
 		}
 		if len(lines[i]) > 0 && json.Unmarshal(lines[i], &rec) == nil && !rec.Timestamp.IsZero() && !rec.Timestamp.After(until) {
 			return rec.Timestamp, true
+		}
+	}
+	return time.Time{}, false
+}
+
+// StopRecordAt is when the turn that stopped ended: the timestamp of its final assistant message, found by the text the
+// Stop hook was given (Claude Code's last_assistant_message, the message's text blocks joined by newlines). Claude Code
+// writes one record per content block, so records are grouped by message id. A message that made a tool call doesn't end
+// a turn, so a turn still running when the hook reads the log can't match. ok is false when last is empty or no message
+// in the log's tail has that text.
+func StopRecordAt(path, last string) (at time.Time, ok bool) {
+	last = strings.TrimSpace(last)
+	lines, read := tailLines(path)
+	if last == "" || !read {
+		return time.Time{}, false
+	}
+	type message struct {
+		text []string
+		tool bool
+		at   time.Time
+	}
+	var order []string
+	byID := map[string]*message{}
+	for _, line := range lines {
+		if !bytes.Contains(line, []byte(`"type":"assistant"`)) {
+			continue
+		}
+		var rec struct {
+			Type      string    `json:"type"`
+			Sidechain bool      `json:"isSidechain"`
+			Timestamp time.Time `json:"timestamp"`
+			Message   struct {
+				ID      string          `json:"id"`
+				Content json.RawMessage `json:"content"`
+			} `json:"message"`
+		}
+		if json.Unmarshal(line, &rec) != nil || rec.Type != "assistant" || rec.Sidechain || rec.Message.ID == "" {
+			continue
+		}
+		m := byID[rec.Message.ID]
+		if m == nil {
+			m = &message{}
+			byID[rec.Message.ID] = m
+			order = append(order, rec.Message.ID)
+		}
+		for _, b := range contentBlocks(rec.Message.Content) {
+			switch b.Type {
+			case "tool_use":
+				m.tool = true
+			case "text":
+				m.text = append(m.text, b.Text)
+			}
+		}
+		m.at = rec.Timestamp
+	}
+	for i := len(order) - 1; i >= 0; i-- {
+		if m := byID[order[i]]; !m.tool && strings.TrimSpace(strings.Join(m.text, "\n")) == last {
+			return m.at, true
 		}
 	}
 	return time.Time{}, false
@@ -100,6 +164,7 @@ type turnBlock struct {
 	ToolUseID string          `json:"tool_use_id"`
 	IsError   bool            `json:"is_error"`
 	Content   json.RawMessage `json:"content"`
+	Text      string          `json:"text"`
 }
 
 // readTurnLog reads one log's calls. With a zero since, the turn starts at the log's last prompt (a user record

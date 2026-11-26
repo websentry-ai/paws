@@ -17,6 +17,8 @@ type Input struct {
 	Source         string         `json:"source,omitempty"` // SessionStart only: startup|resume|clear|compact
 	AgentID        string         `json:"agent_id,omitempty"`
 	AgentType      string         `json:"agent_type,omitempty"`
+	// LastAssistantMessage is a Stop's final message text: it names the turn that stopped (see StopRecordAt).
+	LastAssistantMessage string `json:"last_assistant_message,omitempty"`
 }
 
 // Output is the decision a hook prints on stdout; the zero value marshals to "{}" (allow).

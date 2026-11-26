@@ -17,6 +17,9 @@ import (
 type removal struct {
 	what string
 	run  func() error
+	// late steps remove what the earlier steps may still need: the portal rules and pack state they leave, the
+	// skills those rules require, and the binary a surviving hook runs. They are skipped if anything failed.
+	late bool
 }
 
 type uninstallFlags struct {
@@ -74,29 +77,25 @@ func Uninstall(args []string) int {
 	var plan []removal
 	var keep []string
 	cwd, _ := os.Getwd()
-	// Outside a repo, in the home folder, the project's files are the global ones.
-	overlap := sameFolder(pack.ProjectTarget(projectRoot(cwd)), pack.UserTarget(gate.UserDir()), projectRoot(cwd))
-	if f.project && overlap {
-		if !f.global {
-			fmt.Fprintln(os.Stderr, "paws: this folder is not in a repo, so its project files are your global ones. Run --project from a repo, or use --global.")
-			return 2
-		}
-		f.project = false // --global covers them
+	root := projectRoot(cwd)
+	user := pack.UserTarget(gate.UserDir())
+	// Outside a repo, in the home folder, some or all of the project's files are the global ones. Each part that
+	// is shared stays with the global scope.
+	shared := overlaps(root, pack.ProjectTarget(root), user)
+	if f.project && !f.global && shared.hooks && shared.skills && shared.packs {
+		fmt.Fprintln(os.Stderr, "paws: this folder is not in a repo, so its project files are your global ones. Run --project from a repo, or use --global.")
+		return 2
 	}
 	if f.project {
-		root := projectRoot(cwd)
 		hooks := []string{filepath.Join(root, ".claude", "settings.json"), filepath.Join(root, ".claude", "settings.local.json")}
-		plan, keep = planScope(plan, keep, "project", hooks, pack.ProjectTarget(root), f.keepSkills, nil)
+		plan, keep = planScope(plan, keep, "project", hooks, pack.ProjectTarget(root), f.keepSkills, shared)
 	}
 	if f.global {
-		hooks := []string{filepath.Join(userClaudeDir(), "settings.json")}
-		// The login goes first: if it stays, the portal rules stay, and so must the skills they require.
-		var loginFailed *bool
-		plan, loginFailed = planPortal(plan)
-		plan, keep = planScope(plan, keep, "global", hooks, pack.UserTarget(gate.UserDir()), f.keepSkills, loginFailed)
+		plan = planPortal(plan)
+		plan, keep = planScope(plan, keep, "global", []string{filepath.Join(userClaudeDir(), "settings.json")}, user, f.keepSkills, overlap{})
 		// Without --project, this project's hook stays, and it may run the shared copy of the binary.
-		keepBin := !f.project && !overlap && (hasPawsHook(filepath.Join(projectRoot(cwd), ".claude", "settings.json")) ||
-			hasPawsHook(filepath.Join(projectRoot(cwd), ".claude", "settings.local.json")))
+		keepBin := !f.project && !shared.hooks && (hasPawsHook(filepath.Join(root, ".claude", "settings.json")) ||
+			hasPawsHook(filepath.Join(root, ".claude", "settings.local.json")))
 		plan, keep = planUserFiles(plan, keep, keepBin)
 	}
 
@@ -129,10 +128,19 @@ func Uninstall(args []string) int {
 	}
 
 	code := 0
-	for _, r := range plan {
-		if err := r.run(); err != nil {
-			fmt.Fprintf(os.Stderr, "paws: %v\n", err)
-			code = 1
+	for _, late := range []bool{false, true} {
+		for _, r := range plan {
+			if r.late != late {
+				continue
+			}
+			if late && code != 0 {
+				fmt.Fprintf(os.Stderr, "paws: kept %s: an earlier step failed; fix it and run uninstall again\n", strings.Join(strings.Fields(r.what), " "))
+				continue
+			}
+			if err := r.run(); err != nil {
+				fmt.Fprintf(os.Stderr, "paws: %v\n", err)
+				code = 1
+			}
 		}
 	}
 	if len(plan) > 0 {
@@ -158,72 +166,82 @@ A repo that committed the paws hook keeps it until you remove it there (unbound-
 	return code
 }
 
-// sameFolder reports whether a project target (at root) points at any of the files the user target does.
-func sameFolder(project, user pack.Target, root string) bool {
-	return filepath.Clean(project.StateFile) == filepath.Clean(user.StateFile) ||
-		filepath.Clean(project.SkillsDir) == filepath.Clean(user.SkillsDir) ||
-		filepath.Clean(filepath.Join(root, ".claude")) == filepath.Clean(userClaudeDir())
+// overlap says which of a project's files are also the user's: all of them when the project root is the home folder.
+type overlap struct{ hooks, skills, packs bool }
+
+func overlaps(root string, project, user pack.Target) overlap {
+	return overlap{
+		hooks:  filepath.Clean(filepath.Join(root, ".claude")) == filepath.Clean(userClaudeDir()),
+		skills: filepath.Clean(project.SkillsDir) == filepath.Clean(user.SkillsDir),
+		packs:  filepath.Clean(project.StateFile) == filepath.Clean(user.StateFile),
+	}
 }
 
 // planScope adds the removals for one scope: the hook in its settings files, the packs the state file lists, and
 // the skills paws installed. Nothing is listed that paws didn't create.
-func planScope(plan []removal, keep []string, scope string, settings []string, t pack.Target, keepSkills bool, loginFailed *bool) ([]removal, []string) {
-	packFailed := false // a pack that stays may still need its skills, so they stay too
-	// A cloned repo can commit .claude as a link to the global one; then nothing in it is the project's to remove.
-	claudeLinked := scope == "project" && isLink(filepath.Dir(settings[0]))
+func planScope(plan []removal, keep []string, scope string, settings []string, t pack.Target, keepSkills bool, shared overlap) ([]removal, []string) {
+	project := scope == "project"
+	claudeDir := filepath.Dir(settings[0])
+	pawsDir := filepath.Dir(t.StateFile)
+	// A cloned repo can commit .claude or .paws as a link to another folder; then nothing behind it is the project's.
+	claudeLinked, pawsLinked := project && isLink(claudeDir), project && isLink(pawsDir)
 	if claudeLinked {
-		keep = append(keep, "project    "+tilde(filepath.Dir(settings[0]))+" (a symbolic link; left alone)")
+		keep = append(keep, "project   "+tilde(claudeDir)+" (a symbolic link; left alone)")
 	}
-	for _, path := range settings {
-		path := path
-		if hasPawsHook(path) && !claudeLinked {
-			plan = append(plan, removal{"hook      " + tilde(path), func() error { return unregisterHook(path) }})
-		}
+	if pawsLinked {
+		keep = append(keep, "project   "+tilde(pawsDir)+" (a symbolic link; left alone)")
 	}
-	st, err := pack.LoadState(t.StateFile)
-	if err != nil {
-		// Without the state file the packs can't be found, and they may still need their skills.
-		packFailed = true
-		keep = append(keep, "packs     "+tilde(t.StateFile)+" (can't be read, so its packs and the skills they may need stay)")
-	}
-	if err == nil && len(st.Packs) > 0 {
-		var names []string
-		for n := range st.Packs {
-			names = append(names, n)
-		}
-		sort.Strings(names)
-		for _, n := range names {
-			n, dir := n, pack.InstallDir(t, n)
-			if rel, err := filepath.Rel(t.PacksDir, dir); err != nil || !filepath.IsLocal(rel) || rel == "." {
-				continue // a name in the state file that points outside the packs folder is not paws's to delete
+	if !claudeLinked && !shared.hooks {
+		for _, path := range settings {
+			path := path
+			if hasPawsHook(path) {
+				plan = append(plan, removal{what: "hook      " + tilde(path), run: func() error { return unregisterHook(path) }})
 			}
-			plan = append(plan, removal{fmt.Sprintf("pack      %s (%s) in %s", n, count(len(st.Packs[n].Bindings), "rule"), tilde(dir)), func() error {
-				if err := removePackDir(t.PacksDir, dir, scope == "project"); err != nil {
-					packFailed = true
-					return err
+		}
+	}
+	skillsOK := !claudeLinked && !shared.skills && !isLink(t.SkillsDir)
+	if !pawsLinked && !shared.packs {
+		st, err := pack.LoadState(t.StateFile)
+		if err != nil {
+			// Without the state file the packs can't be found, and they may still need their skills.
+			skillsOK = false
+			keep = append(keep, "packs     "+tilde(t.StateFile)+" (can't be read, so its packs and the skills they may need stay)")
+		}
+		if err == nil && len(st.Packs) > 0 {
+			var names []string
+			for n := range st.Packs {
+				names = append(names, n)
+			}
+			sort.Strings(names)
+			for _, n := range names {
+				n, dir := n, pack.InstallDir(t, n)
+				rel, relErr := filepath.Rel(t.PacksDir, dir)
+				if relErr != nil || !filepath.IsLocal(rel) || rel == "." || printable(n) != n {
+					continue // a name that points outside the packs folder, or hides in the terminal, is not paws's to delete
 				}
-				pruneUp(filepath.Dir(dir), t.PacksDir)
-				return nil
+				plan = append(plan, removal{what: fmt.Sprintf("pack      %s (%s) in %s", n, count(len(st.Packs[n].Bindings), "rule"), tilde(dir)), run: func() error {
+					if err := removePackDir(t.PacksDir, dir, project); err != nil {
+						return err
+					}
+					pruneUp(filepath.Dir(dir), t.PacksDir)
+					return nil
+				}})
+			}
+			// The state file is how a retry finds the packs left behind, so it goes only if every pack did.
+			plan = append(plan, removal{what: "packs     " + tilde(t.StateFile), late: true, run: func() error {
+				err := os.Remove(t.StateFile)
+				if errors.Is(err, os.ErrNotExist) {
+					err = nil
+				}
+				pruneUp(t.PacksDir, filepath.Dir(t.StateFile))
+				return err
 			}})
 		}
-		plan = append(plan, removal{"packs     " + tilde(t.StateFile), func() error {
-			if packFailed {
-				// The state file is how a retry finds the packs left behind.
-				return fmt.Errorf("kept %s: a pack could not be removed, so run uninstall again after fixing that", tilde(t.StateFile))
-			}
-			err := os.Remove(t.StateFile)
-			if errors.Is(err, os.ErrNotExist) {
-				err = nil
-			}
-			pruneUp(t.PacksDir, filepath.Dir(t.StateFile))
-			return err
-		}})
 	}
-	skills := pack.PawsSkills(t.SkillsDir)
-	if claudeLinked || isLink(t.SkillsDir) {
-		skills = nil
+	if !skillsOK {
+		return plan, keep
 	}
-	for _, s := range skills {
+	for _, s := range pack.PawsSkills(t.SkillsDir) {
 		s, dir := s, filepath.Join(t.SkillsDir, s.Name)
 		switch {
 		case keepSkills:
@@ -231,13 +249,7 @@ func planScope(plan []removal, keep []string, scope string, settings []string, t
 		case s.Edited:
 			keep = append(keep, fmt.Sprintf("skill     %s (paws installed it, but it was edited since)", tilde(dir)))
 		default:
-			plan = append(plan, removal{"skill     " + tilde(dir), func() error {
-				if packFailed {
-					return fmt.Errorf("kept %s: a pack that may need it could not be removed", tilde(dir))
-				}
-				if loginFailed != nil && *loginFailed {
-					return fmt.Errorf("kept %s: the portal rules that stay may need it", tilde(dir))
-				}
+			plan = append(plan, removal{what: "skill     " + tilde(dir), late: true, run: func() error {
 				_, err := pack.RemoveBundledSkill(t.SkillsDir, s.Name)
 				pruneEmpty(t.SkillsDir)
 				return err
@@ -247,21 +259,19 @@ func planScope(plan []removal, keep []string, scope string, settings []string, t
 	return plan, keep
 }
 
-// planPortal adds logging out and clearing the portal's rules and state, the way `logout` does.
-func planPortal(plan []removal) ([]removal, *bool) {
+// planPortal adds logging out and clearing the portal's rules and state, the way `logout` does. The rules go
+// only if the login did, since a login that stays is still served those rules.
+func planPortal(plan []removal) []removal {
 	dir := portalDir()
-	loginFailed := new(bool) // the portal rules go with the login: if it stays, so do they
 	if path := credentialsPath(); path != "" {
 		if _, err := os.Stat(path); err == nil {
-			plan = append(plan, removal{"login     " + tilde(path) + " (logs this laptop out of the portal first)", func() error {
+			plan = append(plan, removal{what: "login     " + tilde(path) + " (logs this laptop out of the portal first)", run: func() error {
 				c, err := loadCredentials()
 				if err != nil {
 					// Deleting a file paws can't read would leave this laptop's login live in the portal.
-					*loginFailed = true
 					return fmt.Errorf("can't read %s (%v); kept it. Disconnect this laptop in the portal, then delete the file", tilde(path), err)
 				}
 				if c != nil && logout(true) != 0 {
-					*loginFailed = true
 					return errors.New("logout failed; credentials.json is still there")
 				}
 				if err := os.Remove(path); err != nil && !errors.Is(err, os.ErrNotExist) {
@@ -273,10 +283,7 @@ func planPortal(plan []removal) ([]removal, *bool) {
 	}
 	if dir != "" {
 		if _, err := os.Stat(dir); err == nil {
-			plan = append(plan, removal{"portal    " + tilde(dir) + " (rules and state)", func() error {
-				if *loginFailed {
-					return fmt.Errorf("kept %s: the login is still there", tilde(dir))
-				}
+			plan = append(plan, removal{what: "portal    " + tilde(dir) + " (rules and state)", late: true, run: func() error {
 				if err := clearPortal(); err != nil {
 					return fmt.Errorf("removing portal rules: %w", err)
 				}
@@ -286,7 +293,7 @@ func planPortal(plan []removal) ([]removal, *bool) {
 			}})
 		}
 	}
-	return plan, loginFailed
+	return plan
 }
 
 // planUserFiles adds the files paws writes in its own folder as it runs: the audit log, the sync cursors and the
@@ -301,7 +308,7 @@ func planUserFiles(plan []removal, keep []string, keepBin bool) ([]removal, []st
 		if _, err := os.Stat(path); err != nil {
 			continue
 		}
-		plan = append(plan, removal{"file      " + tilde(path), func() error { return os.Remove(path) }})
+		plan = append(plan, removal{what: "file      " + tilde(path), run: func() error { return os.Remove(path) }})
 	}
 	bin := filepath.Join(dir, "bin")
 	if entries, _ := os.ReadDir(bin); len(entries) > 0 {
@@ -314,7 +321,7 @@ func planUserFiles(plan []removal, keep []string, keepBin bool) ([]removal, []st
 		if len(paths) > 0 && keepBin {
 			keep = append(keep, "binary    "+tilde(bin)+" (the hook still registered in this project runs it)")
 		} else if len(paths) > 0 {
-			plan = append(plan, removal{"binary    " + tilde(bin) + " (the copy `init` made for the hook)", func() error {
+			plan = append(plan, removal{what: "binary    " + tilde(bin) + " (the copy `init` made for the hook)", late: true, run: func() error {
 				var errs []error
 				for _, p := range paths {
 					errs = append(errs, os.Remove(p))

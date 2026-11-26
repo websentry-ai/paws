@@ -343,6 +343,16 @@ func TestUninstallRefusesAProjectDotPawsThatIsALink(t *testing.T) {
 func TestUninstallProjectScopeInTheHomeFolder(t *testing.T) {
 	f := setupUninstall(t)
 	t.Chdir(f.home)
+	// Only the .claude folder is shared here (PAWS_HOME is elsewhere): --project leaves it to --global.
+	if code, out := captureStdout(t, func() int { return Uninstall([]string{"--project", "--yes"}) }); code != 0 {
+		t.Fatalf("exit %d: %s", code, out)
+	}
+	if !hasPawsHook(filepath.Join(f.home, ".claude", "settings.json")) {
+		t.Error("--project took the global hook")
+	}
+	kept(t, filepath.Join(f.pawsHome, "packs"), filepath.Join(f.pawsHome, "credentials.json"), filepath.Join(f.home, ".claude", "skills", "git"))
+	// With PAWS_HOME at ~/.paws too, every project file is a global one.
+	t.Setenv("PAWS_HOME", filepath.Join(f.home, ".paws"))
 	code, errOut := capture(t, &os.Stderr, func() int {
 		c, _ := captureStdout(t, func() int { return Uninstall([]string{"--project", "--yes"}) })
 		return c
@@ -350,11 +360,8 @@ func TestUninstallProjectScopeInTheHomeFolder(t *testing.T) {
 	if code != 2 || !strings.Contains(errOut, "not in a repo") {
 		t.Errorf("exit %d, stderr %q", code, errOut)
 	}
-	kept(t, filepath.Join(f.pawsHome, "packs"), filepath.Join(f.pawsHome, "credentials.json"))
-	if !hasPawsHook(filepath.Join(f.home, ".claude", "settings.json")) {
-		t.Error("--project took the global hook")
-	}
 	// With both scopes, the shared files are listed and removed once.
+	t.Setenv("PAWS_HOME", f.pawsHome)
 	code, out := captureStdout(t, func() int { return Uninstall([]string{"--yes"}) })
 	if code != 0 || strings.Count(out, "~/.claude/settings.json") != 1 {
 		t.Errorf("exit %d:\n%s", code, out)
@@ -366,11 +373,8 @@ func TestUninstallKeepsSkillsWhenThePackStateIsUnreadable(t *testing.T) {
 	f := setupUninstall(t)
 	state := filepath.Join(f.repo, ".paws", "installed.yaml")
 	writeFile(t, state, "packs: [not, a, map")
-	if code, _ := capture(t, &os.Stderr, func() int {
-		c, _ := captureStdout(t, func() int { return Uninstall([]string{"--project", "--yes"}) })
-		return c
-	}); code != 1 {
-		t.Fatalf("exit %d, want 1: the skills were kept", code)
+	if code, out := captureStdout(t, func() int { return Uninstall([]string{"--project", "--yes"}) }); code != 0 || !strings.Contains(out, "can't be read") {
+		t.Fatalf("exit %d: %s", code, out)
 	}
 	kept(t, state, filepath.Join(f.repo, ".claude", "skills", "git"), filepath.Join(f.repo, ".paws", "packs"))
 }
@@ -411,4 +415,37 @@ func TestUninstallKeepsGlobalSkillsWhenTheLoginStays(t *testing.T) {
 		return c
 	})
 	kept(t, skill, filepath.Join(pawsHome, "credentials.json"))
+}
+
+// A project .claude that is a link to the global one is left alone; a project .paws that is a link is too, even
+// when no pack name in its installed.yaml is usable.
+func TestUninstallProjectLinkedDotPawsWithNoUsablePack(t *testing.T) {
+	f := setupUninstall(t)
+	outside := filepath.Join(f.home, "outside")
+	state := filepath.Join(outside, "installed.yaml")
+	writeFile(t, state, "packs:\n  .:\n    bindings: [a.md]\n    at: now\n")
+	os.RemoveAll(filepath.Join(f.repo, ".paws"))
+	if err := os.Symlink(outside, filepath.Join(f.repo, ".paws")); err != nil {
+		t.Skip(err)
+	}
+	captureStdout(t, func() int { return Uninstall([]string{"--project", "--yes"}) })
+	kept(t, state)
+}
+
+// A hook that failed to come out may still run the binary, and a pack that stayed may still need its skills.
+func TestUninstallSkipsLateStepsAfterAFailure(t *testing.T) {
+	f := setupUninstall(t)
+	// An early step that fails: a pack folder that is a link.
+	os.RemoveAll(filepath.Join(f.pawsHome, "packs", "writing"))
+	victim := filepath.Join(f.home, "victim")
+	writeFile(t, filepath.Join(victim, "x"), "x")
+	if err := os.Symlink(victim, filepath.Join(f.pawsHome, "packs", "writing")); err != nil {
+		t.Skip(err)
+	}
+	capture(t, &os.Stderr, func() int {
+		c, _ := captureStdout(t, func() int { return Uninstall([]string{"--global", "--yes"}) })
+		return c
+	})
+	kept(t, filepath.Join(victim, "x"), filepath.Join(f.pawsHome, "bin"), filepath.Join(f.pawsHome, "portal"),
+		filepath.Join(f.pawsHome, "installed.yaml"), filepath.Join(f.home, ".claude", "skills", "humanizer"))
 }

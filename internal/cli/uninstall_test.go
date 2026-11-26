@@ -536,3 +536,26 @@ func TestUninstallKeepsTheBinaryForALinkedProjectHook(t *testing.T) {
 	}
 	kept(t, filepath.Join(f.pawsHome, "bin"))
 }
+
+// Without --global the portal rules stay, so a project skill the applied config uses stays too.
+func TestUninstallProjectKeepsSkillsThePortalConfigUses(t *testing.T) {
+	f := setupUninstall(t)
+	writeFile(t, filepath.Join(f.pawsHome, "portal", "state.json"), `{"skills":["humanizer"]}`)
+	captureStdout(t, func() int { return Uninstall([]string{"--project", "--yes"}) })
+	kept(t, filepath.Join(f.repo, ".claude", "skills", "humanizer"))
+	gone(t, filepath.Join(f.repo, ".claude", "skills", "git"), filepath.Join(f.repo, ".claude", "settings.json"))
+}
+
+func TestUninstallProjectLeavesNoEmptyDotClaude(t *testing.T) {
+	f := setupUninstall(t)
+	os.RemoveAll(filepath.Join(f.repo, ".claude", "skills", "ours")) // the user's own skill, removed so only paws's files are left
+	captureStdout(t, func() int { return Uninstall([]string{"--project", "--yes"}) })
+	gone(t, filepath.Join(f.repo, ".claude"))
+}
+
+func TestUninstallHookOnlyRejectsProject(t *testing.T) {
+	portalEnv(t, http.NotFoundHandler())
+	if code, _ := capture(t, &os.Stderr, func() int { return Uninstall([]string{"--hook-only", "--project"}) }); code != 2 {
+		t.Errorf("exit %d, want 2", code)
+	}
+}

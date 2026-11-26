@@ -62,8 +62,8 @@ func Uninstall(args []string) int {
 		return 2
 	}
 	if f.hookOnly {
-		if f.keepSkills || f.yes {
-			fmt.Fprintln(os.Stderr, "paws: --hook-only takes only --global or --settings <path>")
+		if f.keepSkills || f.yes || f.project {
+			fmt.Fprintln(os.Stderr, "paws: --hook-only takes only --global or --settings <path>; the project's settings file is the default")
 			return 2
 		}
 		if f.global {
@@ -87,15 +87,23 @@ func Uninstall(args []string) int {
 		fmt.Fprintln(os.Stderr, "paws: this folder is not in a repo, so its project files are your global ones. Run --project from a repo, or use --global.")
 		return 2
 	}
+	// Without --global the portal rules stay, and a project skill they use stays with them.
+	var portalSkillsToKeep map[string]bool
+	if !f.global {
+		portalSkillsToKeep = map[string]bool{}
+		for _, name := range loadPortalState().Skills {
+			portalSkillsToKeep[name] = true
+		}
+	}
 	if f.global {
 		plan = planPortal(plan) // first: late steps run in plan order, and the skills below need the login gone first
 	}
 	if f.project {
 		hooks := []string{filepath.Join(root, ".claude", "settings.json"), filepath.Join(root, ".claude", "settings.local.json")}
-		plan, keep = planScope(plan, keep, "project", hooks, pack.ProjectTarget(root), f.keepSkills, shared)
+		plan, keep = planScope(plan, keep, "project", hooks, pack.ProjectTarget(root), f.keepSkills, shared, portalSkillsToKeep)
 	}
 	if f.global {
-		plan, keep = planScope(plan, keep, "global", []string{filepath.Join(userClaudeDir(), "settings.json")}, user, f.keepSkills, overlap{})
+		plan, keep = planScope(plan, keep, "global", []string{filepath.Join(userClaudeDir(), "settings.json")}, user, f.keepSkills, overlap{}, nil)
 		// A project hook that stays (no --project, or a linked file this run won't follow) may run the shared copy
 		// of the binary.
 		keepBin := false
@@ -188,7 +196,7 @@ func overlaps(root string, project, user pack.Target) overlap {
 
 // planScope adds the removals for one scope: the hook in its settings files, the packs the state file lists, and
 // the skills paws installed. Nothing is listed that paws didn't create.
-func planScope(plan []removal, keep []string, scope string, settings []string, t pack.Target, keepSkills bool, shared overlap) ([]removal, []string) {
+func planScope(plan []removal, keep []string, scope string, settings []string, t pack.Target, keepSkills bool, shared overlap, portalSkills map[string]bool) ([]removal, []string) {
 	project := scope == "project"
 	claudeDir := filepath.Dir(settings[0])
 	pawsDir := filepath.Dir(t.StateFile)
@@ -208,7 +216,13 @@ func planScope(plan []removal, keep []string, scope string, settings []string, t
 				continue
 			}
 			if hasPawsHook(path) {
-				plan = append(plan, removal{what: "hook      " + tilde(path), run: func() error { return unregisterHook(path) }})
+				plan = append(plan, removal{what: "hook      " + tilde(path), run: func() error {
+					err := unregisterHook(path)
+					if project {
+						pruneEmpty(claudeDir)
+					}
+					return err
+				}})
 			}
 		}
 	}
@@ -262,10 +276,15 @@ func planScope(plan []removal, keep []string, scope string, settings []string, t
 			keep = append(keep, fmt.Sprintf("skill     %s (--keep-skills)", tilde(dir)))
 		case s.Edited:
 			keep = append(keep, fmt.Sprintf("skill     %s (paws installed it, but it was edited since)", tilde(dir)))
+		case portalSkills[s.Name]:
+			keep = append(keep, fmt.Sprintf("skill     %s (a portal rule for this laptop uses it; uninstall --global removes both)", tilde(dir)))
 		default:
 			plan = append(plan, removal{what: "skill     " + tilde(dir), late: true, run: func() error {
 				_, err := pack.RemoveBundledSkill(t.SkillsDir, s.Name)
 				pruneEmpty(t.SkillsDir)
+				if project {
+					pruneEmpty(claudeDir) // paws may have created it; os.Remove keeps it if anything else is in it
+				}
 				return err
 			}})
 		}

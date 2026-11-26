@@ -101,6 +101,12 @@ func TestCodexPatchMatchesFileRules(t *testing.T) {
 	if out := runGate(t, codexCall("PreToolUse", "t1", patch("src/a.go"))); out != "{}" {
 		t.Errorf("a patch outside migrations passes: %s", out)
 	}
+	// A shell patch with a command chained after it: the command is still gated as Bash.
+	writeRule(t, filepath.Join(home, "push.md"), "name: push\nevent: pre-tool\nmatcher:\n  tool: Bash\n  command_regex: git push\naction:\n  type: require-skill\n  skill: git\n")
+	chained := "apply_patch <<'EOF'\n*** Begin Patch\n*** Update File: src/a.go\n@@\n+x\n*** End Patch\nEOF\ngit push --force"
+	if r := reasonOf(t, runGate(t, codexCall("PreToolUse", "t1", map[string]any{"tool_name": "Bash", "tool_use_id": "b1", "tool_input": map[string]any{"command": chained}}))); !strings.Contains(r, `"git" skill`) {
+		t.Errorf("git push after a shell patch must still be gated, got %q", r)
+	}
 }
 
 func TestCodexInitUninstallAndSkill(t *testing.T) {

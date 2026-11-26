@@ -116,28 +116,21 @@ func canonical(in *Input) []call {
 	switch {
 	case in.ToolName == "":
 		return []call{{}}
-	case in.ToolName == "Bash" && !strings.HasPrefix(strings.TrimSpace(str("command")), "apply_patch"):
+	case in.ToolName == "Bash":
+		// The command is always gated as Bash. A patch inside it (apply_patch <<'EOF' ... EOF through the shell)
+		// also edits files: those are gated too, as Codex's apply_patch tool is.
 		cmd := str("command")
-		return []call{{tool: "Bash", target: cmd, text: cmd, input: map[string]any{"command": cmd}}}
-	case in.ToolName == "Bash", in.ToolName == "apply_patch":
-		// apply_patch, or the same patch through the shell (apply_patch <<'EOF' ... EOF): one call per file.
-		var calls []call
-		patch := cmp.Or(str("command"), str("input"), str("patch"))
-		for _, f := range parsePatch(patch) {
-			path := f.Path
-			if !filepath.IsAbs(path) {
-				path = filepath.Join(in.CWD, path)
-			}
-			c := call{tool: "Edit", target: path, text: f.Added, input: map[string]any{"file_path": path, "new_string": f.Added}}
-			if f.New {
-				c.tool, c.input = "Write", map[string]any{"file_path": path, "content": f.Added}
-			}
-			calls = append(calls, c)
-		}
-		if len(calls) == 0 {
-			return []call{{tool: "apply_patch", target: patch, text: patch, input: ti}}
+		calls := []call{{tool: "Bash", target: cmd, text: cmd, input: map[string]any{"command": cmd}}}
+		if strings.Contains(cmd, "*** Begin Patch") {
+			calls = append(calls, patchCalls(cmd, in.CWD)...)
 		}
 		return calls
+	case in.ToolName == "apply_patch":
+		patch := cmp.Or(str("command"), str("input"), str("patch"))
+		if calls := patchCalls(patch, in.CWD); len(calls) > 0 {
+			return calls
+		}
+		return []call{{tool: "apply_patch", target: patch, text: patch, input: ti}}
 	case in.ToolName == "spawn_agent":
 		prompt := ""
 		for _, k := range []string{"prompt", "message", "task", "instructions"} {
@@ -155,6 +148,24 @@ func canonical(in *Input) []call {
 		return []call{{tool: in.ToolName, target: string(b), text: strings.Join(stringsIn(ti), "\n"), input: ti}}
 	}
 	return []call{{tool: in.ToolName, target: in.ToolName, text: in.ToolName, input: ti}}
+}
+
+// patchCalls are a patch's files as canonical calls: a Write for a new file, an Edit for any other, relative paths
+// taken from cwd.
+func patchCalls(patch, cwd string) []call {
+	var calls []call
+	for _, f := range parsePatch(patch) {
+		path := f.Path
+		if !filepath.IsAbs(path) {
+			path = filepath.Join(cwd, path)
+		}
+		c := call{tool: "Edit", target: path, text: f.Added, input: map[string]any{"file_path": path, "new_string": f.Added}}
+		if f.New {
+			c.tool, c.input = "Write", map[string]any{"file_path": path, "content": f.Added}
+		}
+		calls = append(calls, c)
+	}
+	return calls
 }
 
 // stringsIn is every string value in v, keys in order, depth first: an MCP call's text, as expect checks see it.

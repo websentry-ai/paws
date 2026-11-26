@@ -275,11 +275,11 @@ func TestLedgerMasksSecrets(t *testing.T) {
 	}
 }
 
-// Codex can run a patch through the shell; it is the same edit, one call per file.
+// Codex can run a patch through the shell: the command is still gated as Bash, and each file as the edit it is.
 func TestParseShellApplyPatch(t *testing.T) {
 	h := parse(t, stdin(t, "PreToolUse", "t1", map[string]any{"tool_name": "Bash", "tool_input": map[string]any{
 		"command": "apply_patch <<'EOF'\n*** Begin Patch\n*** Add File: migrations/1.sql\n+x\n*** End Patch\nEOF"}}))
-	if len(h.Calls) != 1 || h.Calls[0].Tool != "Write" || h.Calls[0].Target != "/repo/migrations/1.sql" {
-		t.Errorf("got %+v", h.Calls)
+	if len(h.Calls) != 2 || h.Calls[0].Tool != "Bash" || h.Calls[1].Tool != "Write" || h.Calls[1].Target != "/repo/migrations/1.sql" {
+		t.Errorf("want the Bash call and a Write of the file, got %+v", h.Calls)
 	}
 }

@@ -223,7 +223,9 @@ func readCalls(lines [][]byte, path, skill, cwd string) map[string]FileRead {
 			// The file may be gone since: a read that succeeded put the skill in the agent's context all the same.
 			if r, ok := ReadOf(b.Name, target, b.Input, cmp.Or(m.Cwd, cwd), false); b.Type == "tool_use" && ok && r.Skill == skill {
 				r.At = m.Timestamp
-				calls[b.ID] = r
+				if prev, seen := calls[b.ID]; !seen || r.At.After(prev.At) {
+					calls[b.ID] = r // a request blob has no time: the call's own record, once written, gives it
+				}
 			}
 		}
 	}

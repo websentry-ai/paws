@@ -301,4 +301,13 @@ func TestASKILLmdReadBeforeTheFileChangedDoesntCount(t *testing.T) {
 	if out := gateCall(t, "Bash", push, log(time.Now().Add(-time.Hour))); !strings.Contains(out, `"deny"`) {
 		t.Errorf("a read from before the file changed doesn't, got %s", out)
 	}
+	// The same old read echoed in a request blob, which has no time, is still the old read.
+	blob := `{"type":"api-request-blob","hash":"h1","message":{"role":"assistant","content":[{"type":"tool_use","id":"toolu_r","name":"Bash","input":` + string(in) + `}]}}`
+	old := log(time.Now().Add(-time.Hour))
+	data, _ := os.ReadFile(old)
+	lines := strings.SplitN(string(data), "\n", 2) // the blob after the prompt, before the call's own record
+	os.WriteFile(old, []byte(lines[0]+"\n"+blob+"\n"+lines[1]), 0o600)
+	if out := gateCall(t, "Bash", push, old); !strings.Contains(out, `"deny"`) {
+		t.Errorf("a blob copy of a read from before the change doesn't count either, got %s", out)
+	}
 }

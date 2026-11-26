@@ -9,6 +9,7 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"slices"
 	"sort"
 	"strings"
 
@@ -112,6 +113,7 @@ func target(project bool) pack.Target {
 		t = pack.ProjectTarget(projectRoot(cwd))
 	}
 	t.Mirrors = skillMirrors(!project, projectRoot(cwd))
+	t.Elsewhere = otherSkillDirs(!project, projectRoot(cwd), t.Mirrors)
 	return t
 }
 
@@ -124,6 +126,17 @@ func skillMirrors(global bool, root string) []string {
 			continue
 		}
 		if d := a.SkillsDirFor(a.HookFile(global, root)); d != "" {
+			dirs = append(dirs, d)
+		}
+	}
+	return dirs
+}
+
+// otherSkillDirs are the same scope's skills folders of every other harness, hooked or not, minus skip.
+func otherSkillDirs(global bool, root string, skip []string) []string {
+	var dirs []string
+	for _, a := range adapters {
+		if d := a.SkillsDirFor(a.HookFile(global, root)); a != defaultAdapter() && d != "" && !slices.Contains(skip, d) {
 			dirs = append(dirs, d)
 		}
 	}

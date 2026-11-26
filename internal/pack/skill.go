@@ -266,7 +266,7 @@ func MirrorSkill(from, to, name string) (installed bool, err error) {
 // removeSkill removes a skill paws installed from the target's skills folder and its mirrors; removed is the
 // target's own folder.
 func (t Target) removeSkill(name string) (removed bool, err error) {
-	for _, m := range t.Mirrors {
+	for _, m := range append(append([]string{}, t.Mirrors...), t.Elsewhere...) {
 		removeSkill(m, name)
 	}
 	return removeSkill(t.SkillsDir, name)

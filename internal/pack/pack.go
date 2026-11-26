@@ -25,6 +25,9 @@ type Target struct {
 	StateFile string
 	// Mirrors are other harnesses' skills folders: each skill paws installs is copied into each, and removed with it.
 	Mirrors []string
+	// Elsewhere are other harnesses' skills folders paws doesn't copy into now (their hook is gone, or in another
+	// repo): a skill removed here is removed there too, so no stale copy outlives its pack.
+	Elsewhere []string
 }
 
 // UserTarget installs for one user: bindings under the paws user dir (loaded in every repo),

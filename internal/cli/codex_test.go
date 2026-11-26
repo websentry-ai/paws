@@ -196,6 +196,8 @@ func TestAddCopiesSkillsForCodex(t *testing.T) {
 	if st, err := os.Lstat(codex); err != nil || st.Mode()&os.ModeSymlink != 0 {
 		t.Error("the copy is a real folder, not a symlink")
 	}
+	// The Codex hook goes before the pack does: the copy goes with the pack all the same.
+	captureStdout(t, func() int { return Uninstall([]string{"--agent", "codex", "--global"}) })
 	if code, _ := captureStdout(t, func() int { return Remove([]string{"writing"}) }); code != 0 {
 		t.Fatal("remove failed")
 	}

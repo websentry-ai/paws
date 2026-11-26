@@ -64,8 +64,10 @@ func gradeTurn(in *hook.Input, ev gate.Event, stoppedAt time.Time) {
 		return
 	}
 	// The turn that stopped: a prompt the user sends while this async hook runs belongs to the next turn.
+	// No calls since the last prompt: that prompt came after the Stop, and the denies before it are the turn before's,
+	// graded below. A deny of this turn with no call to match is left eligible by gradeCalls.
 	calls, start, err := hook.TurnCalls(in.TranscriptPath, stoppedAt)
-	if err != nil || len(calls) == 0 {
+	if err != nil {
 		settle = false
 		return
 	}

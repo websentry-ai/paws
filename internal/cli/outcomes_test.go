@@ -525,6 +525,31 @@ func TestTheNextTurnRightAfterAStopIsGradedAtItsOwnStop(t *testing.T) {
 	}
 }
 
+// The async Stop hook can read the log after the user's next prompt landed. That prompt has no calls yet, so the block
+// is in the turn before it: graded at this Stop, so it isn't lost if the next turn never reaches a Stop of its own.
+func TestAStopThatReadsAfterTheNextPromptGradesTheTurnBefore(t *testing.T) {
+	home := portalEnv(t, http.NotFoundHandler())
+	cwd, _ := os.Getwd()
+	writeRule(t, filepath.Join(cwd, ".paws", "pre-tool", "rm-gate.md"), rmRule)
+	l := &liveTurn{t: t, session: "sess-late", path: filepath.Join(t.TempDir(), "sess-late.jsonl"), cwd: cwd}
+	l.prompt("clean up the build folder")
+	l.bash("rm -rf build", true)
+	l.bash("ls build", false)
+	l.bash("rm -rf build", false)
+	l.log("assistant", `"message":{"content":[{"type":"text","text":"done"}]}`)
+	l.prompt("now the dist folder") // in the log before the Stop hook reads it
+	runGate(t, map[string]any{"hook_event_name": "Stop", "session_id": l.session, "transcript_path": l.path, "cwd": cwd})
+	if got := outcomesIn(t, home); len(got) != 1 || got[0] != "fixed rm -rf build" {
+		t.Fatalf("after the late Stop: outcomes %v; want [fixed rm -rf build]", got)
+	}
+	l.bash("rm -rf dist", true)
+	l.bash("rm -rf dist", false)
+	l.stop()
+	if got := outcomesIn(t, home); len(got) != 2 || got[1] != "same_retry rm -rf dist" {
+		t.Errorf("after the next turn's Stop: outcomes %v; want [fixed rm -rf build, same_retry rm -rf dist]", got)
+	}
+}
+
 // An interrupted turn fires no Stop. The short turn after it, a few seconds old at its Stop, is the turn that stopped and
 // is graded in full; the interrupted turn's block, which Claude Code ends with its interrupt marker, stays ungraded.
 func TestAShortTurnAfterAnInterruptIsGraded(t *testing.T) {

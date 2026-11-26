@@ -127,7 +127,8 @@ func TestExplainCountsTowardOtherRulesAndTakesJSON(t *testing.T) {
 		t.Errorf("a cased before check: %q", out)
 	}
 	_, out = captureStdout(t, func() int {
-		return Explain([]string{"--tool", "Write", `{"file_path":"app/.env","content":"KEY=AKIAABCDEFGHIJKLMNOP"}`})
+		key := "AKIA" + strings.Repeat("Q", 16) // built here, so secret scanners don't flag a fake key
+		return Explain([]string{"--tool", "Write", `{"file_path":"app/.env","content":"KEY=` + key + `"}`})
 	})
 	if !regexp.MustCompile(`no-key\s+FAIL`).MatchString(out) {
 		t.Errorf("Write JSON: %q", out)

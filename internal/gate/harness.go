@@ -135,9 +135,13 @@ var SkillRoots = func(cwd string) (dirs, trees []string) {
 
 // SkillRead names the skill a call loads by reading its SKILL.md: the Read tool on <dir>/skills/<skill>/SKILL.md,
 // or a Bash line that does nothing but print that file (see rule.PlainRead). The file must exist and sit under one
-// of the SkillRoots, so a SKILL.md the agent wrote somewhere else loads nothing. A relative path is taken from cwd.
+// of the SkillRoots, so a SKILL.md the agent wrote somewhere else loads nothing. A relative path is taken from cwd,
+// or from the hook's own working directory (the session's) when the record names none.
 // "" for any other call.
 func SkillRead(tool, target, cwd string) string {
+	if cwd == "" {
+		cwd, _ = os.Getwd()
+	}
 	var p string
 	switch tool {
 	case "Read":

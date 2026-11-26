@@ -139,3 +139,23 @@ func TestSyncUploadsHarnessAndModel(t *testing.T) {
 		t.Errorf("a record without a harness uploads none (the portal takes it as claude-code): %v", got[1])
 	}
 }
+
+// A finished SKILL.md read is logged as the skill load it is, never with the file's path.
+func TestSKILLmdReadLogsASkillAction(t *testing.T) {
+	home := portalEnv(t, http.NotFoundHandler())
+	md := skillMD(t, "deployer")
+	runGate(t, map[string]any{"hook_event_name": "PostToolUse", "cwd": t.TempDir(), "session_id": "s",
+		"tool_name": "Bash", "tool_input": map[string]any{"command": "cat " + md}})
+	n := 0
+	for _, rec := range auditLines(t, home) {
+		if rec["event"] == "action" {
+			n++
+			if rec["tool"] != "Skill" || rec["action"] != "skill" || rec["command"] != nil {
+				t.Errorf("want a Skill action with no command, got %v", rec)
+			}
+		}
+	}
+	if n != 1 {
+		t.Errorf("want one action record, got %d", n)
+	}
+}

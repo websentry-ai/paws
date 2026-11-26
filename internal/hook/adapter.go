@@ -37,6 +37,8 @@ func ToEvent(in *Input) gate.Event {
 	case "PreToolUse":
 		ev.Kind = rule.KindTool
 		ev.SkillLoad = skillLoad(in, ev.Target)
+	case "PostToolUse":
+		ev.SkillLoad = skillLoad(in, ev.Target)
 	case "SessionStart":
 		ev.Kind = rule.KindSession
 	}

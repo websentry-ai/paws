@@ -564,7 +564,7 @@ func TestUninstallHookOnlyRejectsProject(t *testing.T) {
 }
 
 // In the home folder the project's .claude is the global one: its settings.local.json is still a separate file.
-func TestUninstallHomeFolderLocalSettingsHookKeepsItsBinary(t *testing.T) {
+func TestUninstallHomeFolderRemovesBothSettingsHooksAndKeepsTheBinary(t *testing.T) {
 	f := setupUninstall(t)
 	t.Chdir(f.home)
 	local := filepath.Join(f.home, ".claude", "settings.local.json")
@@ -577,6 +577,7 @@ func TestUninstallHomeFolderLocalSettingsHookKeepsItsBinary(t *testing.T) {
 	if hasPawsHook(local) || hasPawsHook(filepath.Join(f.home, ".claude", "settings.json")) {
 		t.Error("a hook is left in ~/.claude")
 	}
+	kept(t, filepath.Join(f.pawsHome, "bin")) // other repos' hooks may still run the copy
 }
 
 // An unreadable state.json must not hide which skills the portal rules use.
@@ -686,4 +687,13 @@ func TestRequiredSkillsDoesNotWalkOutsideARepo(t *testing.T) {
 		t.Error("did not find a nested .paws in a repo")
 	}
 	requiredCache = nil
+}
+
+// A user-level rule serves every repo, so a user skill stays even when this project has its own copy.
+func TestUninstallKeepsAUserSkillASurvivingUserRuleRequires(t *testing.T) {
+	f := setupUninstall(t)
+	writeFile(t, filepath.Join(f.pawsHome, "pre-tool", "mine.md"), requireSkillRule("mine", "humanizer"))
+	captureStdout(t, func() int { return Uninstall([]string{"--yes"}) })
+	kept(t, filepath.Join(f.home, ".claude", "skills", "humanizer"))
+	gone(t, filepath.Join(f.repo, ".claude", "skills", "humanizer")) // the user copy serves it
 }

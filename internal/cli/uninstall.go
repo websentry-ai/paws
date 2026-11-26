@@ -493,16 +493,13 @@ func requiredSkills() map[string]bool {
 // requiredCache holds requiredSkills for one run, so the walk happens once however many skills are removed.
 var requiredCache map[string]bool
 
-// hasOtherCopy reports whether the skill also exists in the other skills folder (user or project). The gate looks
-// in both, so a rule that needs the skill is still served by that copy.
+// hasOtherCopy reports whether a project skill is also in the user skills folder. The user copy serves every repo, so
+// the project copy can go. A user skill is never covered by a project copy: other repos don't have it.
 func hasOtherCopy(name, dir string) bool {
 	cwd, _ := os.Getwd()
-	for _, skills := range []string{pack.UserTarget(gate.UserDir()).SkillsDir, pack.ProjectTarget(projectRoot(cwd)).SkillsDir} {
-		if p := filepath.Join(skills, name); p != dir && fileExists(filepath.Join(p, "SKILL.md")) {
-			return true
-		}
-	}
-	return false
+	project := pack.ProjectTarget(projectRoot(cwd)).SkillsDir
+	user := pack.UserTarget(gate.UserDir()).SkillsDir
+	return filepath.Dir(dir) == project && project != user && fileExists(filepath.Join(user, name, "SKILL.md"))
 }
 
 func fileExists(path string) bool {

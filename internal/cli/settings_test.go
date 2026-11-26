@@ -3,7 +3,9 @@ package cli
 import (
 	"encoding/json"
 	"os"
+	"os/exec"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 
@@ -18,11 +20,11 @@ func TestEnsureHooksMergesAndIsIdempotent(t *testing.T) {
 		"hooks": json.RawMessage(`{"PreToolUse":[{"matcher":"*","hooks":[{"type":"command","command":"\"/x/unbound.py\"","timeout":15000}]}]}`),
 	}
 
-	changed, err := ensureHooks(doc, pawsCmd)
+	changed, err := ensureHooks(doc, pawsCmd, false)
 	if err != nil || !changed {
 		t.Fatalf("first ensureHooks should report a change: %v %v", changed, err)
 	}
-	changed, err = ensureHooks(doc, pawsCmd)
+	changed, err = ensureHooks(doc, pawsCmd, false)
 	if err != nil || changed {
 		t.Fatalf("second ensureHooks should be a no-op: %v %v", changed, err)
 	}
@@ -48,7 +50,7 @@ func TestEnsureHooksMergesAndIsIdempotent(t *testing.T) {
 
 func TestEnsureHooksFromEmpty(t *testing.T) {
 	doc := settingsDoc{}
-	if changed, err := ensureHooks(doc, pawsCmd); err != nil || !changed {
+	if changed, err := ensureHooks(doc, pawsCmd, false); err != nil || !changed {
 		t.Fatalf("should add hooks to empty settings: %v %v", changed, err)
 	}
 	hooks, err := hooksBlock(doc)
@@ -62,10 +64,10 @@ func TestEnsureHooksFromEmpty(t *testing.T) {
 
 func TestEnsureHooksRepointsMovedBinary(t *testing.T) {
 	doc := settingsDoc{}
-	if _, err := ensureHooks(doc, `'/old/path/paws' gate`); err != nil {
+	if _, err := ensureHooks(doc, `'/old/path/paws' gate`, false); err != nil {
 		t.Fatal(err)
 	}
-	changed, err := ensureHooks(doc, `'/new/path/paws' gate`)
+	changed, err := ensureHooks(doc, `'/new/path/paws' gate`, false)
 	if err != nil || !changed {
 		t.Fatalf("repointing to a new path should report a change: %v %v", changed, err)
 	}
@@ -86,7 +88,7 @@ func TestEnsureHooksRegistersAsyncPromptHook(t *testing.T) {
 	old, _ := json.Marshal(map[string]any{"hooks": []any{map[string]any{"type": "command", "command": pawsCmd, "timeout": 15}}})
 	other := `{"hooks":[{"type":"command","command":"/x/other.sh"}]}`
 	doc := settingsDoc{"hooks": json.RawMessage(`{"UserPromptSubmit":[` + string(old) + `,` + other + `]}`)}
-	if changed, err := ensureHooks(doc, pawsCmd); err != nil || !changed {
+	if changed, err := ensureHooks(doc, pawsCmd, false); err != nil || !changed {
 		t.Fatalf("ensureHooks: %v %v", changed, err)
 	}
 	hooks, _ := hooksBlock(doc)
@@ -140,7 +142,7 @@ func TestIsPawsCommand(t *testing.T) {
 func TestSiblingHookInPawsEntrySurvives(t *testing.T) {
 	entry := `{"matcher":"*","hooks":[{"type":"command","command":"PAWS_MANAGED=1 '/old/paws' gate"},{"type":"command","command":"/x/secret-scan"}]}`
 	doc := settingsDoc{"hooks": json.RawMessage(`{"PreToolUse":[` + entry + `]}`)}
-	if _, err := ensureHooks(doc, pawsCmd); err != nil {
+	if _, err := ensureHooks(doc, pawsCmd, false); err != nil {
 		t.Fatal(err)
 	}
 	hooks, _ := hooksBlock(doc)
@@ -162,10 +164,10 @@ func TestSiblingHookInPawsEntrySurvives(t *testing.T) {
 // Re-running init over a 0.3.0 entry replaces it instead of adding a second paws hook.
 func TestEnsureHooksUpgradesLegacyEntry(t *testing.T) {
 	doc := settingsDoc{}
-	if _, err := ensureHooks(doc, `PAWS_MANAGED=1 '/Users/me/.paws/bin/paws' gate`); err != nil {
+	if _, err := ensureHooks(doc, `PAWS_MANAGED=1 '/Users/me/.paws/bin/paws' gate`, false); err != nil {
 		t.Fatal(err)
 	}
-	if changed, err := ensureHooks(doc, pawsCmd); err != nil || !changed {
+	if changed, err := ensureHooks(doc, pawsCmd, false); err != nil || !changed {
 		t.Fatalf("ensureHooks: %v %v", changed, err)
 	}
 	hooks, _ := hooksBlock(doc)
@@ -180,7 +182,7 @@ func TestRemoveHooksStripsOnlyPaws(t *testing.T) {
 	doc := settingsDoc{
 		"hooks": json.RawMessage(`{"PreToolUse":[{"matcher":"*","hooks":[{"type":"command","command":"\"/x/unbound.py\"","timeout":15000}]}]}`),
 	}
-	if _, err := ensureHooks(doc, pawsCmd); err != nil {
+	if _, err := ensureHooks(doc, pawsCmd, false); err != nil {
 		t.Fatal(err)
 	}
 	changed, err := removeHooks(doc)
@@ -257,4 +259,149 @@ func containsCommand(list []json.RawMessage, command string) bool {
 		}
 	}
 	return false
+}
+
+func TestGuardedCommandIsStillPawsAndUnguards(t *testing.T) {
+	for _, plain := range []string{"unbound-paws gate", `"$HOME/.paws/bin/paws" gate`, `'/opt/it'\''s/paws' gate`} {
+		for _, event := range []string{"PreToolUse", "Stop"} {
+			g := guardedCommand(plain, event)
+			if !isPawsCommand(g) || unguard(g) != plain {
+				t.Errorf("%s: isPawsCommand=%v unguard=%q", g, isPawsCommand(g), unguard(g))
+			}
+		}
+	}
+	for _, bad := range []string{
+		"command -v unbound-paws gate",
+		"command -v x" + guardMid("2") + "rm -rf ~; unbound-paws gate",
+		"command -v unbound-paws" + guardMid("2") + "unbound-paws gate; rm -rf ~",
+		"command -v unbound-paws" + guardMid("3") + "unbound-paws gate",
+		"command -v unbound-paws" + guardMid("2") + "other gate",
+	} {
+		if isPawsCommand(bad) {
+			t.Errorf("isPawsCommand accepted %q", bad)
+		}
+	}
+	if guardedCommand("unbound-paws gate", "PreToolUse") == guardedCommand("unbound-paws gate", "Stop") {
+		t.Error("PreToolUse blocks with exit 2; the other events must not")
+	}
+}
+
+// The guard runs in sh. Without the binary it prints the install hint to stderr and exits 2 for PreToolUse (1 for
+// the other events); with it, the event on stdin reaches the binary.
+func TestGuardedCommandInSh(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("the guard needs sh")
+	}
+	sh, err := exec.LookPath("sh")
+	if err != nil {
+		t.Skip(err)
+	}
+	run := func(path, event, stdin string) (int, string, string) {
+		cmd := exec.Command(sh, "-c", guardedCommand("unbound-paws gate", event))
+		cmd.Env = []string{"PATH=" + path}
+		cmd.Stdin = strings.NewReader(stdin)
+		var out, errb strings.Builder
+		cmd.Stdout, cmd.Stderr = &out, &errb
+		err := cmd.Run()
+		code := 0
+		if ee, ok := err.(*exec.ExitError); ok {
+			code = ee.ExitCode()
+		} else if err != nil {
+			t.Fatal(err)
+		}
+		return code, out.String(), errb.String()
+	}
+	empty := t.TempDir()
+	for event, want := range map[string]int{"PreToolUse": 2, "Stop": 1} {
+		code, out, errOut := run(empty, event, "{}")
+		if code != want || out != "" || strings.TrimSpace(errOut) != missingMsg {
+			t.Errorf("%s without paws: exit %d (want %d), stdout %q, stderr %q", event, code, want, out, errOut)
+		}
+	}
+	bin := t.TempDir()
+	os.WriteFile(filepath.Join(bin, "unbound-paws"), []byte("#!/bin/sh\n/bin/cat\n"), 0o755)
+	if code, out, errOut := run(bin+":"+empty, "PreToolUse", `{"tool":"x"}`); code != 0 || out != `{"tool":"x"}` || errOut != "" {
+		t.Errorf("with paws: exit %d, stdout %q, stderr %q", code, out, errOut)
+	}
+}
+
+func TestWriteSettingsKeepsTheGuardReadable(t *testing.T) {
+	doc := settingsDoc{}
+	ensureHooks(doc, "unbound-paws gate", true)
+	path := filepath.Join(t.TempDir(), "settings.json")
+	if err := writeSettings(path, doc); err != nil {
+		t.Fatal(err)
+	}
+	data, _ := os.ReadFile(path)
+	if strings.Contains(string(data), "\\u003e") || !strings.Contains(string(data), ">/dev/null 2>&1") {
+		t.Errorf("settings.json escapes the shell redirects:\n%s", data)
+	}
+	if !hasPawsHook(path) {
+		t.Error("the file with the guard no longer reads as a paws hook")
+	}
+}
+
+// A sibling hook with a literal backslash-u0026 in its command must come back byte for byte, not as an invalid escape.
+func TestWriteSettingsKeepsEscapedBackslashesInOtherHooks(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "settings.json")
+	u := "\\" + "u0026" // a backslash, then u0026, as text
+	sibling := "printf '" + u + "' > /dev/null 2>&1"
+	src := `{"hooks":{"PreToolUse":[{"matcher":"*","hooks":[{"type":"command","command":"printf '\\` + "u0026" + `' > /dev/null 2>&1"}]}]}}`
+	if err := os.WriteFile(path, []byte(src), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	doc, err := readSettings(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := ensureHooks(doc, "unbound-paws gate", true); err != nil {
+		t.Fatal(err)
+	}
+	if err := writeSettings(path, doc); err != nil {
+		t.Fatal(err)
+	}
+	data, _ := os.ReadFile(path)
+	var back struct {
+		Hooks map[string][]struct {
+			Hooks []struct {
+				Command string `json:"command"`
+			} `json:"hooks"`
+		} `json:"hooks"`
+	}
+	if err := json.Unmarshal(data, &back); err != nil {
+		t.Fatalf("settings.json is no longer valid JSON: %v\n%s", err, data)
+	}
+	found := false
+	for _, e := range back.Hooks["PreToolUse"] {
+		for _, h := range e.Hooks {
+			found = found || h.Command == sibling
+		}
+	}
+	if !found {
+		t.Errorf("the sibling hook changed:\n%s", data)
+	}
+	if strings.Contains(string(data), "\\"+"u003e") {
+		t.Errorf("a > was escaped:\n%s", data)
+	}
+}
+
+func TestInitGuardsOnlyTheUnboundPawsOnPathCommand(t *testing.T) {
+	if !hookGuard() {
+		t.Skip("no guard on this OS")
+	}
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	t.Setenv("PAWS_HOME", filepath.Join(home, ".paws"))
+	t.Setenv("CLAUDE_CONFIG_DIR", "")
+	t.Setenv("PATH", "") // off PATH: init copies the binary and registers "$HOME/.paws/bin/paws" gate
+	repo := filepath.Join(home, "repo")
+	os.MkdirAll(filepath.Join(repo, ".git"), 0o755)
+	t.Chdir(repo)
+	if code, _ := captureStdout(t, func() int { return Init(nil) }); code != 0 {
+		t.Fatalf("init exit %d", code)
+	}
+	got := pawsCommandIn(filepath.Join(repo, ".claude", "settings.json"))
+	if strings.Contains(got, "command -v") || !strings.HasSuffix(got, ` gate`) {
+		t.Errorf("a copied binary can't be installed by npm; the hint would not help, so no guard: %q", got)
+	}
 }

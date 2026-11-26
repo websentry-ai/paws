@@ -624,7 +624,9 @@ func TestUninstallStopsWhenAHookFileCannotBeRead(t *testing.T) {
 	if code != 1 {
 		t.Errorf("exit %d, want 1", code)
 	}
-	kept(t, filepath.Join(f.pawsHome, "credentials.json"), filepath.Join(f.home, ".claude", "skills", "humanizer"), filepath.Join(f.pawsHome, "installed.yaml"))
+	// The hook may still be registered, so the rules it enforces stay too.
+	kept(t, filepath.Join(f.pawsHome, "credentials.json"), filepath.Join(f.home, ".claude", "skills", "humanizer"), filepath.Join(f.pawsHome, "installed.yaml"),
+		filepath.Join(f.pawsHome, "packs", "writing"))
 }
 
 // A nested .paws in the same repo (a monorepo package) uses the project's skills too.

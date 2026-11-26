@@ -19,10 +19,10 @@ import (
 type removal struct {
 	what string
 	run  func() error
-	// late steps remove what the earlier steps may still need: the login and the portal rules, the pack state, the
-	// skills those rules require, the audit history and the binary a surviving hook runs. They run in plan order
-	// and are skipped once any step has failed.
-	late bool
+	// tier orders the steps: 0 removes hooks, 1 removes pack rules, 2 removes what the earlier steps may still
+	// need (the login and portal rules, the pack state, the skills those rules require). Each tier runs in plan
+	// order and is skipped once any step has failed, so a hook that stays keeps its rules.
+	tier int
 }
 
 type uninstallFlags struct {
@@ -91,7 +91,7 @@ func Uninstall(args []string) int {
 		return 2
 	}
 	if f.global {
-		plan = planPortal(plan) // first: late steps run in plan order, and the skills below need the login gone first
+		plan = planPortal(plan) // first: tier 2 steps run in plan order, and the skills below need the login gone first
 	}
 	if f.project {
 		hooks := []string{filepath.Join(root, ".claude", "settings.json"), filepath.Join(root, ".claude", "settings.local.json")}
@@ -131,12 +131,12 @@ func Uninstall(args []string) int {
 	}
 
 	code := 0
-	for _, late := range []bool{false, true} {
+	for tier := 0; tier <= 2; tier++ {
 		for _, r := range plan {
-			if r.late != late {
+			if r.tier != tier {
 				continue
 			}
-			if late && code != 0 {
+			if tier > 0 && code != 0 {
 				fmt.Fprintf(os.Stderr, "paws: kept %s: an earlier step failed; fix it and run uninstall again\n", strings.Join(strings.Fields(r.what), " "))
 				continue
 			}
@@ -243,7 +243,7 @@ func planScope(plan []removal, keep []string, scope string, settings []string, t
 				if relErr != nil || !filepath.IsLocal(rel) || rel == "." || printable(n) != n {
 					continue // a name that points outside the packs folder, or hides in the terminal, is not paws's to delete
 				}
-				plan = append(plan, removal{what: fmt.Sprintf("pack      %s (%s) in %s", n, count(len(st.Packs[n].Bindings), "rule"), tilde(dir)), run: func() error {
+				plan = append(plan, removal{what: fmt.Sprintf("pack      %s (%s) in %s", n, count(len(st.Packs[n].Bindings), "rule"), tilde(dir)), tier: 1, run: func() error {
 					if err := removePackDir(t.PacksDir, dir, project); err != nil {
 						return err
 					}
@@ -252,7 +252,7 @@ func planScope(plan []removal, keep []string, scope string, settings []string, t
 				}})
 			}
 			// The state file is how a retry finds the packs left behind, so it goes only if every pack did.
-			plan = append(plan, removal{what: "packs     " + tilde(t.StateFile), late: true, run: func() error {
+			plan = append(plan, removal{what: "packs     " + tilde(t.StateFile), tier: 2, run: func() error {
 				err := os.Remove(t.StateFile)
 				if errors.Is(err, os.ErrNotExist) {
 					err = nil
@@ -273,7 +273,7 @@ func planScope(plan []removal, keep []string, scope string, settings []string, t
 		case s.Edited:
 			keep = append(keep, fmt.Sprintf("skill     %s (paws installed it, but it was edited since)", tilde(dir)))
 		default:
-			plan = append(plan, removal{what: "skill     " + tilde(dir), late: true, run: func() error {
+			plan = append(plan, removal{what: "skill     " + tilde(dir), tier: 2, run: func() error {
 				if requiredSkills()[s.Name] && !hasOtherCopy(s.Name, dir) {
 					fmt.Printf("Kept %s: a rule that stays requires it\n", tilde(dir))
 					return nil
@@ -296,7 +296,7 @@ func planPortal(plan []removal) []removal {
 	dir := portalDir()
 	if path := credentialsPath(); path != "" {
 		if _, err := os.Stat(path); err == nil {
-			plan = append(plan, removal{what: "login     " + tilde(path) + " (logs this laptop out of the portal first)", late: true, run: func() error {
+			plan = append(plan, removal{what: "login     " + tilde(path) + " (logs this laptop out of the portal first)", tier: 2, run: func() error {
 				c, err := loadCredentials()
 				if err != nil {
 					// Deleting a file paws can't read would leave this laptop's login live in the portal.
@@ -318,7 +318,7 @@ func planPortal(plan []removal) []removal {
 	}
 	if dir != "" {
 		if _, err := os.Stat(dir); err == nil {
-			plan = append(plan, removal{what: "portal    " + tilde(dir) + " (rules and state)", late: true, run: func() error {
+			plan = append(plan, removal{what: "portal    " + tilde(dir) + " (rules and state)", tier: 2, run: func() error {
 				if err := clearPortal(); err != nil {
 					return fmt.Errorf("removing portal rules: %w", err)
 				}

@@ -506,3 +506,33 @@ func TestUninstallKeepsProjectSkillsWhenLogoutFails(t *testing.T) {
 	})
 	kept(t, skill, filepath.Join(pawsHome, "credentials.json"))
 }
+
+// A cloned repo can commit .claude/settings.json as a link to the global one.
+func TestUninstallProjectLeavesALinkedSettingsFileAlone(t *testing.T) {
+	f := setupUninstall(t)
+	link := filepath.Join(f.repo, ".claude", "settings.json")
+	os.Remove(link)
+	if err := os.Symlink(filepath.Join(f.home, ".claude", "settings.json"), link); err != nil {
+		t.Skip(err)
+	}
+	captureStdout(t, func() int { return Uninstall([]string{"--project", "--yes"}) })
+	if !hasPawsHook(filepath.Join(f.home, ".claude", "settings.json")) {
+		t.Error("--project removed the global hook through a linked settings.json")
+	}
+}
+
+// A project hook this run leaves in place still needs the binary copy.
+func TestUninstallKeepsTheBinaryForALinkedProjectHook(t *testing.T) {
+	f := setupUninstall(t)
+	elsewhere := filepath.Join(f.home, "elsewhere")
+	os.MkdirAll(elsewhere, 0o755)
+	os.Rename(filepath.Join(f.repo, ".claude"), filepath.Join(elsewhere, ".claude"))
+	if err := os.Symlink(filepath.Join(elsewhere, ".claude"), filepath.Join(f.repo, ".claude")); err != nil {
+		t.Skip(err)
+	}
+	captureStdout(t, func() int { return Uninstall([]string{"--yes"}) })
+	if !hasPawsHook(filepath.Join(elsewhere, ".claude", "settings.json")) {
+		t.Fatal("the linked project hook should stay")
+	}
+	kept(t, filepath.Join(f.pawsHome, "bin"))
+}

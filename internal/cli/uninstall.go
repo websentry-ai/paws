@@ -96,9 +96,15 @@ func Uninstall(args []string) int {
 	}
 	if f.global {
 		plan, keep = planScope(plan, keep, "global", []string{filepath.Join(userClaudeDir(), "settings.json")}, user, f.keepSkills, overlap{})
-		// Without --project, this project's hook stays, and it may run the shared copy of the binary.
-		keepBin := !f.project && !shared.hooks && (hasPawsHook(filepath.Join(root, ".claude", "settings.json")) ||
-			hasPawsHook(filepath.Join(root, ".claude", "settings.local.json")))
+		// A project hook that stays (no --project, or a linked file this run won't follow) may run the shared copy
+		// of the binary.
+		keepBin := false
+		for _, name := range []string{"settings.json", "settings.local.json"} {
+			path := filepath.Join(root, ".claude", name)
+			if hasPawsHook(path) && !shared.hooks && (!f.project || isLink(filepath.Dir(path)) || isLink(path)) {
+				keepBin = true
+			}
+		}
 		plan, keep = planUserFiles(plan, keep, keepBin)
 	}
 
@@ -197,6 +203,10 @@ func planScope(plan []removal, keep []string, scope string, settings []string, t
 	if !claudeLinked && !shared.hooks {
 		for _, path := range settings {
 			path := path
+			if project && isLink(path) {
+				keep = append(keep, "project   "+tilde(path)+" (a symbolic link; left alone)")
+				continue
+			}
 			if hasPawsHook(path) {
 				plan = append(plan, removal{what: "hook      " + tilde(path), run: func() error { return unregisterHook(path) }})
 			}

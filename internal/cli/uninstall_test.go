@@ -625,3 +625,33 @@ func TestUninstallStopsWhenAHookFileCannotBeRead(t *testing.T) {
 	}
 	kept(t, filepath.Join(f.pawsHome, "credentials.json"), filepath.Join(f.home, ".claude", "skills", "humanizer"), filepath.Join(f.pawsHome, "installed.yaml"))
 }
+
+// A nested .paws in the same repo (a monorepo package) uses the project's skills too.
+func TestUninstallKeepsSkillsANestedRuleRequires(t *testing.T) {
+	f := setupUninstall(t)
+	os.RemoveAll(filepath.Join(f.home, ".claude", "skills", "humanizer"))
+	writeFile(t, filepath.Join(f.repo, "packages", "web", ".paws", "pre-tool", "mine.md"), requireSkillRule("mine", "humanizer"))
+	captureStdout(t, func() int { return Uninstall([]string{"--project", "--yes"}) })
+	kept(t, filepath.Join(f.repo, ".claude", "skills", "humanizer"))
+}
+
+func TestUninstallStopsWhenAHookFileCannotBeOpened(t *testing.T) {
+	f := setupUninstall(t)
+	path := filepath.Join(f.home, ".claude", "settings.json")
+	if err := os.Chmod(path, 0); err != nil {
+		t.Skip(err)
+	}
+	t.Cleanup(func() { os.Chmod(path, 0o600) })
+	if f, err := os.Open(path); err == nil { // running as root: the mode doesn't stop us
+		f.Close()
+		t.Skip("file is readable anyway")
+	}
+	code, _ := capture(t, &os.Stderr, func() int {
+		c, _ := captureStdout(t, func() int { return Uninstall([]string{"--global", "--yes"}) })
+		return c
+	})
+	if code != 1 {
+		t.Errorf("exit %d, want 1", code)
+	}
+	kept(t, filepath.Join(f.pawsHome, "credentials.json"))
+}

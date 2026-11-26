@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"errors"
 	"fmt"
+	"io/fs"
 	"os"
 	"path/filepath"
 	"sort"
@@ -417,7 +418,7 @@ func removePackDir(packs, dir string, project bool) error {
 func unreadableWithPaws(path string) bool {
 	data, err := os.ReadFile(path)
 	if err != nil {
-		return false
+		return !errors.Is(err, os.ErrNotExist) // permission denied and the like: can't tell, so don't skip it
 	}
 	doc, err := readSettings(path)
 	if err == nil {
@@ -438,11 +439,26 @@ func isLink(path string) bool {
 func requiredSkills() map[string]bool {
 	cwd, _ := os.Getwd()
 	need := map[string]bool{}
-	for _, r := range gate.Collect(cwd).Rules {
-		if r.Action.Skill != "" {
-			need[r.Action.Skill] = true
+	collect := func(dir string) {
+		for _, r := range gate.Collect(dir).Rules {
+			if r.Action.Skill != "" {
+				need[r.Action.Skill] = true
+			}
 		}
 	}
+	collect(cwd)
+	// Rules in nested folders of the repo (a monorepo package's own .paws) use the same project skills.
+	filepath.WalkDir(projectRoot(cwd), func(p string, d fs.DirEntry, err error) error {
+		switch {
+		case err != nil:
+			return nil
+		case d.IsDir() && (d.Name() == ".git" || d.Name() == "node_modules"):
+			return filepath.SkipDir
+		case d.IsDir() && d.Name() == ".paws":
+			collect(filepath.Dir(p))
+		}
+		return nil
+	})
 	return need
 }
 

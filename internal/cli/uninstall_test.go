@@ -449,3 +449,35 @@ func TestUninstallSkipsLateStepsAfterAFailure(t *testing.T) {
 	kept(t, filepath.Join(victim, "x"), filepath.Join(f.pawsHome, "bin"), filepath.Join(f.pawsHome, "portal"),
 		filepath.Join(f.pawsHome, "installed.yaml"), filepath.Join(f.home, ".claude", "skills", "humanizer"))
 }
+
+// The login is a late step: a failure before it keeps the login, the portal rules and the audit history, and a
+// failed logout keeps the audit history and the skills.
+func TestUninstallKeepsLoginAndAuditHistoryAfterAnEarlierFailure(t *testing.T) {
+	f := setupUninstall(t)
+	os.RemoveAll(filepath.Join(f.pawsHome, "packs", "writing"))
+	victim := filepath.Join(f.home, "victim")
+	writeFile(t, filepath.Join(victim, "x"), "x")
+	if err := os.Symlink(victim, filepath.Join(f.pawsHome, "packs", "writing")); err != nil {
+		t.Skip(err)
+	}
+	capture(t, &os.Stderr, func() int {
+		c, _ := captureStdout(t, func() int { return Uninstall([]string{"--global", "--yes"}) })
+		return c
+	})
+	kept(t, filepath.Join(f.pawsHome, "credentials.json"), filepath.Join(f.pawsHome, "audit.log"), filepath.Join(f.pawsHome, "portal", "state.json"))
+	if f.logouts.Load() != 0 {
+		t.Errorf("the device was retired (%d calls) although a step before it failed", f.logouts.Load())
+	}
+}
+
+func TestUninstallKeepsSkillsWhenProjectDotPawsIsLinked(t *testing.T) {
+	f := setupUninstall(t)
+	outside := filepath.Join(f.home, "outside")
+	writeFile(t, filepath.Join(outside, "installed.yaml"), "packs: {}\n")
+	os.RemoveAll(filepath.Join(f.repo, ".paws"))
+	if err := os.Symlink(outside, filepath.Join(f.repo, ".paws")); err != nil {
+		t.Skip(err)
+	}
+	captureStdout(t, func() int { return Uninstall([]string{"--project", "--yes"}) })
+	kept(t, filepath.Join(f.repo, ".claude", "skills", "git"))
+}

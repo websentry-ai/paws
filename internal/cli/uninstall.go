@@ -17,8 +17,9 @@ import (
 type removal struct {
 	what string
 	run  func() error
-	// late steps remove what the earlier steps may still need: the portal rules and pack state they leave, the
-	// skills those rules require, and the binary a surviving hook runs. They are skipped if anything failed.
+	// late steps remove what the earlier steps may still need: the login and the portal rules, the pack state, the
+	// skills those rules require, the audit history and the binary a surviving hook runs. They run in plan order
+	// and are skipped once any step has failed.
 	late bool
 }
 
@@ -199,7 +200,8 @@ func planScope(plan []removal, keep []string, scope string, settings []string, t
 			}
 		}
 	}
-	skillsOK := !claudeLinked && !shared.skills && !isLink(t.SkillsDir)
+	// With a linked .paws the packs can't be found, and they may still need their skills.
+	skillsOK := !claudeLinked && !pawsLinked && !shared.skills && !isLink(t.SkillsDir)
 	if !pawsLinked && !shared.packs {
 		st, err := pack.LoadState(t.StateFile)
 		if err != nil {
@@ -265,7 +267,7 @@ func planPortal(plan []removal) []removal {
 	dir := portalDir()
 	if path := credentialsPath(); path != "" {
 		if _, err := os.Stat(path); err == nil {
-			plan = append(plan, removal{what: "login     " + tilde(path) + " (logs this laptop out of the portal first)", run: func() error {
+			plan = append(plan, removal{what: "login     " + tilde(path) + " (logs this laptop out of the portal first)", late: true, run: func() error {
 				c, err := loadCredentials()
 				if err != nil {
 					// Deleting a file paws can't read would leave this laptop's login live in the portal.
@@ -308,7 +310,7 @@ func planUserFiles(plan []removal, keep []string, keepBin bool) ([]removal, []st
 		if _, err := os.Stat(path); err != nil {
 			continue
 		}
-		plan = append(plan, removal{what: "file      " + tilde(path), run: func() error { return os.Remove(path) }})
+		plan = append(plan, removal{what: "file      " + tilde(path), late: true, run: func() error { return os.Remove(path) }})
 	}
 	bin := filepath.Join(dir, "bin")
 	if entries, _ := os.ReadDir(bin); len(entries) > 0 {

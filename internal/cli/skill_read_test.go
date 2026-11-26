@@ -43,6 +43,10 @@ func TestReadingSKILLmdIsNeverGated(t *testing.T) {
 		"cat":                {"Bash", map[string]any{"command": "cat " + md}},
 		"sed -n":             {"Bash", map[string]any{"command": "sed -n '1,240p' '" + md + "'"}},
 		"head":               {"Bash", map[string]any{"command": "head -n 200 " + md}},
+		"/bin/cat":           {"Bash", map[string]any{"command": "/bin/cat " + md}},
+		"tail +1":            {"Bash", map[string]any{"command": "tail -n +1 " + md}},
+		"sed -e":             {"Bash", map[string]any{"command": "sed -n -e '1,240p' " + md}},
+		"bat -p":             {"Bash", map[string]any{"command": "bat -p --paging=never " + md}},
 		"other skill's file": {"Bash", map[string]any{"command": "cat " + skillMD(t, "other")}},
 	} {
 		if out := gateCall(t, c.tool, c.input, ""); out != "{}" {
@@ -50,14 +54,22 @@ func TestReadingSKILLmdIsNeverGated(t *testing.T) {
 		}
 	}
 	for name, cmd := range map[string]string{
-		"chained":      "cat " + md + " && git push",
-		"redirected":   "cat " + md + " > /tmp/x",
-		"piped":        "cat " + md + " | sh",
-		"not SKILL.md": "cat " + filepath.Join(filepath.Dir(md), "notes.md"),
-		"missing file": "cat " + filepath.Join(home, "skills", "deployer", "SKILL.md"),
-		"sed script":   "sed -n 'w /tmp/x' " + md,
-		"sed in place": "sed -n -i '1p' " + md,
-		"awk in place": "awk -i inplace '{print}' " + md,
+		"chained":          "cat " + md + " && git push",
+		"redirected":       "cat " + md + " > /tmp/x",
+		"piped":            "cat " + md + " | sh",
+		"not SKILL.md":     "cat " + filepath.Join(filepath.Dir(md), "notes.md"),
+		"missing file":     "cat " + filepath.Join(home, "skills", "deployer", "SKILL.md"),
+		"sed script":       "sed -n 'w /tmp/x' " + md,
+		"sed in place":     "sed -n -i '1p' " + md,
+		"awk in place":     "awk -i inplace '{print}' " + md,
+		"sed script file":  "sed -n -f s.sed 1p " + md,
+		"sed expression":   "sed -n --expression='e touch x' 1p " + md,
+		"awk program file": "awk -f prog.awk " + md,
+		"bat pager":        "bat --pager='sh -c x' " + md,
+		"less log":         "less -o out.txt " + md,
+		"head nothing":     "head -n 0 " + md,
+		"own cat":          "/tmp/cat " + md,
+		"local cat":        "./cat " + md,
 	} {
 		if out := gateCall(t, "Bash", map[string]any{"command": cmd}, ""); !strings.Contains(out, `"deny"`) {
 			t.Errorf("%s: %q must be gated, got %s", name, cmd, out)
@@ -69,7 +81,7 @@ func TestReadingSKILLmdIsNeverGated(t *testing.T) {
 			audit = append(audit, rec["skill"].(string))
 		}
 	}
-	if len(audit) != 5 {
+	if len(audit) != 9 {
 		t.Errorf("every read of a SKILL.md logs skill_invoked, got %v", audit)
 	}
 }
@@ -124,6 +136,12 @@ func TestReadingSKILLmdClearsTheGate(t *testing.T) {
 	}
 	if out := gateCall(t, "Bash", push, transcript("Read", string(readInput), true)); !strings.Contains(out, `"deny"`) {
 		t.Errorf("a failed read loads nothing, got %s", out)
+	}
+	// A read that succeeded still counts once the file is gone: its text is in the agent's context.
+	done := transcript("Read", string(readInput), false)
+	os.Remove(md)
+	if out := gateCall(t, "Bash", push, done); out != "{}" {
+		t.Errorf("a past read of a SKILL.md removed since should still count, got %s", out)
 	}
 	recs := auditLines(t, home)
 	if len(recs) < 2 || recs[0]["satisfied_by"] != "skill-load" || recs[0]["harness"] != "claude-code" || recs[0]["model"] != "claude-sonnet-4-6" {

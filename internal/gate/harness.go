@@ -138,7 +138,10 @@ var SkillRoots = func(cwd string) (dirs, trees []string) {
 // of the SkillRoots, so a SKILL.md the agent wrote somewhere else loads nothing. A relative path is taken from cwd,
 // or from the hook's own working directory (the session's) when the record names none.
 // "" for any other call.
-func SkillRead(tool, target, cwd string) string {
+func SkillRead(tool, target, cwd string) string { return skillRead(tool, target, cwd, true) }
+
+// skillRead is SkillRead; with exists false the file may be gone since (a past read, still in the agent's context).
+func skillRead(tool, target, cwd string, exists bool) string {
 	if cwd == "" {
 		cwd, _ = os.Getwd()
 	}
@@ -168,7 +171,12 @@ func SkillRead(tool, target, cwd string) string {
 	if filepath.Base(p) != "SKILL.md" || filepath.Base(filepath.Dir(dir)) != "skills" || skill == "skills" {
 		return ""
 	}
-	if st, err := os.Stat(p); err != nil || !st.Mode().IsRegular() || !underSkillRoot(filepath.Dir(dir), cwd) {
+	if exists {
+		if st, err := os.Stat(p); err != nil || !st.Mode().IsRegular() {
+			return ""
+		}
+	}
+	if !underSkillRoot(filepath.Dir(dir), cwd) {
 		return ""
 	}
 	return skill

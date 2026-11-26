@@ -198,7 +198,8 @@ func readCalls(lines [][]byte, path, skill string) map[string]bool {
 			if b.Name == "Read" {
 				target = b.Input.FilePath
 			}
-			if b.Type == "tool_use" && SkillRead(b.Name, target, m.Cwd) == skill {
+			// The file may be gone since: a read that succeeded put the skill in the agent's context all the same.
+			if b.Type == "tool_use" && skillRead(b.Name, target, m.Cwd, false) == skill {
 				calls[b.ID] = true
 			}
 		}

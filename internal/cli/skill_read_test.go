@@ -56,6 +56,8 @@ func TestReadingSKILLmdIsNeverGated(t *testing.T) {
 		"not SKILL.md": "cat " + filepath.Join(filepath.Dir(md), "notes.md"),
 		"missing file": "cat " + filepath.Join(home, "skills", "deployer", "SKILL.md"),
 		"sed script":   "sed -n 'w /tmp/x' " + md,
+		"sed in place": "sed -n -i '1p' " + md,
+		"awk in place": "awk -i inplace '{print}' " + md,
 	} {
 		if out := gateCall(t, "Bash", map[string]any{"command": cmd}, ""); !strings.Contains(out, `"deny"`) {
 			t.Errorf("%s: %q must be gated, got %s", name, cmd, out)

@@ -3,6 +3,7 @@ package hook
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -42,5 +43,23 @@ func TestGradingTreatsASKILLmdReadAsTheAnswer(t *testing.T) {
 	}
 	if res := outcome.Grade(r, []outcome.Call{at(0, blocked), at(1, read)}, 0); res.Outcome != outcome.Stopped {
 		t.Errorf("read then nothing: want stopped, got %s", res.Outcome)
+	}
+}
+
+// A relative SKILL.md read in the transcript is resolved from the session's own cwd, not the hook's.
+func TestTurnCallsResolveRelativeReadsFromTheSessionCwd(t *testing.T) {
+	repo := t.TempDir()
+	md := filepath.Join(repo, ".claude", "skills", "git", "SKILL.md")
+	os.MkdirAll(filepath.Dir(md), 0o755)
+	os.WriteFile(md, []byte("# git\n"), 0o644)
+	log := filepath.Join(t.TempDir(), "s.jsonl")
+	lines := []string{
+		`{"type":"user","timestamp":"2026-11-26T10:00:00Z","cwd":"` + repo + `","message":{"role":"user","content":"go"}}`,
+		`{"type":"assistant","timestamp":"2026-11-26T10:00:01Z","cwd":"` + repo + `","message":{"content":[{"type":"tool_use","id":"t1","name":"Bash","input":{"command":"cat .claude/skills/git/SKILL.md"}}]}}`,
+	}
+	os.WriteFile(log, []byte(strings.Join(lines, "\n")+"\n"), 0o600)
+	calls, _, err := TurnCalls(log, time.Time{})
+	if err != nil || len(calls) != 1 || calls[0].SkillLoad != "git" {
+		t.Fatalf("want the relative read to load git, got %+v %v", calls, err)
 	}
 }

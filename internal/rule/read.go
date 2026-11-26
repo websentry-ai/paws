@@ -74,6 +74,11 @@ var (
 	}
 	readers = map[string]bool{"cat": true, "head": true, "tail": true, "nl": true, "less": true, "more": true,
 		"bat": true, "batcat": true, "sed": true, "awk": true}
+	// readOnlyFlags are the only flags sed and awk may carry: anything else (sed -i, gawk -i inplace) can write.
+	readOnlyFlags = map[string]map[string]bool{
+		"sed": {"-n": true, "-e": true, "-E": true, "-r": true, "--quiet": true, "--silent": true, "-s": true, "-u": true},
+		"awk": {"-F": true},
+	}
 )
 
 // readTarget is the file a reader's arguments print, when they print exactly one file and nothing else.
@@ -92,6 +97,9 @@ func readTarget(prog string, args []string) (string, bool) {
 			operands = append(operands, args[i+1:]...)
 			i = len(args)
 		case strings.HasPrefix(a, "-") && a != "-":
+			if allowed, limited := readOnlyFlags[prog]; limited && !allowed[a] {
+				return "", false
+			}
 			flags = append(flags, a)
 			if valueFlags[prog][a] || prog == "sed" && a == "-e" {
 				if i+1 >= len(args) {

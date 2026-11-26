@@ -87,23 +87,15 @@ func Uninstall(args []string) int {
 		fmt.Fprintln(os.Stderr, "paws: this folder is not in a repo, so its project files are your global ones. Run --project from a repo, or use --global.")
 		return 2
 	}
-	// Without --global the portal rules stay, and a project skill they use stays with them.
-	var portalSkillsToKeep map[string]bool
-	if !f.global {
-		portalSkillsToKeep = map[string]bool{}
-		for _, name := range portalSkillNames() {
-			portalSkillsToKeep[name] = true
-		}
-	}
 	if f.global {
 		plan = planPortal(plan) // first: late steps run in plan order, and the skills below need the login gone first
 	}
 	if f.project {
 		hooks := []string{filepath.Join(root, ".claude", "settings.json"), filepath.Join(root, ".claude", "settings.local.json")}
-		plan, keep = planScope(plan, keep, "project", hooks, pack.ProjectTarget(root), f.keepSkills, shared, portalSkillsToKeep)
+		plan, keep = planScope(plan, keep, "project", hooks, pack.ProjectTarget(root), f.keepSkills, shared)
 	}
 	if f.global {
-		plan, keep = planScope(plan, keep, "global", []string{filepath.Join(userClaudeDir(), "settings.json")}, user, f.keepSkills, overlap{}, nil)
+		plan, keep = planScope(plan, keep, "global", []string{filepath.Join(userClaudeDir(), "settings.json")}, user, f.keepSkills, overlap{})
 		keep = planUserFiles(keep)
 	}
 
@@ -157,7 +149,7 @@ func Uninstall(args []string) int {
 				if os.Remove(dir) == nil {
 					fmt.Printf("Removed %s\n", tilde(dir))
 				} else if _, err := os.Stat(dir); err == nil {
-					fmt.Printf("Left %s: it still holds files paws didn't create.\n", tilde(dir))
+					fmt.Printf("Left %s: it still holds the audit history, the binary copy or files you wrote.\n", tilde(dir))
 				}
 			}
 		}
@@ -187,7 +179,7 @@ func overlaps(root string, project, user pack.Target) overlap {
 
 // planScope adds the removals for one scope: the hook in its settings files, the packs the state file lists, and
 // the skills paws installed. Nothing is listed that paws didn't create.
-func planScope(plan []removal, keep []string, scope string, settings []string, t pack.Target, keepSkills bool, shared overlap, portalSkills map[string]bool) ([]removal, []string) {
+func planScope(plan []removal, keep []string, scope string, settings []string, t pack.Target, keepSkills bool, shared overlap) ([]removal, []string) {
 	project := scope == "project"
 	claudeDir := filepath.Dir(settings[0])
 	pawsDir := filepath.Dir(t.StateFile)
@@ -270,10 +262,12 @@ func planScope(plan []removal, keep []string, scope string, settings []string, t
 			keep = append(keep, fmt.Sprintf("skill     %s (--keep-skills)", tilde(dir)))
 		case s.Edited:
 			keep = append(keep, fmt.Sprintf("skill     %s (paws installed it, but it was edited since)", tilde(dir)))
-		case portalSkills[s.Name]:
-			keep = append(keep, fmt.Sprintf("skill     %s (a portal rule for this laptop uses it; uninstall --global removes both)", tilde(dir)))
 		default:
 			plan = append(plan, removal{what: "skill     " + tilde(dir), late: true, run: func() error {
+				if requiredSkills()[s.Name] && !hasOtherCopy(s.Name, dir) {
+					fmt.Printf("Kept %s: a rule that stays requires it\n", tilde(dir))
+					return nil
+				}
 				_, err := pack.RemoveBundledSkill(t.SkillsDir, s.Name)
 				pruneEmpty(t.SkillsDir)
 				if project {
@@ -417,17 +411,30 @@ func isLink(path string) bool {
 	return err == nil && st.Mode()&os.ModeSymlink != 0
 }
 
-// portalSkillNames are the skills the applied portal config uses: the ones state.json lists, and those the rule files
-// in the portal folder are named for (<skill>--<action>.md), so an unreadable state.json hides none of them.
-func portalSkillNames() []string {
-	names := loadPortalState().Skills
-	if dir := portalDir(); dir != "" {
-		rules, _ := filepath.Glob(filepath.Join(dir, "*--*.md"))
-		for _, r := range rules {
-			names = append(names, strings.SplitN(filepath.Base(r), "--", 2)[0])
+// requiredSkills are the skills the rules still on disk require. The skill steps run after the pack and portal
+// removals, so this sees only rules that stay: user-written ones, portal rules of a scope that stays, and the packs
+// of a scope whose state couldn't be read.
+func requiredSkills() map[string]bool {
+	cwd, _ := os.Getwd()
+	need := map[string]bool{}
+	for _, r := range gate.Collect(cwd).Rules {
+		if r.Action.Skill != "" {
+			need[r.Action.Skill] = true
 		}
 	}
-	return names
+	return need
+}
+
+// hasOtherCopy reports whether the skill also exists in the other skills folder (user or project). The gate looks
+// in both, so a rule that needs the skill is still served by that copy.
+func hasOtherCopy(name, dir string) bool {
+	cwd, _ := os.Getwd()
+	for _, skills := range []string{pack.UserTarget(gate.UserDir()).SkillsDir, pack.ProjectTarget(projectRoot(cwd)).SkillsDir} {
+		if p := filepath.Join(skills, name); p != dir && fileExists(filepath.Join(p, "SKILL.md")) {
+			return true
+		}
+	}
+	return false
 }
 
 func fileExists(path string) bool {

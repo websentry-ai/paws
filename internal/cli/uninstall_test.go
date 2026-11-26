@@ -542,7 +542,8 @@ func TestUninstallKeepsTheBinaryForALinkedProjectHook(t *testing.T) {
 // Without --global the portal rules stay, so a project skill the applied config uses stays too.
 func TestUninstallProjectKeepsSkillsThePortalConfigUses(t *testing.T) {
 	f := setupUninstall(t)
-	writeFile(t, filepath.Join(f.pawsHome, "portal", "state.json"), `{"skills":["humanizer"]}`)
+	os.RemoveAll(filepath.Join(f.home, ".claude", "skills", "humanizer")) // the project copy is the only one
+	writeFile(t, filepath.Join(f.pawsHome, "portal", "humanizer--pr.md"), requireSkillRule("humanizer--pr", "humanizer"))
 	captureStdout(t, func() int { return Uninstall([]string{"--project", "--yes"}) })
 	kept(t, filepath.Join(f.repo, ".claude", "skills", "humanizer"))
 	gone(t, filepath.Join(f.repo, ".claude", "skills", "git"), filepath.Join(f.repo, ".claude", "settings.json"))
@@ -581,8 +582,32 @@ func TestUninstallHomeFolderLocalSettingsHookKeepsItsBinary(t *testing.T) {
 // An unreadable state.json must not hide which skills the portal rules use.
 func TestUninstallProjectKeepsPortalSkillsWhenStateIsUnreadable(t *testing.T) {
 	f := setupUninstall(t)
+	os.RemoveAll(filepath.Join(f.home, ".claude", "skills", "humanizer")) // the project copy is the only one
 	writeFile(t, filepath.Join(f.pawsHome, "portal", "state.json"), "not json")
-	writeFile(t, filepath.Join(f.pawsHome, "portal", "humanizer--pr.md"), "---\nname: humanizer--pr\n---\n")
+	writeFile(t, filepath.Join(f.pawsHome, "portal", "my--skill--pr.md"), requireSkillRule("my--skill--pr", "humanizer"))
 	captureStdout(t, func() int { return Uninstall([]string{"--project", "--yes"}) })
+	kept(t, filepath.Join(f.repo, ".claude", "skills", "humanizer"))
+}
+
+func requireSkillRule(name, skill string) string {
+	return "---\nname: " + name + "\nevent: pre-tool\nmatcher:\n  tool: Bash\n  command_regex: gh pr create\naction:\n  type: require-skill\n  skill: " + skill + "\n---\n"
+}
+
+// A rule the user wrote that requires a paws skill keeps that skill, and so does a pack the run could not read.
+func TestUninstallKeepsSkillsASurvivingRuleRequires(t *testing.T) {
+	f := setupUninstall(t)
+	os.RemoveAll(filepath.Join(f.home, ".claude", "skills", "humanizer")) // the project copy is the only one
+	writeFile(t, filepath.Join(f.repo, ".paws", "pre-tool", "mine.md"), requireSkillRule("mine", "humanizer"))
+	captureStdout(t, func() int { return Uninstall([]string{"--project", "--yes"}) })
+	kept(t, filepath.Join(f.repo, ".claude", "skills", "humanizer"))
+	gone(t, filepath.Join(f.repo, ".claude", "skills", "git"))
+
+	// The project's state can't be read, so its packs stay and a copy of the skill they use must stay.
+	f = setupUninstall(t)
+	writeFile(t, filepath.Join(f.repo, ".paws", "installed.yaml"), "packs: [")
+	capture(t, &os.Stderr, func() int {
+		c, _ := captureStdout(t, func() int { return Uninstall([]string{"--yes"}) })
+		return c
+	})
 	kept(t, filepath.Join(f.repo, ".claude", "skills", "humanizer"))
 }

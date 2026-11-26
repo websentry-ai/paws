@@ -445,6 +445,106 @@ func TestADenyAfterTheLastRecordIsNotThisTurns(t *testing.T) {
 	}
 }
 
+// liveTurn plays a session through the real gate as Claude Code would: each record logged now, a call logged before its
+// PreToolUse hook runs, and the Stop hook run once the turn's last record is in the log.
+type liveTurn struct {
+	t                  *testing.T
+	session, path, cwd string
+	n                  int
+}
+
+// log appends one record of the given type: body is its fields after type and timestamp.
+func (l *liveTurn) log(typ, body string) {
+	l.t.Helper()
+	time.Sleep(2 * time.Millisecond) // strictly increasing times, as in a real log
+	appendLines(l.t, l.path, `{"type":"`+typ+`","timestamp":"`+time.Now().UTC().Format(time.RFC3339Nano)+`",`+body+`}`)
+}
+
+func (l *liveTurn) prompt(text string) {
+	l.log("user", `"message":{"role":"user","content":`+jsonString(text)+`}`)
+}
+
+// bash logs a Bash call; gated runs it through PreToolUse first, and a deny is logged as Claude Code logs a refusal.
+func (l *liveTurn) bash(cmd string, gated bool) {
+	l.t.Helper()
+	l.n++
+	id := fmt.Sprintf("toolu_live%02d", l.n)
+	l.log("assistant", `"message":{"content":[{"type":"tool_use","id":"`+id+`","name":"Bash","input":{"command":`+jsonString(cmd)+`}}]}`)
+	result, isErr := "ok", "false"
+	if gated {
+		out := runGate(l.t, map[string]any{"hook_event_name": "PreToolUse", "session_id": l.session, "transcript_path": l.path,
+			"cwd": l.cwd, "tool_name": "Bash", "tool_input": map[string]any{"command": cmd}})
+		if strings.Contains(out, `"deny"`) {
+			result, isErr = "PreToolUse:Bash hook error: paws: load coreutils", "true"
+		}
+	}
+	l.log("user", `"message":{"content":[{"type":"tool_result","tool_use_id":"`+id+`","is_error":`+isErr+`,"content":`+jsonString(result)+`}]}`)
+}
+
+func (l *liveTurn) stop() {
+	l.t.Helper()
+	l.log("assistant", `"message":{"content":[{"type":"text","text":"done"}]}`)
+	runGate(l.t, map[string]any{"hook_event_name": "Stop", "session_id": l.session, "transcript_path": l.path, "cwd": l.cwd})
+}
+
+func jsonString(s string) string { b, _ := json.Marshal(s); return string(b) }
+
+func outcomesIn(t *testing.T, home string) []string {
+	t.Helper()
+	var got []string
+	for _, rec := range auditLines(t, home) {
+		if rec["event"] == "outcome" {
+			got = append(got, fmt.Sprint(rec["outcome"], " ", rec["retry_command"]))
+		}
+	}
+	return got
+}
+
+// The next prompt can come the moment a turn ends. The Stop hook reads the log well before the next turn's first call
+// (the model answers first), so it grades the turn that stopped; the next turn's block is graded at that turn's own
+// Stop, and the first isn't graded again.
+func TestTheNextTurnRightAfterAStopIsGradedAtItsOwnStop(t *testing.T) {
+	home := portalEnv(t, http.NotFoundHandler())
+	cwd, _ := os.Getwd()
+	writeRule(t, filepath.Join(cwd, ".paws", "pre-tool", "rm-gate.md"), rmRule)
+	l := &liveTurn{t: t, session: "sess-next", path: filepath.Join(t.TempDir(), "sess-next.jsonl"), cwd: cwd}
+	l.prompt("clean up the build folder")
+	l.bash("rm -rf build", true)
+	l.bash("ls build", false)
+	l.bash("rm -rf build", false)
+	l.stop()
+	if got := outcomesIn(t, home); len(got) != 1 || got[0] != "fixed rm -rf build" {
+		t.Fatalf("after the first Stop: outcomes %v; want [fixed rm -rf build]", got)
+	}
+	l.prompt("now the dist folder") // milliseconds after the Stop returned
+	l.bash("rm -rf dist", true)
+	l.bash("rm -rf dist", false)
+	l.stop()
+	if got := outcomesIn(t, home); len(got) != 2 || got[1] != "same_retry rm -rf dist" {
+		t.Errorf("after the second Stop: outcomes %v; want [fixed rm -rf build, same_retry rm -rf dist]", got)
+	}
+}
+
+// An interrupted turn fires no Stop. The short turn after it, a few seconds old at its Stop, is the turn that stopped and
+// is graded in full; the interrupted turn's block, which Claude Code ends with its interrupt marker, stays ungraded.
+func TestAShortTurnAfterAnInterruptIsGraded(t *testing.T) {
+	home := portalEnv(t, http.NotFoundHandler())
+	cwd, _ := os.Getwd()
+	writeRule(t, filepath.Join(cwd, ".paws", "pre-tool", "rm-gate.md"), rmRule)
+	l := &liveTurn{t: t, session: "sess-int", path: filepath.Join(t.TempDir(), "sess-int.jsonl"), cwd: cwd}
+	l.prompt("clean up the build folder")
+	l.bash("rm -rf build", true)
+	l.log("user", `"message":{"role":"user","content":[{"type":"text","text":"[Request interrupted by user]"}]}`)
+	l.prompt("just the dist folder")
+	l.bash("rm -rf dist", true)
+	l.bash("rm -rf dist", false)
+	l.stop()
+	l.stop() // a second Stop for the same turn grades nothing new
+	if got := outcomesIn(t, home); len(got) != 1 || got[0] != "same_retry rm -rf dist" {
+		t.Errorf("outcomes %v; want only the short turn's block: [same_retry rm -rf dist]", got)
+	}
+}
+
 // Another hook refused the same command earlier in the turn: paws's block is its own later call, so the listing
 // between the two refusals isn't "before the retry" for paws's block.
 func TestAnEarlierRefusalByAnotherHookIsNotTheBlock(t *testing.T) {

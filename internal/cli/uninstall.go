@@ -166,13 +166,24 @@ func sameFolder(project, user pack.Target, root string) bool {
 // the skills paws installed. Nothing is listed that paws didn't create.
 func planScope(plan []removal, keep []string, scope string, settings []string, t pack.Target, keepSkills bool) ([]removal, []string) {
 	packFailed := false // a pack that stays may still need its skills, so they stay too
+	// A cloned repo can commit .claude as a link to the global one; then nothing in it is the project's to remove.
+	claudeLinked := scope == "project" && isLink(filepath.Dir(settings[0]))
+	if claudeLinked {
+		keep = append(keep, "project    "+tilde(filepath.Dir(settings[0]))+" (a symbolic link; left alone)")
+	}
 	for _, path := range settings {
 		path := path
-		if hasPawsHook(path) {
+		if hasPawsHook(path) && !claudeLinked {
 			plan = append(plan, removal{"hook      " + tilde(path), func() error { return unregisterHook(path) }})
 		}
 	}
-	if st, err := pack.LoadState(t.StateFile); err == nil && len(st.Packs) > 0 {
+	st, err := pack.LoadState(t.StateFile)
+	if err != nil {
+		// Without the state file the packs can't be found, and they may still need their skills.
+		packFailed = true
+		keep = append(keep, "packs     "+tilde(t.StateFile)+" (can't be read, so its packs and the skills they may need stay)")
+	}
+	if err == nil && len(st.Packs) > 0 {
 		var names []string
 		for n := range st.Packs {
 			names = append(names, n)
@@ -205,7 +216,11 @@ func planScope(plan []removal, keep []string, scope string, settings []string, t
 			return err
 		}})
 	}
-	for _, s := range pack.PawsSkills(t.SkillsDir) {
+	skills := pack.PawsSkills(t.SkillsDir)
+	if claudeLinked || isLink(t.SkillsDir) {
+		skills = nil
+	}
+	for _, s := range skills {
 		s, dir := s, filepath.Join(t.SkillsDir, s.Name)
 		switch {
 		case keepSkills:
@@ -229,15 +244,18 @@ func planScope(plan []removal, keep []string, scope string, settings []string, t
 // planPortal adds logging out and clearing the portal's rules and state, the way `logout` does.
 func planPortal(plan []removal) []removal {
 	dir := portalDir()
+	loginFailed := false // the portal rules go with the login: if it stays, so do they
 	if path := credentialsPath(); path != "" {
 		if _, err := os.Stat(path); err == nil {
 			plan = append(plan, removal{"login     " + tilde(path) + " (logs this laptop out of the portal first)", func() error {
 				c, err := loadCredentials()
 				if err != nil {
 					// Deleting a file paws can't read would leave this laptop's login live in the portal.
+					loginFailed = true
 					return fmt.Errorf("can't read %s (%v); kept it. Disconnect this laptop in the portal, then delete the file", tilde(path), err)
 				}
 				if c != nil && logout(true) != 0 {
+					loginFailed = true
 					return errors.New("logout failed; credentials.json is still there")
 				}
 				if err := os.Remove(path); err != nil && !errors.Is(err, os.ErrNotExist) {
@@ -250,6 +268,9 @@ func planPortal(plan []removal) []removal {
 	if dir != "" {
 		if _, err := os.Stat(dir); err == nil {
 			plan = append(plan, removal{"portal    " + tilde(dir) + " (rules and state)", func() error {
+				if loginFailed {
+					return fmt.Errorf("kept %s: the login is still there", tilde(dir))
+				}
 				if err := clearPortal(); err != nil {
 					return fmt.Errorf("removing portal rules: %w", err)
 				}
@@ -363,4 +384,10 @@ func removePackDir(packs, dir string, project bool) error {
 		}
 	}
 	return os.RemoveAll(dir)
+}
+
+// isLink reports whether path is a symbolic link.
+func isLink(path string) bool {
+	st, err := os.Lstat(path)
+	return err == nil && st.Mode()&os.ModeSymlink != 0
 }

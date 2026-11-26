@@ -291,6 +291,8 @@ func TestUninstallKeepsTheLoginWhenThePortalCannotRetireTheDevice(t *testing.T) 
 	}))
 	creds := filepath.Join(pawsHome, "credentials.json")
 	writeFile(t, creds, `{"api":"`+strings.TrimSuffix(os.Getenv("PAWS_PORTAL_API"), "/")+`","token":"tok"}`)
+	portalState := filepath.Join(pawsHome, "portal", "state.json")
+	writeFile(t, portalState, "{}")
 	for _, bad := range []int{503, 429, 403, 400} {
 		status.Store(int32(bad))
 		code, errOut := capture(t, &os.Stderr, func() int {
@@ -300,14 +302,14 @@ func TestUninstallKeepsTheLoginWhenThePortalCannotRetireTheDevice(t *testing.T) 
 		if code != 1 || !strings.Contains(errOut, "couldn't disconnect this laptop") {
 			t.Errorf("status %d: exit %d, stderr %q", bad, code, errOut)
 		}
-		kept(t, creds)
+		kept(t, creds, portalState) // the rules stay with the login
 	}
 
 	status.Store(401) // the portal already forgot this device: nothing left to retire
 	if code, out := captureStdout(t, func() int { return Uninstall([]string{"--global", "--yes"}) }); code != 0 {
 		t.Fatalf("exit %d: %s", code, out)
 	}
-	gone(t, creds)
+	gone(t, creds, portalState)
 }
 
 func TestUninstallHandlesANullPackRecord(t *testing.T) {
@@ -357,4 +359,33 @@ func TestUninstallProjectScopeInTheHomeFolder(t *testing.T) {
 		t.Errorf("exit %d:\n%s", code, out)
 	}
 	gone(t, filepath.Join(f.pawsHome, "packs"))
+}
+
+func TestUninstallKeepsSkillsWhenThePackStateIsUnreadable(t *testing.T) {
+	f := setupUninstall(t)
+	state := filepath.Join(f.repo, ".paws", "installed.yaml")
+	writeFile(t, state, "packs: [not, a, map")
+	if code, _ := capture(t, &os.Stderr, func() int {
+		c, _ := captureStdout(t, func() int { return Uninstall([]string{"--project", "--yes"}) })
+		return c
+	}); code != 1 {
+		t.Fatalf("exit %d, want 1: the skills were kept", code)
+	}
+	kept(t, state, filepath.Join(f.repo, ".claude", "skills", "git"), filepath.Join(f.repo, ".paws", "packs"))
+}
+
+// A cloned repo can commit .claude as a link to the global one; --project must not touch what is behind it.
+func TestUninstallProjectLeavesALinkedDotClaudeAlone(t *testing.T) {
+	f := setupUninstall(t)
+	os.RemoveAll(filepath.Join(f.repo, ".claude"))
+	if err := os.Symlink(filepath.Join(f.home, ".claude"), filepath.Join(f.repo, ".claude")); err != nil {
+		t.Skip(err)
+	}
+	if code, out := captureStdout(t, func() int { return Uninstall([]string{"--project", "--yes"}) }); code != 0 {
+		t.Fatalf("exit %d: %s", code, out)
+	}
+	if !hasPawsHook(filepath.Join(f.home, ".claude", "settings.json")) {
+		t.Error("--project removed the global hook through a linked .claude")
+	}
+	kept(t, filepath.Join(f.home, ".claude", "skills", "git"), filepath.Join(f.home, ".claude", "skills", "humanizer"))
 }

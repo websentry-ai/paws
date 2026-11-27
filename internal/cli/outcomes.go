@@ -154,7 +154,9 @@ func gradeCalls(cwd string, ev gate.Event, calls []outcome.Call, denies, allows 
 			ids := appliedCalls(calls, allows, ruleKey)
 			applied = func(c outcome.Call) bool { return ids[c.ID] }
 		}
-		calls[i].DeniedAt = at
+		if at.After(calls[i].DeniedAt) { // the later of the audit's deny time and the harness's own (Codex: hook end)
+			calls[i].DeniedAt = at
+		}
 		res := outcome.GradeWhere(r, calls, i, applied)
 		rec := map[string]any{"session": ev.Session, "agent": ev.Agent, "rule": d.Rule, "skill": r.Action.Skill,
 			"source": d.Source, "tool": d.Tool, "outcome": res.Outcome, "checks": res.Checks, "blocked_at": d.TS}

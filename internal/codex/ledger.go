@@ -420,6 +420,9 @@ func (t turns) TurnCalls(until time.Time) ([]outcome.Call, time.Time, error) {
 func toCall(r record) outcome.Call {
 	c := outcome.Call{ID: r.ID + "/" + strconv.Itoa(r.Part), Tool: r.Tool, Target: r.Target, Text: r.Text, Input: r.Input,
 		At: r.At, Agent: r.Agent, Denied: r.Verdict == "deny", SkillLoad: r.SkillLoad}
+	if c.Denied {
+		c.DeniedAt = r.End // the hook finished: Codex got the deny then
+	}
 	if server, tool, ok := gate.MCPParts(r.Tool); ok {
 		c.MCP = map[string]any{"server": server, "tool": tool, "class": rule.MCPAction(r.Tool)}
 	}

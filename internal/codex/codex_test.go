@@ -804,3 +804,15 @@ func TestLedgerCutReadDoesNotCountTheHeader(t *testing.T) {
 		t.Error("seven lines of ten reached the model: not loaded")
 	}
 }
+
+// A denied call's record keeps when its hook finished: grading counts from then, not from the call's start.
+func TestTurnCallsKeepWhenTheDenyLanded(t *testing.T) {
+	ledgerEnv(t)
+	observe(t, stdin(t, "PreToolUse", "t1", bashCall("c1", "git push")), gate.Decision{Verdict: gate.Deny, Reason: "no"})
+	tl := Adapter{}.Turns(parse(t, stdin(t, "Stop", "t1", nil)))
+	at, _ := tl.LastRecordAt(time.Now())
+	calls, _, err := tl.TurnCalls(at)
+	if err != nil || len(calls) != 1 || !calls[0].Denied || calls[0].DeniedAt.IsZero() || calls[0].DeniedAt.Before(calls[0].At) {
+		t.Errorf("want a denied call with DeniedAt at or after At, got %+v (%v)", calls, err)
+	}
+}

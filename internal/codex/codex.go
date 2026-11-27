@@ -191,6 +191,9 @@ func shellPatches(cmd, cwd string) []shellPatch {
 			file = m[1]
 		}
 		if file != "" {
+			if !strings.HasPrefix(file, "'") { // "$F" and $F expand; '$F' is literal
+				file = expandWith(shellVars(cmd[:at]), file)
+			}
 			run.text = readPatchFile(file, run.dir) + "\n" + strings.Join(patchBlock.FindAllString(cmd[:at], -1), "\n")
 		}
 		out = append(out, run)
@@ -228,14 +231,19 @@ func readPatchFile(p, dir string) string {
 // closes before apply_patch moves nothing.
 func patchDir(before, cwd string) string {
 	var outer []string // the folder each open subshell started in
+	vars := map[string]string{}
 	for _, part := range chainSep.Split(withoutHeredocs(before), -1) {
 		part = strings.TrimSpace(part)
+		if m := assignStep.FindStringSubmatch(part); m != nil {
+			vars[m[1]] = expandWith(vars, m[2]+m[4]) + m[3] // D=sub, D="$X/sub", D='lit'
+			continue
+		}
 		for strings.HasPrefix(part, "(") {
 			outer, part = append(outer, cwd), strings.TrimSpace(part[1:])
 		}
 		inner := strings.TrimRight(part, ") ")
 		if m := cdStep.FindStringSubmatch(inner); m != nil {
-			dir := m[1] + os.ExpandEnv(m[2]+m[3]) // "$DIR" and $DIR from the hook's environment; '$DIR' is literal
+			dir := m[1] + expandWith(vars, m[2]+m[3]) // "$DIR" and $DIR from the command, then the environment; '$DIR' is literal
 			if m[1]+m[2]+m[3] == "" && !strings.ContainsAny(m[0], `'"`) {
 				dir, _ = os.UserHomeDir() // a bare cd goes home
 			}
@@ -246,6 +254,30 @@ func patchDir(before, cwd string) string {
 		}
 	}
 	return cwd
+}
+
+// assignStep is a `VAR=value` command of its own: the value bare, single-quoted (literal) or double-quoted.
+var assignStep = regexp.MustCompile(`^([A-Za-z_][A-Za-z0-9_]*)=(?:"([^"]*)"|'([^']*)'|([^\s'"]*))$`)
+
+// expandWith expands $VAR and ${VAR} from vars, the command's own assignments, else the hook's environment.
+func expandWith(vars map[string]string, s string) string {
+	return os.Expand(s, func(k string) string {
+		if v, ok := vars[k]; ok {
+			return v
+		}
+		return os.Getenv(k)
+	})
+}
+
+// shellVars are the VAR=value assignments of the commands in before, as patchDir reads them.
+func shellVars(before string) map[string]string {
+	vars := map[string]string{}
+	for _, part := range chainSep.Split(withoutHeredocs(before), -1) {
+		if m := assignStep.FindStringSubmatch(strings.TrimSpace(part)); m != nil {
+			vars[m[1]] = expandWith(vars, m[2]+m[4]) + m[3]
+		}
+	}
+	return vars
 }
 
 // cdTo is the folder `cd dir` moves to from cwd.

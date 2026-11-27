@@ -557,3 +557,18 @@ func TestShellPatchQuotedFileName(t *testing.T) {
 		}
 	}
 }
+
+// Variables the command sets itself resolve a cd and a patch file name, as in the live run (D=sub; cd $D).
+func TestShellPatchWithShellLocalVariables(t *testing.T) {
+	h := parse(t, stdin(t, "PreToolUse", "t1", map[string]any{"tool_name": "Bash", "tool_input": map[string]any{
+		"command": "D=sub; cd $D && apply_patch <<'EOF'\n*** Begin Patch\n*** Add File: x.txt\n+hi\n*** End Patch\nEOF"}}))
+	if len(h.Calls) != 2 || h.Calls[1].Target != "/repo/sub/x.txt" {
+		t.Errorf("want /repo/sub/x.txt, got %+v", h.Calls)
+	}
+	dir := t.TempDir()
+	os.WriteFile(filepath.Join(dir, "fix.patch"), []byte("*** Begin Patch\n*** Update File: migrations/8.sql\n@@\n+y\n*** End Patch\n"), 0o644)
+	h = parse(t, stdin(t, "PreToolUse", "t1", map[string]any{"tool_name": "Bash", "cwd": dir, "tool_input": map[string]any{"command": `P=fix.patch && apply_patch < "$P"`}}))
+	if len(h.Calls) != 2 || h.Calls[1].Target != filepath.Join(dir, "migrations", "8.sql") {
+		t.Errorf(`apply_patch < "$P": want an Edit of migrations/8.sql, got %+v`, h.Calls)
+	}
+}

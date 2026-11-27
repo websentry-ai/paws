@@ -527,9 +527,11 @@ func TestShellPatchHeredocDataAndStdinFile(t *testing.T) {
 	}
 	dir := t.TempDir()
 	os.WriteFile(filepath.Join(dir, "fix.patch"), []byte("*** Begin Patch\n*** Update File: migrations/2.sql\n@@\n+y\n*** End Patch\n"), 0o644)
-	h = parse(t, stdin(t, "PreToolUse", "t1", map[string]any{"tool_name": "Bash", "cwd": dir, "tool_input": map[string]any{"command": "apply_patch < fix.patch"}}))
-	if len(h.Calls) != 2 || h.Calls[1].Tool != "Edit" || h.Calls[1].Target != filepath.Join(dir, "migrations", "2.sql") {
-		t.Errorf("apply_patch < fix.patch: want an Edit of migrations/2.sql, got %+v", h.Calls)
+	for _, cmd := range []string{"apply_patch < fix.patch", "apply_patch 0< fix.patch"} {
+		h = parse(t, stdin(t, "PreToolUse", "t1", map[string]any{"tool_name": "Bash", "cwd": dir, "tool_input": map[string]any{"command": cmd}}))
+		if len(h.Calls) != 2 || h.Calls[1].Tool != "Edit" || h.Calls[1].Target != filepath.Join(dir, "migrations", "2.sql") {
+			t.Errorf("%s: want an Edit of migrations/2.sql, got %+v", cmd, h.Calls)
+		}
 	}
 }
 

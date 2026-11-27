@@ -247,7 +247,14 @@ func Covered(reads []FileRead) bool {
 	byFile := map[string][]rule.Lines{}
 	for _, r := range reads {
 		if r.Cut { // only the first lines of the output reached the agent
-			if r.Lines.From < 0 || r.Shown < 1 {
+			if r.Lines.From < 0 { // tail -n N: its output starts N lines from the end
+				n, ok := lineCount(r.File)
+				if !ok {
+					continue
+				}
+				r.Lines.From = max(n+r.Lines.From+1, 1)
+			}
+			if r.Shown < 1 {
 				continue
 			}
 			r.Lines.To = r.Lines.From + r.Shown - 1

@@ -113,11 +113,18 @@ func Uninstall(args []string) int {
 		fmt.Fprintln(os.Stderr, "paws: this folder is not in a repo, so its project files are your global ones. Run --project from a repo, or use --global.")
 		return 2
 	}
+	// What every agent shares (the login, portal and pack rules, pack state, the skills paws installed) goes with
+	// Claude Code's part, unless an agent that stays still runs paws: then Claude Code loses only its hook. A
+	// Codex-only setup has no Claude Code hook to keep it, so it goes with Codex's.
+	claudeHooked := hasPawsHook(filepath.Join(root, ".claude", "settings.json")) ||
+		hasPawsHook(filepath.Join(root, ".claude", "settings.local.json")) || hasPawsHook(filepath.Join(hook.ConfigDir(), "settings.json"))
+	if !claude && claudeHooked {
+		staying = defaultAdapter().Title()
+	}
 	if claude && staying != "" {
 		plan, keep = planClaudeHooks(plan, keep, root, f.project, f.global, staying)
-		claude = false
 	}
-	// Claude Code's part is also what every harness shares: the login, portal and pack rules, and the pack state.
+	claude = staying == ""
 	if claude && f.global {
 		plan = planPortal(plan) // first: tier 2 steps run in plan order, and the skills below need the login gone first
 	}

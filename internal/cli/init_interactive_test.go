@@ -208,3 +208,23 @@ func TestUninstallNeedsAnAgent(t *testing.T) {
 		t.Errorf("Codex, this repo only, after the reminder:\n%s", out)
 	}
 }
+
+// A Codex-only setup, uninstalled from Codex: what all agents share goes too, as no agent still runs paws.
+func TestUninstallCodexOnlyRemovesWhatItShared(t *testing.T) {
+	_, repo := askEnv(t, "\r\ry\n", true)
+	interactive = func() bool { return false }
+	captureStdout(t, func() int { return Init([]string{"--agent", "codex", "--project"}) })
+	captureStdout(t, func() int { return Skill([]string{"--settings", filepath.Join(repo, ".claude", "settings.json")}) })
+	skill := filepath.Join(repo, ".claude", "skills", "paws")
+	if _, err := os.Stat(skill); err != nil {
+		t.Fatalf("paws skill not installed: %v", err)
+	}
+	interactive = func() bool { return true }
+	code, out := captureStdout(t, func() int { return Uninstall(nil) })
+	if code != 0 || hasPawsHook(filepath.Join(repo, ".codex", "hooks.json")) {
+		t.Fatalf("uninstall exit %d:\n%s", code, out)
+	}
+	if _, err := os.Stat(skill); err == nil {
+		t.Errorf("no agent runs paws any more: the skills paws installed go too\n%s", out)
+	}
+}

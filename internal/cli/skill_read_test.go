@@ -458,3 +458,19 @@ func TestReadingSeveralSKILLmdFilesLoadsEach(t *testing.T) {
 		t.Errorf("a cut read of several files covers none of them, got %s", out)
 	}
 }
+
+// head -v and tail -v print a "==> file <==" header, which a cut read would count as a line of the skill: they are
+// no plain read of a SKILL.md.
+func TestVerboseHeadOrTailIsNoSKILLmdRead(t *testing.T) {
+	home := portalEnv(t, http.NotFoundHandler())
+	writeRule(t, filepath.Join(home, "catch-all.md"), "name: catch-all\nevent: pre-tool\naction:\n  type: require-skill\n  skill: deployer\n")
+	md := skillMD(t, "deployer")
+	for _, cmd := range []string{"head -v -n 300 " + md, "tail -v -n +1 " + md} {
+		if !strings.Contains(gateCall(t, "Bash", map[string]any{"command": cmd}, ""), `"deny"`) {
+			t.Errorf("%s: not a plain read", cmd)
+		}
+	}
+	if strings.Contains(gateCall(t, "Bash", map[string]any{"command": "head -q -n 300 " + md}, ""), `"deny"`) {
+		t.Error("head -q prints no header: a plain read")
+	}
+}

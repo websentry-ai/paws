@@ -103,8 +103,9 @@ var (
 	readFlags = map[string]*regexp.Regexp{
 		"cat":  regexp.MustCompile(`^-[nbAeEstTuv]+$`),
 		"nl":   regexp.MustCompile(`^-ba$`),
-		"head": regexp.MustCompile(`^(-n|-[qv]|-\d+|-n\d+|--lines=\d+)$`),
-		"tail": regexp.MustCompile(`^(-n|-[qv]|-\d+|-n\+?\d+|--lines=\+?\d+)$`),
+		// No -v: its "==> file <==" header would count as a line of a cut read.
+		"head": regexp.MustCompile(`^(-n|-q|-\d+|-n\d+|--lines=\d+)$`),
+		"tail": regexp.MustCompile(`^(-n|-q|-\d+|-n\+?\d+|--lines=\+?\d+)$`),
 		"bat":  regexp.MustCompile(`^(-[pnA]+|--(plain|number|show-all)|--paging=never|--(style|color)=[a-z,-]+|-l|--language(=\S+)?)$`),
 		"sed":  regexp.MustCompile(`^(-[nEr]+|-[esu]|--(quiet|silent))$`),
 		"awk":  regexp.MustCompile(`^-F$`),

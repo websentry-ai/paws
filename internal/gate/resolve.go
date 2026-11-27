@@ -255,7 +255,7 @@ func sessionSkillContext(r *rule.Rule, ev Event) string {
 // reading the chat knows where the block came from, and names every missing skill in one sentence.
 // The instruction comes first and the reassurance last: Claude Code labels every deny "hook error", so the reason
 // says nothing is broken, but opening with that cut how often a small model retried correctly.
-// e.g. paws (rule git--git): this command needs the "git" skill. Load it with the Skill tool and follow it, then run the command again, changed if the skill says so. This is paws working as intended, nothing is broken.
+// e.g. paws (rule git--git): this command needs the "git" skill. Load and follow it, then run the command again, changed if it says so. This is paws working as intended.
 func skillReason(names, skills []string, ev Event) string {
 	label := "rule " + names[0]
 	if len(names) > 1 {

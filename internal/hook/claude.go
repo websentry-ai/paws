@@ -99,13 +99,13 @@ func readAlso(skills []gate.Skill) string {
 			files = append(files, s.File)
 		}
 	}
-	switch {
-	case len(files) == 0:
+	switch len(files) {
+	case 0:
 		return ""
-	case len(skills) == 1:
-		return " Reading its SKILL.md in full also works: " + files[0] + "."
+	case 1:
+		return " Reading " + files[0] + " in full also works."
 	}
-	return " Reading a skill's SKILL.md in full also works: " + strings.Join(files, ", ") + "."
+	return " Reading " + strings.Join(files[:len(files)-1], ", ") + " and " + files[len(files)-1] + " in full also works."
 }
 
 func (Claude) HookFile(global bool, root string) string {

@@ -49,7 +49,7 @@ func TestCodexRequireSkillRound(t *testing.T) {
 	}
 	runGate(t, codexCall("UserPromptSubmit", "t1", nil))
 	r := reasonOf(t, runGate(t, codexCall("PreToolUse", "t1", bash("c1", "git push"))))
-	want := `paws (rule push): this command needs the "git" skill. Read ` + md + ` in full on its own, follow it, then run the command again, changed if the skill says so. This is paws working as intended, nothing is broken`
+	want := `paws (rule push): this command needs the "git" skill. Read ` + md + ` in full, follow it, then run the command again, changed if it says so. This is paws working as intended`
 	if r != want {
 		t.Fatalf("deny:\n got %q\nwant %q", r, want)
 	}

@@ -624,16 +624,15 @@ func (Adapter) SkillDirs(cwd string) []string {
 // LoadSkills tells Codex to read each SKILL.md in full and follow it, then make the call again, changed if the skill
 // says so. Codex has no Skill tool, and told to retry "this exact command" it re-runs the blocked call unchanged.
 func (Adapter) LoadSkills(skills []gate.Skill, noun string) string {
-	it, says := "it", "the skill says"
+	it, says := "it", "it says"
 	if len(skills) > 1 {
-		it, says = "them", "the skills say"
+		it, says = "them", "they say"
 	}
 	verb := "make the " + noun
 	if noun == "command" {
 		verb = "run the command"
 	}
-	// "On its own": a read chained with other commands isn't a load, and Codex likes to chain.
-	return fmt.Sprintf("Read %s in full on its own, follow %s, then %s again, changed if %s so. %s", readList(skills), it, verb, says, gate.Reassurance)
+	return fmt.Sprintf("Read %s in full, follow %s, then %s again, changed if %s so. %s", readList(skills), it, verb, says, gate.Reassurance)
 }
 
 func (Adapter) LoadAtStart(s gate.Skill) string {

@@ -228,7 +228,9 @@ func ReadOf(tool, target string, input map[string]any, cwd string, exists bool) 
 	p = filepath.Clean(p)
 	dir := filepath.Dir(p)
 	skill := filepath.Base(dir)
-	if filepath.Base(p) != "SKILL.md" || filepath.Base(filepath.Dir(dir)) != "skills" || skill == "skills" {
+	if filepath.Base(p) != "SKILL.md" || filepath.Base(filepath.Dir(dir)) != "skills" || skill == "skills" ||
+		strings.ContainsAny(skill, "*?[") { // skills/*/SKILL.md is many files, no one skill
+
 		return FileRead{}, false
 	}
 	if exists {

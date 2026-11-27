@@ -58,7 +58,7 @@ func ProjectTarget(root string) Target {
 type Installed struct {
 	Bindings []string          `yaml:"bindings"`
 	Picks    map[string]string `yaml:"picks,omitempty"`
-	Skills   []string          `yaml:"skills,omitempty"` // skills paws installed for this pack
+	Skills   []string          `yaml:"skills,omitempty"` // skills this pack requires; removing it removes paws's unedited copies
 	At       string            `yaml:"at"`
 }
 
@@ -206,6 +206,7 @@ func Add(c *catalog.Catalog, name string, bindings []string, picks map[string]st
 
 	// Skills first: a binding must never be live before the skill it requires can load.
 	done := map[string]bool{}
+	var need []string // every skill the bindings require, kept ones too: Remove takes paws's copies of each
 	for _, rel := range bindings {
 		b := c.Bindings[rel]
 		if b.Action.Type != "require-skill" || done[b.Action.Skill] {
@@ -235,8 +236,9 @@ func Add(c *catalog.Catalog, name string, bindings []string, picks map[string]st
 			}
 			res.Installed = append(res.Installed, b.Action.Skill)
 		} else {
-			res.Kept = append(res.Kept, filepath.Join(t.SkillsDir, b.Action.Skill))
+			res.Kept = append(res.Kept, KeptCopies(append([]string{t.SkillsDir}, t.Mirrors...), b.Action.Skill)...)
 		}
+		need = append(need, b.Action.Skill)
 	}
 
 	dest := InstallDir(t, name)
@@ -277,7 +279,7 @@ func Add(c *catalog.Catalog, name string, bindings []string, picks map[string]st
 			}
 		}
 	}
-	st.Packs[name] = &Installed{Bindings: bindings, Picks: picks, Skills: res.Installed, At: time.Now().UTC().Format(time.RFC3339)}
+	st.Packs[name] = &Installed{Bindings: bindings, Picks: picks, Skills: need, At: time.Now().UTC().Format(time.RFC3339)}
 	if err := st.save(t.StateFile); err != nil {
 		return nil, err
 	}

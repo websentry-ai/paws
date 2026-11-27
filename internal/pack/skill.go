@@ -232,6 +232,18 @@ func pawsOwned(dir string) bool {
 	return err == nil
 }
 
+// KeptCopies are the <dir>/<name> folders, of dirs, that hold a skill paws may not replace: the user's own, or a paws
+// copy edited since.
+func KeptCopies(dirs []string, name string) []string {
+	var kept []string
+	for _, d := range dirs {
+		if p := filepath.Join(d, name); exists(p) && !replaceable(p) {
+			kept = append(kept, p)
+		}
+	}
+	return kept
+}
+
 // FromPaws reports whether paws installed the skill directory dir: it carries the install marker.
 func FromPaws(dir string) bool { return pawsOwned(dir) }
 

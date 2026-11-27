@@ -395,7 +395,7 @@ func prepareSkill(s portalSkill, stores []string, kept *[]string) (string, error
 	case err == nil:
 		if outcome == pack.BundledKept {
 			// As with paws add, a copy the user owns or edited is not copied on as paws's.
-			*kept = append(*kept, filepath.Join(skillsDir, s.Name))
+			*kept = append(*kept, pack.KeptCopies(stores, s.Name)...)
 			return "", nil
 		}
 		// The other harnesses that run paws read their own folders: each gets a copy.

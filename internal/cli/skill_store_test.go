@@ -516,3 +516,45 @@ func TestClaudeAfterCodexReadsTheUsersCopy(t *testing.T) {
 		t.Errorf("deny %q", r)
 	}
 }
+
+// The folder paws installs into moves to Claude Code's, where the user has their own copy: the pack still owns the
+// copy paws made for Codex, so remove takes it, and the user's stays.
+func TestRemoveTakesTheCodexCopyAfterTheStoreMoves(t *testing.T) {
+	home, _ := storeEnv(t)
+	mustRun(t, Init, "--agent", "codex", "--global")
+	mustRun(t, Add, "writing")
+	mine := ownSkill(t, filepath.Join(home, ".claude", "skills"), "humanizer", "my own humanizer\n")
+	mustRun(t, Init, "--global")
+	if out := mustRun(t, Add, "writing"); !strings.Contains(out, "humanizer    already in ~/.claude/skills/humanizer, not from paws; left as is") {
+		t.Errorf("add output:\n%s", out)
+	}
+	mustRun(t, Remove, "writing")
+	if isThere(filepath.Join(home, ".agents", "skills", "humanizer")) {
+		t.Error("the copy paws made for Codex outlived its pack")
+	}
+	if data, _ := os.ReadFile(mine); string(data) != "my own humanizer\n" {
+		t.Errorf("the user's copy: %q", data)
+	}
+}
+
+// With the user's own copy in both agents' folders, paws add and sync name both.
+func TestKeptCopiesAreNamedInEveryFolder(t *testing.T) {
+	home, srv := syncEnv(t)
+	t.Setenv("CODEX_HOME", "")
+	userHome := os.Getenv("HOME")
+	mustRun(t, Init, "--agent", "claude,codex", "--global")
+	for _, d := range []string{filepath.Join(userHome, ".claude", "skills"), filepath.Join(userHome, ".agents", "skills")} {
+		ownSkill(t, d, "humanizer", "my own humanizer\n")
+	}
+	srv.configHash = "h1"
+	srv.config = configJSON(t, "h1", humanizerSkill(fakeUpstream(t, "# humanizer\n")))
+	out := mustRun(t, Sync)
+	for _, want := range []string{"humanizer    already in ~/.claude/skills/humanizer, not from paws", "humanizer    already in ~/.agents/skills/humanizer, not from paws"} {
+		if !strings.Contains(out, want) {
+			t.Errorf("sync output lacks %q:\n%s", want, out)
+		}
+	}
+	if len(portalFiles(t, home)) != 1 {
+		t.Error("the rule is written")
+	}
+}

@@ -27,6 +27,12 @@ var (
 var fileTools = map[string]bool{"Read": true, "Write": true, "Edit": true, "NotebookEdit": true}
 
 // Matches reports whether this rule applies to a call by tool, against target (the extracted command or prompt).
+// MatchesAnyFile reports whether r is a file rule for tool: it matches a call to some file of that tool whose name
+// paws can't tell, so the call is gated, not let through.
+func (r *Rule) MatchesAnyFile(tool string) bool {
+	return r.fileRe != nil && fileTools[tool] && matchTool(r.Matcher.Tool, tool) && r.Event != "pre-commit" && r.Event != "pre-push"
+}
+
 func (r *Rule) Matches(tool, target string) bool {
 	if !matchTool(r.Matcher.Tool, tool) {
 		return false

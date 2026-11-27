@@ -15,7 +15,7 @@ import (
 
 // Applies reports whether r matches ev and every `when:` condition holds.
 func Applies(r *rule.Rule, ev Event) bool {
-	if ev.Kind == "" || rule.Kind(r.Event) != ev.Kind || !r.Matches(ev.Tool, ev.Target) {
+	if ev.Kind == "" || rule.Kind(r.Event) != ev.Kind || !r.Matches(ev.Tool, ev.Target) && !(ev.AnyFile && r.MatchesAnyFile(ev.Tool)) {
 		return false
 	}
 	for _, c := range r.When {

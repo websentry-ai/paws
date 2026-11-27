@@ -17,8 +17,8 @@ type Lines struct{ From, To int }
 // AllLines is a read of the whole file.
 var AllLines = Lines{From: 1}
 
-// PlainRead returns the one file a Bash line does nothing but print, and the lines it prints: cat, head, tail, nl,
-// less, more or bat on it, a sed -n print of a line range or an awk print of it, alone on the line. A line that
+// PlainRead returns the one file a Bash line does nothing but print, and the lines it prints: cat, head, tail, nl
+// or bat on it, a sed -n print of a line range or an awk print of it, alone on the line. A line that
 // chains, pipes, redirects, assigns or expands anything is not a plain read, so `cat f && git push` never passes for
 // one; nor is a read whose lines can't be told (head -c, an awk program that filters).
 func PlainRead(line string) (string, Lines, bool) {
@@ -95,16 +95,14 @@ var (
 		"nl":   regexp.MustCompile(`^-ba$`),
 		"head": regexp.MustCompile(`^(-n|-[qv]|-\d+|-n\d+|--lines=\d+)$`),
 		"tail": regexp.MustCompile(`^(-n|-[qv]|-\d+|-n\+?\d+|--lines=\+?\d+)$`),
-		"less": regexp.MustCompile(`^-[RNSXF]+$`),
-		"more": regexp.MustCompile(`^-[RNSXF]+$`),
 		"bat":  regexp.MustCompile(`^(-[pnA]+|--(plain|number|show-all)|--paging=never|--(style|color)=[a-z,-]+|-l|--language(=\S+)?)$`),
 		"sed":  regexp.MustCompile(`^(-[nEr]+|-[esu]|--(quiet|silent))$`),
 		"awk":  regexp.MustCompile(`^-F$`),
 	}
 	// lineCount is a head or tail line count: N, or for tail +K (from line K on).
 	lineCount = regexp.MustCompile(`^(\+?)(\d+)$`)
-	readers   = map[string]bool{"cat": true, "head": true, "tail": true, "nl": true, "less": true, "more": true,
-		"bat": true, "batcat": true, "sed": true, "awk": true}
+	// No less or more: they run $LESSOPEN, set in the environment where the line can't show it.
+	readers = map[string]bool{"cat": true, "head": true, "tail": true, "nl": true, "bat": true, "batcat": true, "sed": true, "awk": true}
 )
 
 // quiet is a sed flag that holds -n (alone or with -E/-r), or its long form: sed prints only what the script says.

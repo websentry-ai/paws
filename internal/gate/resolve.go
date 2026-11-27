@@ -29,6 +29,9 @@ type Event struct {
 	// SkillWhole is set when this call loads the skill on its own: the Skill tool, or a read of the whole SKILL.md
 	// (a chunk of it is still a skill read, never gated, but loads nothing alone).
 	SkillWhole bool
+	// AnyFile is set on a file call whose files paws can't tell (a patch file it can't read): every file rule for
+	// the tool matches it, whatever its glob.
+	AnyFile bool
 	Log        Session // the session's past; nil reads Transcript and Own as Claude Code logs
 	Harness    Harness // skill folders and deny wording; nil is SkillTool
 }

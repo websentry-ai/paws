@@ -395,3 +395,30 @@ func TestSkillLoadBeforeTheSKILLmdChangedIsNoLoad(t *testing.T) {
 		t.Error("the SKILL.md changed after the load: the call needs a new load")
 	}
 }
+
+// A reader that can run a command or write a file is no plain read of SKILL.md: a catch-all rule gates it like any
+// command. Only the print forms pass.
+func TestCommandRunningReadsOfSKILLmdAreGated(t *testing.T) {
+	home := portalEnv(t, http.NotFoundHandler())
+	writeRule(t, filepath.Join(home, "catch-all.md"), "name: catch-all\nevent: pre-tool\naction:\n  type: require-skill\n  skill: deployer\n")
+	md := skillMD(t, "deployer")
+	gated := func(cmd string) bool {
+		return strings.Contains(gateCall(t, "Bash", map[string]any{"command": cmd}, ""), `"deny"`)
+	}
+	for _, cmd := range []string{
+		"sed -n '1,5p;e touch x' " + md, "sed -n '1e id' " + md, "sed -n 'w out' " + md, "sed -n 'W out' " + md,
+		"sed -n 's/a/id/e' " + md, "sed -n -f s.sed " + md, "sed -n -e 1p -e 'w out' " + md,
+		`awk '{system("id")}' ` + md, `awk '{print | "sh"}' ` + md, `awk '{print > "out"}' ` + md, `awk 'BEGIN{system("id")}' ` + md,
+		"LESSOPEN='|id %s' less " + md, "less " + md, "more " + md, "bat --pager=sh " + md, "bat --pager sh " + md,
+		"cat " + md + " > out", "cat " + md + " 2>/dev/null", "FOO=1 cat " + md, "PAGER=sh bat " + md,
+	} {
+		if !gated(cmd) {
+			t.Errorf("not a plain read, so it is gated: %s", cmd)
+		}
+	}
+	for _, cmd := range []string{"sed -n '1,240p' " + md, "sed -n '10,$p' " + md, "awk 'NR<=200' " + md, "bat -p " + md, "cat " + md} {
+		if gated(cmd) {
+			t.Errorf("a plain read passes: %s", cmd)
+		}
+	}
+}

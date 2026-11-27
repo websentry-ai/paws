@@ -358,3 +358,28 @@ func TestCodexFailedCallsLogNoAction(t *testing.T) {
 		t.Errorf("a call that ran logs tool_result then its action, got %v", kinds)
 	}
 }
+
+// A patch file paws can't read (a link, too big, not there) has unknown files: every file rule gates the call. A
+// regular file is read and gated by the files it names.
+func TestCodexUnreadablePatchFileIsGated(t *testing.T) {
+	home := portalEnv(t, http.NotFoundHandler())
+	writeRule(t, filepath.Join(home, "mig.md"), "name: mig\nevent: pre-tool\nmatcher:\n  tool: Write|Edit\n  file_glob: \"migrations/**\"\naction:\n  type: require-skill\n  skill: db\n")
+	cwd := os.Getenv("HOME") // codexCall's cwd
+	patch := "*** Begin Patch\n*** Update File: migrations/1.sql\n@@\n+x\n*** End Patch\n"
+	other := "*** Begin Patch\n*** Update File: docs/a.md\n@@\n+x\n*** End Patch\n"
+	writeFile(t, filepath.Join(cwd, "real.patch"), patch)
+	writeFile(t, filepath.Join(cwd, "docs.patch"), other)
+	os.Symlink(filepath.Join(cwd, "real.patch"), filepath.Join(cwd, "link.patch"))
+	writeFile(t, filepath.Join(cwd, "big.patch"), other+strings.Repeat("+x\n", 3<<20))
+	gated := func(cmd string) bool {
+		return reasonOf(t, runGate(t, codexCall("PreToolUse", "t1", map[string]any{"tool_name": "Bash", "tool_use_id": "c1", "tool_input": map[string]any{"command": cmd}}))) != ""
+	}
+	for _, cmd := range []string{"apply_patch < link.patch", "apply_patch < big.patch", "apply_patch < nope.patch", "cat nope.patch | apply_patch"} {
+		if !gated(cmd) {
+			t.Errorf("%s: paws can't read the patch, so the migration rule gates it", cmd)
+		}
+	}
+	if !gated("apply_patch < real.patch") || gated("apply_patch < docs.patch") {
+		t.Error("a readable patch file is gated by the files it names")
+	}
+}

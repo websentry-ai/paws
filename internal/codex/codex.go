@@ -6,6 +6,7 @@ import (
 	"cmp"
 	"encoding/json"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -65,6 +66,7 @@ type parsed struct {
 type call struct {
 	tool, target, text string
 	input              map[string]any
+	anyFile            bool // the files are unknown: a patch from a file paws couldn't read
 }
 
 // Claims a hook call that names a turn and a model (Claude Code sends neither on a tool call), or whose transcript
@@ -94,7 +96,7 @@ func (a Adapter) Parse(stdin []byte) (*harness.Hook, error) {
 	h := &harness.Hook{Event: in.HookEventName, Cwd: in.CWD, Source: in.Source, Native: p}
 	for _, c := range p.calls {
 		ev := base
-		ev.Tool, ev.Target = c.tool, c.target
+		ev.Tool, ev.Target, ev.AnyFile = c.tool, c.target, c.anyFile
 		if s, ok := ev.Log.(session); ok && c.tool == "Agent" {
 			s.spawning = true // this call is a spawn the ledger doesn't hold yet
 			if in.HookEventName == "PreToolUse" && in.AgentID == "" && in.TurnID != "" && in.ToolUseID != "" {
@@ -187,6 +189,9 @@ func canonical(in *Input) []call {
 					}
 				}
 			}
+			if sp.unread != "" { // files paws can't name: an edit every file rule gates
+				calls = append(calls, call{tool: "Edit", target: sp.unread, text: "", anyFile: true, input: map[string]any{"file_path": sp.unread}})
+			}
 		}
 		return calls
 	case in.ToolName == "apply_patch":
@@ -231,6 +236,8 @@ type shellPatch struct {
 	text string
 	dir  string   // where it runs if every cd before it ran
 	dirs []string // every folder it may run in: dir, and each folder the commands before it pass through
+	// unread is the patch file paws couldn't read (a link, too big, not there, not a file): its files are unknown.
+	unread string
 }
 
 // applyPatchCmd finds apply_patch (or its applypatch alias) as a word anywhere in the command, by path too
@@ -273,8 +280,15 @@ func shellPatches(cmd, cwd string) []shellPatch {
 				file = expandWith(shellVars(cmd[:at]), file)
 			}
 			texts := patchBlock.FindAllString(cmd[:at], -1)
+			read, refused := false, false
 			for _, d := range run.dirs { // the file from each folder the patch may run in
-				texts = append(texts, readPatchFile(file, d))
+				text, there, ok := readPatchFile(file, d)
+				texts = append(texts, text)
+				read, refused = read || ok, refused || there && !ok
+			}
+			// Not read and not written earlier in the command, or refused somewhere: its files are unknown.
+			if refused || !read && !patchBlock.MatchString(cmd[:at]) {
+				run.unread = strings.Trim(file, `'"`)
 			}
 			run.text = strings.Join(texts, "\n")
 		}
@@ -292,20 +306,33 @@ var pipedFrom = regexp.MustCompile(`(?:^|[;&(\n])[ \t]*cat[ \t]+('[^']*'|"[^"]*"
 // patchFromFile is an apply_patch that reads its patch from a file on stdin: apply_patch < fix.patch or 0< (not <<).
 var patchFromFile = regexp.MustCompile(`^apply_?patch[ \t]*0?<[ \t]*('[^']*'|"[^"]*"|[^<\s'"]\S*)`)
 
-// maxPatchFile bounds the patch file paws reads: far past any patch an agent writes, short of exhausting memory.
-const maxPatchFile = 256 << 20
+// maxPatchFile bounds the patch file paws reads: past any patch an agent writes, small enough for every hook.
+const maxPatchFile = 4 << 20
 
-// readPatchFile is the patch in the file at p (relative to dir), "" when it can't be read.
-func readPatchFile(p, dir string) string {
+// readPatchFile is the patch in the file at p (relative to dir). there is whether something is at p; ok is whether
+// paws read it: a regular file (not a link) of at most maxPatchFile bytes.
+func readPatchFile(p, dir string) (text string, there, ok bool) {
 	p = strings.Trim(p, `'"`)
 	if !filepath.IsAbs(p) {
 		p = filepath.Join(dir, p)
 	}
-	if st, err := os.Stat(p); err != nil || !st.Mode().IsRegular() || st.Size() > maxPatchFile {
-		return ""
+	st, err := os.Lstat(p)
+	if err != nil {
+		return "", false, false
 	}
-	data, _ := os.ReadFile(p)
-	return string(data)
+	if !st.Mode().IsRegular() || st.Size() > maxPatchFile {
+		return "", true, false
+	}
+	f, err := os.Open(p)
+	if err != nil {
+		return "", true, false
+	}
+	defer f.Close()
+	data, err := io.ReadAll(io.LimitReader(f, maxPatchFile+1))
+	if err != nil || len(data) > maxPatchFile {
+		return "", true, false
+	}
+	return string(data), true, true
 }
 
 // patchDir is where a shell patch runs, given the command before it: the hook's cwd, moved by each `cd`, so a

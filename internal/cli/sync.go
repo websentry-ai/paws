@@ -42,8 +42,24 @@ type actionUpload struct {
 	MCP     *gate.MCPCall `json:"mcp,omitempty"`
 }
 
+// outcomeUpload is what `paws sync` uploads about one graded block (see outcomes.go): the skill, the rule's action,
+// the outcome, each expect check's result and what Claude ran after the block (a command, redacted).
+type outcomeUpload struct {
+	Kind      string          `json:"kind"` // "outcome"
+	TS        string          `json:"ts"`
+	BlockedAt string          `json:"blocked_at"`
+	Skill     string          `json:"skill"`
+	Action    string          `json:"action_id,omitempty"` // the catalog or portal action, from a managed rule's name
+	Tool      string          `json:"tool,omitempty"`
+	Outcome   string          `json:"outcome"`
+	Checks    map[string]bool `json:"checks,omitempty"`
+	// What Claude ran after the block (the retry, or the other route): a redacted Bash command, else the tool and
+	// its file or MCP tool. Empty for a stopped block.
+	RetryCommand string `json:"retry_command,omitempty"`
+}
+
 type syncBody struct {
-	Records           []any      `json:"records"` // ruleUpload and actionUpload
+	Records           []any      `json:"records"` // ruleUpload, actionUpload and outcomeUpload
 	AppliedConfigHash *string    `json:"applied_config_hash"`
 	Inventory         *inventory `json:"inventory"`
 }
@@ -290,7 +306,8 @@ func pendingSync(paths []string, cur syncCursor) []pendingRecord {
 				continue
 			}
 			isRule := r.Rule != "" && (r.Verdict == "allow" || r.Verdict == "deny")
-			if !isRule && (r.Event != "action" || r.Action == "") {
+			isOutcome := r.Event == "outcome" && r.Outcome != "" && r.Skill != ""
+			if !isRule && !isOutcome && (r.Event != "action" || r.Action == "") {
 				continue
 			}
 			key := r.Rule + "|" + r.Session
@@ -303,7 +320,9 @@ func pendingSync(paths []string, cur syncCursor) []pendingRecord {
 			if after.TS < cur.TS || after.TS == cur.TS && after.N <= cur.N {
 				continue
 			}
-			if !isRule {
+			if isOutcome {
+				out = append(out, pendingRecord{rec: toOutcomeUpload(r), after: after})
+			} else if !isRule {
 				out = append(out, pendingRecord{rec: toActionUpload(r), after: after})
 			} else if rec, ok := toRuleUpload(r, already, rules); ok {
 				out = append(out, pendingRecord{rec: rec, after: after})
@@ -347,6 +366,26 @@ func toActionUpload(r auditRecord) actionUpload {
 	}
 	if filepath.IsAbs(rec.File) || rec.File == ".." || strings.HasPrefix(rec.File, "../") {
 		rec.File = ""
+	}
+	return rec
+}
+
+// toOutcomeUpload passes an outcome record through, with the trigger's action id for catalog and portal rules, so the
+// portal can show which trigger the outcome belongs to.
+func toOutcomeUpload(r auditRecord) outcomeUpload {
+	rec := outcomeUpload{Kind: "outcome", TS: r.TS, BlockedAt: r.BlockedAt, Skill: r.Skill, Tool: r.Tool,
+		Outcome: r.Outcome, Checks: r.Checks, RetryCommand: r.RetryCommand}
+	switch {
+	case managed(r.Source): // a portal rule is named <skill>--<action id>
+		// The skill's own name comes off the front, so a `--` inside the skill's name or the action id splits nowhere.
+		name, _, _ := strings.Cut(r.Skill, "@")
+		if id, ok := strings.CutPrefix(r.Rule, name+"--"); ok {
+			rec.Action = id
+		} else if _, id, ok := strings.Cut(r.Rule, "--"); ok {
+			rec.Action = id
+		}
+	case fromCatalog(r.Source): // a catalog binding's name is its action id (see index_portal.go)
+		rec.Action = r.Rule
 	}
 	return rec
 }

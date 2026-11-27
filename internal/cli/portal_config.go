@@ -67,6 +67,28 @@ type portalAction struct {
 	MCPAction    string `json:"mcp_action,omitempty"`
 	// Example is a call the trigger fires on, from the catalog's reviewed cases; the website shows it.
 	Example string `json:"example,omitempty"`
+	// Expect is what should follow a block (rule.Expect), carried into the rule file so the laptop grades it.
+	Expect portalChecks `json:"expect,omitempty"`
+}
+
+// portalChecks decodes an action's checks one by one: a check this paws can't decode (a newer shape, say) is
+// dropped, so it never stops the rest of the config from applying. A check only measures; the rule still enforces.
+type portalChecks []rule.Expect
+
+func (c *portalChecks) UnmarshalJSON(data []byte) error {
+	var raw []json.RawMessage
+	if json.Unmarshal(data, &raw) != nil {
+		*c = nil
+		return nil
+	}
+	*c = nil
+	for _, r := range raw {
+		var e rule.Expect
+		if json.Unmarshal(r, &e) == nil {
+			*c = append(*c, e)
+		}
+	}
+	return nil
 }
 
 // applyResult is what applying one config did.
@@ -447,6 +469,7 @@ type managedRule struct {
 		OnMiss string `yaml:"on_miss,omitempty"`
 		Digest string `yaml:"digest,omitempty"`
 	} `yaml:"action"`
+	Expect []rule.Expect `yaml:"expect,omitempty"`
 }
 
 // managedRuleFile renders one action as a require-skill rule, the label as its body, and checks
@@ -459,16 +482,28 @@ func managedRuleFile(skill, name string, a portalAction, digest, dir string) ([]
 	}
 	m.Matcher.Tool, m.Matcher.CommandRegex, m.Matcher.FileGlob, m.Matcher.MCPAction = a.Tool, a.CommandRegex, a.FileGlob, a.MCPAction
 	m.Action.Type, m.Action.Skill = rule.ActionRequireSkill, skill
+	m.Expect = []rule.Expect(a.Expect)
 	if digest != "" {
 		m.Action.OnMiss, m.Action.Digest = rule.OnMissDigest, digest
 	}
-	fm, err := yaml.Marshal(m)
-	if err != nil {
-		return nil, err
+	render := func() ([]byte, *rule.Rule, error) {
+		fm, err := yaml.Marshal(m)
+		if err != nil {
+			return nil, nil, err
+		}
+		label := strings.Join(strings.Fields(a.Label), " ")
+		data := []byte("---\n# Written by paws from the portal config; the next sync replaces edits.\n" + string(fm) + "---\n" + label + "\n")
+		r, err := rule.Parse(data, filepath.Join(dir, name+".md"))
+		return data, r, err
 	}
-	label := strings.Join(strings.Fields(a.Label), " ")
-	data := []byte("---\n# Written by paws from the portal config; the next sync replaces edits.\n" + string(fm) + "---\n" + label + "\n")
-	r, err := rule.Parse(data, filepath.Join(dir, name+".md"))
+	data, r, err := render()
+	if (err != nil || r.ExpectErr != nil) && len(m.Expect) > 0 {
+		// Checks this paws can't read (a newer catalog's, say) only measure: keep the ones it can, and keep enforcing.
+		if m.Expect = rule.UsableExpect(m.Expect); len(m.Expect) == 0 {
+			m.Expect = nil
+		}
+		data, r, err = render()
+	}
 	if err != nil {
 		return nil, err
 	}

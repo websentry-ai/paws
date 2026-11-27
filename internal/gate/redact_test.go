@@ -3,6 +3,7 @@ package gate
 import (
 	"strings"
 	"testing"
+	"unicode/utf8"
 )
 
 func TestRedact(t *testing.T) {
@@ -50,5 +51,30 @@ func TestRedact(t *testing.T) {
 				t.Errorf("redact(%q) = %q, expected %q to survive for readability", c.in, got, c.wantKept)
 			}
 		})
+	}
+}
+
+func TestDescribeCall(t *testing.T) {
+	cwd := t.TempDir()
+	long := "echo " + strings.Repeat("é", 3000)
+	cases := []struct {
+		name string
+		ev   Event
+		want string
+	}{
+		{"bash is redacted", Event{Tool: "Bash", Target: `AWS_SECRET_ACCESS_KEY=abc123XYZ aws s3 ls`}, "AWS_SECRET_ACCESS_KEY="},
+		{"file in the repo", Event{Tool: "Edit", Target: cwd + "/src/a.go", Cwd: cwd}, "Edit src/a.go"},
+		{"file outside the repo has no path", Event{Tool: "Write", Target: "/etc/hosts", Cwd: cwd}, "Write"},
+		{"mcp names server and tool", Event{Tool: "mcp__claude_ai_Gmail__create_draft"}, "MCP gmail create-draft"},
+		{"other tool", Event{Tool: "WebFetch", Target: "https://x.test/?token=1"}, "WebFetch"},
+	}
+	for _, c := range cases {
+		got := DescribeCall(c.ev)
+		if !strings.HasPrefix(got, c.want) || strings.Contains(got, "abc123XYZ") || strings.Contains(got, "token") {
+			t.Errorf("%s: %q, want prefix %q and no secret", c.name, got, c.want)
+		}
+	}
+	if got := DescribeCall(Event{Tool: "Bash", Target: long}); len(got) > 4096 || !utf8.ValidString(got) {
+		t.Errorf("long command: %d bytes, valid %v; want at most 4096 and valid UTF-8", len(got), utf8.ValidString(got))
 	}
 }

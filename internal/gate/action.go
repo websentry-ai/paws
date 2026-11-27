@@ -31,10 +31,11 @@ type MCPCall struct {
 	Class  string `json:"class,omitempty"`
 }
 
-// maxCommand bounds an uploaded command.
-const maxCommand = 500
+// maxCommand bounds an uploaded command: 4 KB holds about 98% of real Bash commands and commit commands whole
+// (a commit's trailers sit at the end of a long message, past what 500 bytes kept).
+const maxCommand = 4096
 
-// RedactCommand masks secrets in a command and cuts it to 500 bytes: the form a command
+// RedactCommand masks secrets in a command and cuts it to maxCommand bytes: the form a command
 // leaves the machine in.
 func RedactCommand(s string) string {
 	s = redact(s)
@@ -46,6 +47,25 @@ func RedactCommand(s string) string {
 		cut--
 	}
 	return s[:cut]
+}
+
+// DescribeCall is the text paws keeps for the call Claude made after a block: a Bash command, redacted and cut like
+// any uploaded command; for any other tool, its name and the repo-relative file or the MCP server and tool, never
+// the call's input.
+func DescribeCall(ev Event) string {
+	switch {
+	case ev.Tool == "Bash":
+		return RedactCommand(ev.Target)
+	case fileTool(ev.Tool):
+		if rel := repoRelative(ev.Target, ev.Cwd); rel != "" {
+			return ev.Tool + " " + rel
+		}
+	default:
+		if server, tool, ok := MCPParts(ev.Tool); ok {
+			return "MCP " + server + " " + tool
+		}
+	}
+	return ev.Tool
 }
 
 // TargetHash identifies a call's full input (the command, path, or MCP input as JSON) in the local audit log without

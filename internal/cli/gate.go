@@ -7,6 +7,7 @@ import (
 	"io"
 	"os"
 	"strings"
+	"time"
 
 	"github.com/websentry-ai/paws/internal/gate"
 	"github.com/websentry-ai/paws/internal/hook"
@@ -39,10 +40,12 @@ func Gate() (code int) {
 	// Telemetry-only events: count and leave. No rules run on a prompt, after a tool or at turn end.
 	switch in.HookEventName {
 	case "Stop":
+		stoppedAt := time.Now()
 		gate.LogTelemetry("turn_end", ev, nil)
 		allow()
-		wrote = true       // a panic below must not print a second decision
-		syncInHook(in.CWD) // the async UserPromptSubmit and Stop hooks are the only hooks that use the network
+		wrote = true                  // a panic below must not print a second decision
+		gradeTurn(&in, ev, stoppedAt) // what followed each block this turn; before the sync, so it goes up with it
+		syncInHook(in.CWD)            // the async UserPromptSubmit and Stop hooks are the only hooks that use the network
 		return 0
 	case "UserPromptSubmit":
 		// Async, so Claude starts on the prompt without waiting. The prompt itself is never read or kept;
@@ -70,7 +73,7 @@ func Gate() (code int) {
 		problems = append(problems, fmt.Sprintf("%d rule file(s) failed to parse", n))
 	}
 	if n := len(res.Warns); n > 0 {
-		problems = append(problems, fmt.Sprintf("%d rule file(s) have unknown keys", n))
+		problems = append(problems, fmt.Sprintf("%d rule file(s) have warnings (unknown keys or expect checks)", n))
 	}
 	if len(problems) > 0 {
 		out.SystemMessage = "paws: " + strings.Join(problems, ", ") + " (run `unbound-paws explain` for details)"

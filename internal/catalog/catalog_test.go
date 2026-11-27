@@ -204,3 +204,17 @@ func TestPickOneOptionsMayShareABinding(t *testing.T) {
 		t.Errorf("options installing separately may share a binding, got %v", probs)
 	}
 }
+
+// A check this paws can't compile: loading keeps the binding (it still enforces, without the check), and publishing
+// reports it.
+func TestABadCheckBlocksPublishingNotLoading(t *testing.T) {
+	root := goodRoot(t)
+	write(t, filepath.Join(root, "catalog/writing/check.md"), strings.Replace(binding("check", "x"), "---\n", "---\nexpect:\n  - id: c\n    when: never\n    if: 'call.text matches ('\n", 1))
+	c, probs := Validate(root)
+	if len(probs) != 0 || c.Bindings["writing/check.md"] == nil {
+		t.Fatalf("loading dropped the binding: %v", probs)
+	}
+	if got := CheckProblems(c); len(got) != 1 || !strings.Contains(got[0].Msg, "expect c: bad if") {
+		t.Errorf("publish problems %v; want the bad check", got)
+	}
+}

@@ -1,0 +1,306 @@
+// Package outcome grades what happened after paws blocked a call: by the end of that turn, did Claude retry the same
+// call, fix it, take another route or stop, and did the rule's expect checks pass? It knows nothing about any agent:
+// an adapter (hook.TurnCalls for Claude Code) turns the agent's own log of the turn into Calls.
+package outcome
+
+import (
+	"reflect"
+	"regexp"
+	"strings"
+	"time"
+
+	"github.com/websentry-ai/paws/internal/rule"
+)
+
+// Call is one tool call of the turn, in the shape expect checks see (see rule.Expect).
+type Call struct {
+	ID     string
+	Tool   string         // as the agent names it: Bash, Write, Edit, mcp__server__tool …
+	Target string         // what the gate matches rules against (hook.Input.Command)
+	Text   string         // the call's main text: a Bash command, written content, an Edit's new text …
+	Input  map[string]any // the raw tool input
+	MCP    map[string]any // server, tool and class for an MCP call, else nil
+	At     time.Time
+	Agent  string // "" for the main conversation, else the subagent's id
+	// AgentStart is when the subagent was launched (the first record of its log); zero for the main conversation, or
+	// when unknown, in which case its first call stands in.
+	AgentStart time.Time
+	Denied     bool // it never ran: a hook (paws or another) refused it, or the user rejected it
+	// DeniedAt is when paws denied the call, if known: a little after At, since a call is logged before its hooks run.
+	DeniedAt time.Time
+}
+
+// Env is the call as an expect check sees it.
+func (c Call) Env() map[string]any { return c.env(rule.Commands) }
+
+// env is Env with the Bash parse supplied, so a grade parses each line once for all its checks.
+func (c Call) env(commands func(string) []string) map[string]any {
+	m := map[string]any{"tool": c.Tool, "text": c.Text, "input": c.Input}
+	if c.Tool == "Bash" {
+		m["commands"] = commands(c.Text)
+	}
+	if c.Input == nil {
+		m["input"] = map[string]any{}
+	}
+	if c.MCP != nil {
+		m["mcp"] = c.MCP
+	}
+	return m
+}
+
+// The outcomes, in the order the portal shows them.
+const (
+	Fixed            = "fixed"             // retried, and every check passed
+	SameRetry        = "same_retry"        // retried the same call (checks failed or none)
+	ChangedFailed    = "changed_failed"    // retried a changed call, and a check failed
+	ChangedUnchecked = "changed_unchecked" // retried a changed call; no check applied
+	OtherRoute       = "other_route"       // never retried; other calls ran
+	Stopped          = "stopped"           // never retried; nothing else ran
+)
+
+// Result is one graded block.
+type Result struct {
+	Outcome string
+	Checks  map[string]bool // expect id → passed; a check none of whose cases fits the call is left out
+	Retry   *Call
+	// Other is, for an other_route block, the first call that ran instead; nil otherwise.
+	Other *Call
+}
+
+// Grade grades the block of calls[blocked] by rule r. calls is the whole turn in time order, every agent's calls
+// together. Only the blocked agent's later calls count, plus, for a block in the main conversation, subagents it
+// started after the block: a subagent already running is a separate task.
+func Grade(r *rule.Rule, calls []Call, blocked int) Result {
+	return GradeWhere(r, calls, blocked, nil)
+}
+
+// GradeWhere is Grade where applied, when set, also decides which calls the rule applied to. A rule's `when`
+// conditions depend on the moment of the call (whether the file existed, say), so they can't be checked afterwards:
+// the caller answers from what the gate logged.
+func GradeWhere(r *rule.Rule, calls []Call, blocked int, applied func(Call) bool) Result {
+	b := calls[blocked]
+	scope := inScope(calls, blocked)
+	var earlier []Call // the blocked agent's calls before the block; its own batch ran alongside it, not before
+	for _, c := range calls[:blocked] {
+		if c.Agent == b.Agent && c.At.Before(b.At) {
+			earlier = append(earlier, c)
+		}
+	}
+	retry := -1
+	for i, c := range scope {
+		// A Skill call is how Claude answers the deny (the gate never holds one), not a retry of the blocked call.
+		if !c.Denied && c.Tool != "Skill" && r.Matches(c.Tool, c.Target) && (applied == nil || applied(c)) {
+			retry = i
+			break
+		}
+	}
+	res := Result{Checks: map[string]bool{}}
+	parsed := map[string][]string{} // each Bash line's commands, parsed once for every check
+	commands := func(line string) []string {
+		cmds, ok := parsed[line]
+		if !ok {
+			cmds = rule.Commands(line)
+			parsed[line] = cmds
+		}
+		return cmds
+	}
+	envOf := func(c Call) map[string]any { return c.env(commands) }
+	blockedEnv := envOf(b)
+	seen := func(cs []Call, e *rule.Expect) bool {
+		for _, c := range cs {
+			if !c.Denied && e.Eval(envOf(c), blockedEnv) {
+				return true
+			}
+		}
+		return false
+	}
+	subject := blockedEnv // what a check's cases are matched on: the retry, else the blocked call
+	if retry >= 0 {
+		subject = envOf(scope[retry])
+	}
+	for i := range r.Expect {
+		e, applies := r.Expect[i].For(subject, blockedEnv)
+		if !applies {
+			continue
+		}
+		var pass bool
+		switch e.When {
+		case rule.ExpectBefore:
+			// Earlier in the turn counts too: tests run, or files listed, before the blocked call still came first.
+			// The retry's own parallel batch ran alongside it, not first: only calls logged before it count, and it.
+			pass = retry >= 0 && (seen(earlier, e) || seen(beforeRetry(scope, retry), e))
+		case rule.ExpectRetry:
+			pass = retry >= 0 && e.Eval(subject, blockedEnv)
+		case rule.ExpectAfter:
+			pass = retry >= 0 && seen(afterRetry(scope, retry), e)
+		case rule.ExpectNever:
+			pass = true
+			for _, c := range scope {
+				if !c.Denied && e.Hit(envOf(c), blockedEnv) {
+					pass = false
+					break
+				}
+			}
+		}
+		res.Checks[e.ID] = pass
+	}
+	if retry < 0 {
+		res.Outcome = Stopped
+		for i, c := range scope {
+			// A Skill load is how Claude answers the deny, not another route: loading it and stopping is a stop.
+			if c.Denied || c.Tool == "Skill" {
+				continue
+			}
+			res.Outcome, res.Other = OtherRoute, &scope[i]
+			break
+		}
+		return res
+	}
+	res.Retry = &scope[retry]
+	all := len(res.Checks) > 0
+	for _, ok := range res.Checks {
+		all = all && ok
+	}
+	switch {
+	case all:
+		res.Outcome = Fixed
+	case sameCall(scope[retry], b):
+		res.Outcome = SameRetry
+	case len(res.Checks) > 0:
+		res.Outcome = ChangedFailed
+	default:
+		res.Outcome = ChangedUnchecked
+	}
+	return res
+}
+
+// beforeRetry is the calls in scope logged before the retry, and the retry itself.
+func beforeRetry(scope []Call, retry int) []Call {
+	var out []Call
+	for _, c := range scope[:retry] {
+		if c.At.Before(scope[retry].At) {
+			out = append(out, c)
+		}
+	}
+	return append(out, scope[retry])
+}
+
+// afterRetry is the calls in scope logged after the retry: its own parallel batch ran alongside it, not after.
+func afterRetry(scope []Call, retry int) []Call {
+	var out []Call
+	for _, c := range scope[retry+1:] {
+		if c.At.After(scope[retry].At) {
+			out = append(out, c)
+		}
+	}
+	return out
+}
+
+// inScope is the blocked agent's calls after the block, with, for a main-conversation block, every subagent whose
+// first call came after it.
+func inScope(calls []Call, blocked int) []Call {
+	b := calls[blocked]
+	first := map[string]time.Time{} // when each subagent started
+	for _, c := range calls {
+		start := c.At
+		if !c.AgentStart.IsZero() {
+			start = c.AgentStart
+		}
+		if t, ok := first[c.Agent]; !ok || start.Before(t) {
+			first[c.Agent] = start
+		}
+	}
+	// Only what came after the deny itself: a call in the blocked call's own batch (logged with it, before its hooks
+	// ran) wasn't a response to the block, and a subagent launched while the call waited on its hooks was already
+	// running.
+	denied := b.At
+	if b.DeniedAt.After(denied) {
+		denied = b.DeniedAt
+	}
+	var out []Call
+	for _, c := range calls[blocked+1:] {
+		switch {
+		case c.Agent == b.Agent && c.At.After(denied):
+			out = append(out, c)
+		case b.Agent == "" && c.Agent != "" && first[c.Agent].After(denied):
+			out = append(out, c)
+		}
+	}
+	return out
+}
+
+// sameCall: the same tool, and for Bash the same command once a `cd` or subshell in front and spacing are ignored; any other
+// call is the same only when its whole input matches exactly (a Write's content, an Edit's new text: spacing counts there).
+func sameCall(a, b Call) bool {
+	if a.Tool != b.Tool {
+		return false // a rule over several tools: another tool is a change, whatever its input
+	}
+	if a.Tool == "Bash" {
+		return Same(a.Target, b.Target)
+	}
+	if a.Input != nil && b.Input != nil {
+		return reflect.DeepEqual(a.Input, b.Input) // the whole input: an Edit's old_string, replace_all, too
+	}
+	return a.Target == b.Target && a.Text == b.Text
+}
+
+// lead is setup in front of the real command: a `cd dir &&`, a `(` opening a subshell. An env assignment is not setup:
+// AWS_PROFILE=prod and AWS_PROFILE=staging run the same command against different accounts.
+var lead = regexp.MustCompile(`^\s*(?:\(\s*|(?:cd|pushd)\s+\S+\s*(?:&&|;)\s*)`)
+
+// Same reports whether two calls' targets are the same once a `cd` or subshell in front and spacing between words are ignored;
+// spacing inside quotes counts (`'a  b'` and `'a b'` name different files).
+func Same(a, b string) bool {
+	norm := func(s string) string {
+		for {
+			loc := lead.FindStringIndex(s)
+			if loc == nil {
+				return squeeze(s)
+			}
+			s = s[loc[1]:]
+		}
+	}
+	return norm(a) == norm(b)
+}
+
+// squeeze trims a command and turns each run of whitespace outside quotes into one space, and each unquoted newline
+// or ';' (both end a command) into one ';', reading quotes and backslash escapes as a shell does.
+func squeeze(s string) string {
+	var b strings.Builder
+	var quote rune
+	space, newline, escaped := false, false, false
+	s = strings.TrimSpace(s)
+	for i, r := range s {
+		switch {
+		case escaped: // the character after a backslash is literal: an escaped quote or space
+			escaped = false
+		case quote == 0 && r == '<' && !space && !newline && strings.HasSuffix(b.String(), "<"):
+			// A heredoc (<<): its body is the command's input, not shell spacing, so the rest stays as written.
+			return b.String() + s[i:]
+		case r == '\\' && quote != '\'':
+			escaped = true // single quotes have no escapes
+		case quote != 0:
+			if r == quote {
+				quote = 0
+			}
+		case r == '\'' || r == '"':
+			quote = r
+		case r == '\n' || r == ';':
+			newline = true // separates commands: kept, as one ';', with the spacing around it dropped
+			space = false
+			continue
+		case r == ' ' || r == '\t' || r == '\r':
+			space = true
+			continue
+		}
+		switch {
+		case newline:
+			b.WriteByte(';')
+		case space && b.Len() > 0:
+			b.WriteByte(' ')
+		}
+		newline, space = false, false
+		b.WriteRune(r)
+	}
+	return b.String()
+}

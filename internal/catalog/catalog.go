@@ -171,6 +171,24 @@ func loadPack(fsys fs.FS, p string) (*Pack, error) {
 // Validate checks every binding and pack under a directory root.
 func Validate(root string) (*Catalog, []Problem) { return ValidateFS(os.DirFS(root), root) }
 
+// CheckProblems reports each binding with an expect check this paws dropped (it doesn't compile, a duplicate id, a
+// wrong shape). Publishing runs it, so the catalog never ships a rule missing a check; a laptop loading the catalog
+// doesn't, so a check only a newer paws reads drops itself there and the rule still enforces.
+func CheckProblems(c *Catalog) []Problem {
+	var probs []Problem
+	rels := make([]string, 0, len(c.Bindings))
+	for rel := range c.Bindings {
+		rels = append(rels, rel)
+	}
+	sort.Strings(rels)
+	for _, rel := range rels {
+		if err := c.Bindings[rel].Rule.ExpectErr; err != nil {
+			probs = append(probs, Problem{c.Display(BindingPath(rel)), err.Error()})
+		}
+	}
+	return probs
+}
+
 // ValidateFS checks every binding and pack in fsys. Problems are sorted by path.
 func ValidateFS(fsys fs.FS, display string) (*Catalog, []Problem) {
 	c, probs := LoadFS(fsys, display)

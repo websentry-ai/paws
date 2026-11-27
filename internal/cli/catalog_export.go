@@ -106,6 +106,7 @@ func noLicense(l string) bool { return l == "" || l == "NOASSERTION" }
 
 func portalDocument(dir string) (map[string]any, error) {
 	c, probs := catalog.Validate(dir)
+	probs = append(probs, catalog.CheckProblems(c)...) // the export is what the backend publishes
 	if len(probs) > 0 {
 		for _, p := range probs {
 			fmt.Fprintln(os.Stderr, "paws: catalog:", p)

@@ -364,6 +364,13 @@ func agentsSinceUserTurn(path string) int {
 // task notifications, shell escapes. They are not prompts the user typed.
 var harnessPrefixes = []string{"<local-command", "<command-", "<task-notification", "<bash-", "<system-reminder"}
 
+// IsUserPromptLine reports whether a transcript line is a prompt the user typed (see isUserPrompt): the turn
+// boundary outcome grading uses, the same one the gate's windows use.
+func IsUserPromptLine(line []byte) bool {
+	var e mainEntry
+	return json.Unmarshal(line, &e) == nil && !e.IsSidechain && isUserPrompt(e)
+}
+
 // isUserPrompt reports whether a transcript entry is a prompt the user typed, not a tool
 // result, a compaction summary or harness output.
 func isUserPrompt(e mainEntry) bool {

@@ -30,8 +30,12 @@ func logAudit(ev Event, r *rule.Rule, oc outcome) {
 	if path == "" {
 		return
 	}
+	now := time.Now().UTC()
 	rec := map[string]any{
-		"ts":      time.Now().UTC().Format(time.RFC3339),
+		"ts": now.Format(time.RFC3339),
+		// The same moment to the nanosecond, kept locally (sync uploads ts): grading tells a deny at the very start
+		// of a turn from one at the end of the turn before it, in the same second.
+		"at":      now.Format(time.RFC3339Nano),
 		"agent":   ev.Agent,
 		"event":   r.Event,
 		"tool":    ev.Tool,
@@ -63,8 +67,9 @@ func logAudit(ev Event, r *rule.Rule, oc outcome) {
 	appendAudit(path, rec)
 }
 
-// maxTarget bounds the matched text kept per record; a heredoc can be megabytes.
-const maxTarget = 2000
+// maxTarget bounds the matched text kept per record; a heredoc can be megabytes. Above maxCommand, so an uploaded
+// command can reach its full 4 KB.
+const maxTarget = 8192
 
 func capTarget(s string) string {
 	if len(s) <= maxTarget {
@@ -129,6 +134,23 @@ func appendAudit(path string, rec map[string]any) {
 	defer f.Close()
 	f.Chmod(0o600) // O_CREATE only sets mode on first creation, not on an existing looser file.
 	f.Write(append(line, '\n'))
+}
+
+// AuditTarget is a call's target as a rule record keeps it: secrets masked, cut to maxTarget.
+func AuditTarget(target string) string { return capTarget(redact(target)) }
+
+// LogOutcome appends an outcome record: what followed a block, graded when its turn ended (see cli/outcomes.go).
+func LogOutcome(rec map[string]any) {
+	if DryRun {
+		return
+	}
+	if p := auditPath(); p != "" {
+		rec["event"] = "outcome"
+		if _, ok := rec["ts"]; !ok {
+			rec["ts"] = time.Now().UTC().Format(time.RFC3339)
+		}
+		appendAudit(p, rec)
+	}
 }
 
 // AuditPath is where the audit log lives ("" if no user dir resolves).

@@ -3,6 +3,7 @@ package cli
 import (
 	"os"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"testing"
 
@@ -55,5 +56,81 @@ func TestExplainWithNoInputShowsUsage(t *testing.T) {
 	resetDryRun(t)
 	if code := Explain(nil); code != 2 {
 		t.Errorf("explain with no input: exit %d, want 2", code)
+	}
+}
+
+// explain shows what each check makes of the call: a retry check passes or fails, a never check is broken or not, and
+// a check no case fits doesn't apply.
+func TestExplainShowsChecksOnTheCall(t *testing.T) {
+	resetDryRun(t)
+	repo := t.TempDir()
+	os.MkdirAll(filepath.Join(repo, ".git"), 0o755)
+	t.Setenv("PAWS_HOME", filepath.Join(repo, "paws-home"))
+	t.Chdir(repo)
+	putRule(t, filepath.Join(repo, ".paws"), "git.md", `---
+name: git
+event: pre-tool
+matcher: {tool: Bash, command_regex: '\bgit\s+(commit|push)\b'}
+action: {type: require-skill, skill: git}
+expect:
+  - id: format
+    when: retry
+    cases:
+      - match: 'any(call.commands, # matches "^git commit\\b")'
+        if: 'call.text matches "fix: "'
+  - id: no-force
+    when: never
+    if: 'any(call.commands, # matches "^git push\\b.* -f( |$)")'
+---
+`)
+	_, out := captureStdout(t, func() int { return Explain([]string{`git commit -m "fix: x"`}) })
+	if !regexp.MustCompile(`format\s+pass\n`).MatchString(out) || !regexp.MustCompile(`no-force\s+pass`).MatchString(out) {
+		t.Errorf("commit: %q", out)
+	}
+	_, out = captureStdout(t, func() int { return Explain([]string{"git push -f"}) })
+	if !regexp.MustCompile(`format\s+doesn't apply`).MatchString(out) || !regexp.MustCompile(`no-force\s+FAIL`).MatchString(out) {
+		t.Errorf("force push: %q", out)
+	}
+}
+
+// An after check never counts the retry: explain says so instead of reporting a pass.
+func TestExplainAfterCheckIsNotTheRetry(t *testing.T) {
+	resetDryRun(t)
+	repo := t.TempDir()
+	os.MkdirAll(filepath.Join(repo, ".git"), 0o755)
+	t.Setenv("PAWS_HOME", filepath.Join(repo, "paws-home"))
+	t.Chdir(repo)
+	putRule(t, filepath.Join(repo, ".paws"), "git.md", "---\nname: git\nevent: pre-tool\nmatcher: {tool: Bash, command_regex: 'git push'}\naction: {type: require-skill, skill: git}\nexpect:\n  - id: checked\n    when: after\n    if: 'call.text matches \"git push\"'\n---\n")
+	_, out := captureStdout(t, func() int { return Explain([]string{"git push"}) })
+	if !strings.Contains(out, "checked") || !strings.Contains(out, "not the retry") {
+		t.Errorf("after check: %q", out)
+	}
+}
+
+// A call another rule's before check counts shows under "would count toward", and a Write takes its input as JSON.
+func TestExplainCountsTowardOtherRulesAndTakesJSON(t *testing.T) {
+	resetDryRun(t)
+	repo := t.TempDir()
+	os.MkdirAll(filepath.Join(repo, ".git"), 0o755)
+	t.Setenv("PAWS_HOME", filepath.Join(repo, "paws-home"))
+	t.Chdir(repo)
+	putRule(t, filepath.Join(repo, ".paws"), "verify.md", "---\nname: verify\nevent: pre-commit\naction: {type: require-skill, skill: v}\nexpect:\n  - id: tested\n    when: before\n    if: 'call.tool == \"Bash\" && any(call.commands, # matches \"^npm test\\\\b\")'\n---\n")
+	putRule(t, filepath.Join(repo, ".paws"), "env.md", "---\nname: env\nevent: pre-tool\nmatcher: {tool: Write, file_glob: '**/.env'}\naction: {type: require-skill, skill: s}\nexpect:\n  - id: no-key\n    when: retry\n    if: '!(call.text matches \"AKIA[0-9A-Z]{16}\")'\n---\n")
+	_, out := captureStdout(t, func() int { return Explain([]string{"cd web && npm test"}) })
+	if !strings.Contains(out, "would count toward") || !strings.Contains(out, "verify / tested (before)") {
+		t.Errorf("npm test: %q", out)
+	}
+	// A check whose case the retry picks: npm test still counts toward it.
+	putRule(t, filepath.Join(repo, ".paws"), "push.md", "---\nname: push\nevent: pre-push\naction: {type: require-skill, skill: v}\nexpect:\n  - id: tested-push\n    when: before\n    cases:\n      - match: 'call.tool == \"Bash\" && any(call.commands, # matches \"^git push\")'\n        if: 'call.tool == \"Bash\" && any(call.commands, # matches \"^npm test\")'\n---\n")
+	_, out = captureStdout(t, func() int { return Explain([]string{"npm test"}) })
+	if !strings.Contains(out, "push / tested-push (before)") {
+		t.Errorf("a cased before check: %q", out)
+	}
+	_, out = captureStdout(t, func() int {
+		key := "AKIA" + strings.Repeat("Q", 16) // built here, so secret scanners don't flag a fake key
+		return Explain([]string{"--tool", "Write", `{"file_path":"app/.env","content":"KEY=` + key + `"}`})
+	})
+	if !regexp.MustCompile(`no-key\s+FAIL`).MatchString(out) {
+		t.Errorf("Write JSON: %q", out)
 	}
 }

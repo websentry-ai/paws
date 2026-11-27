@@ -40,9 +40,9 @@ func askEnv(t *testing.T, input string, raw bool) (home, repo string) {
 	return home, repo
 }
 
-// Arrow keys: Claude Code comes ticked (found), down and space tick Codex, enter confirms; enter keeps "this repo".
+// Arrow keys: Claude Code comes ticked (found), down and space tick Codex, enter confirms; up picks "this repo".
 func TestInitAsksWithArrowKeys(t *testing.T) {
-	_, repo := askEnv(t, "\x1b[B \r\r", true)
+	_, repo := askEnv(t, "\x1b[B \r\x1b[A\r", true)
 	code, out := captureStdout(t, func() int { return Init(nil) })
 	if code != 0 {
 		t.Fatalf("init exit %d: %s", code, out)
@@ -52,6 +52,39 @@ func TestInitAsksWithArrowKeys(t *testing.T) {
 	}
 	if !strings.Contains(out, "Claude Code (found)") || !strings.Contains(out, "paws is set up for:") || !strings.Contains(out, "Codex") {
 		t.Errorf("the menu marks what it found and the end says what was set up where:\n%s", out)
+	}
+	if strings.Count(out, "asks you to trust a repo's hook in each repo") != 1 {
+		t.Errorf("Codex in this repo only: say once that it asks to trust the hook in each repo:\n%s", out)
+	}
+	for _, l := range strings.Split(out, "\n") {
+		if len(l) > 100 && !strings.Contains(l, "\x1b") {
+			t.Errorf("a line wraps at 100 columns: %q", l)
+		}
+	}
+}
+
+// With Codex picked, enter on the scope question means every repo: Codex trusts a global hook once.
+func TestInitWithCodexDefaultsToEveryRepo(t *testing.T) {
+	home, repo := askEnv(t, "\x1b[B \r\r", true)
+	code, out := captureStdout(t, func() int { return Init(nil) })
+	if code != 0 || !hasPawsHook(filepath.Join(home, ".codex", "hooks.json")) || !hasPawsHook(filepath.Join(home, ".claude", "settings.json")) {
+		t.Fatalf("both agents, every repo: exit %d\n%s", code, out)
+	}
+	if hasPawsHook(filepath.Join(repo, ".codex", "hooks.json")) || strings.Contains(out, "in each repo") {
+		t.Errorf("nothing in the repo, and no per-repo trust note:\n%s", out)
+	}
+	data, _ := os.ReadFile(filepath.Join(home, ".codex", "hooks.json"))
+	if strings.Contains(string(data), "command -v") {
+		t.Errorf("a global hook has no install guard, so its command stays the same across versions: %s", data)
+	}
+}
+
+// Enter with no agent ticked stays on the list and says why; space ticks one again.
+func TestInitNeedsAnAgent(t *testing.T) {
+	_, repo := askEnv(t, " \r \r\r", true)
+	code, out := captureStdout(t, func() int { return Init(nil) })
+	if code != 0 || !strings.Contains(out, "pick at least one agent") || !hasPawsHook(filepath.Join(repo, ".claude", "settings.json")) {
+		t.Errorf("init exit %d:\n%s", code, out)
 	}
 }
 
@@ -158,5 +191,20 @@ func TestInitMenuIgnoresALoneEsc(t *testing.T) {
 	}
 	if !hasPawsHook(filepath.Join(repo, ".claude", "settings.json")) {
 		t.Error("Esc then enter keeps the ticked default")
+	}
+}
+
+// Uninstall's agent list needs one ticked too.
+func TestUninstallNeedsAnAgent(t *testing.T) {
+	_, repo := askEnv(t, " \x1b[B \r \r\x1b[B\ry\n", true)
+	interactive = func() bool { return false }
+	captureStdout(t, func() int { return Init([]string{"--agent", "claude,codex"}) })
+	interactive = func() bool { return true }
+	code, out := captureStdout(t, func() int { return Uninstall(nil) })
+	if code != 0 || !strings.Contains(out, "pick at least one agent") {
+		t.Fatalf("uninstall exit %d:\n%s", code, out)
+	}
+	if hasPawsHook(filepath.Join(repo, ".codex", "hooks.json")) || !hasPawsHook(filepath.Join(repo, ".claude", "settings.json")) {
+		t.Errorf("Codex, this repo only, after the reminder:\n%s", out)
 	}
 }

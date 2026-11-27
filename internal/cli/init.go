@@ -29,26 +29,77 @@ func Init(args []string) int {
 		return code
 	}
 	var set []string
-	for _, t := range targets {
-		if c := initOne(t.a, t.path); c != 0 {
-			code = c
+	var did initDone
+	for i, t := range targets {
+		if i > 0 {
+			fmt.Println() // a blank line between each agent's lines
+		}
+		d := initOne(t.a, t.path)
+		did.guarded, did.copied, did.offPath = did.guarded || d.guarded, did.copied || d.copied, did.offPath || d.offPath
+		if d.code != 0 {
+			code = d.code
 			continue
 		}
-		set = append(set, fmt.Sprintf("  %-12s %s", t.a.Title(), tilde(t.path)))
+		set = append(set, fmt.Sprintf("  %-12s %s", t.a.Title(), shortPath(t.path)))
 	}
 	if len(set) > 0 {
-		fmt.Println("paws is set up for:")
+		fmt.Println("\npaws is set up for:")
 		fmt.Println(strings.Join(set, "\n"))
 	}
+	initNotes(targets, did)
 	return max(code, 0)
 }
 
+// initDone is what one harness's init did, for the notes Init prints once at the end.
+type initDone struct {
+	code                     int
+	guarded, copied, offPath bool
+}
+
+// initNotes says once what holds for every hook init wrote: the guard, the binary copy, Codex's trust step.
+func initNotes(targets []initTarget, did initDone) {
+	var notes []string
+	if did.copied {
+		notes = append(notes, "The hook runs a copy of paws in "+tilde(filepath.Join(gate.UserDir(), "bin"))+".")
+	}
+	if did.offPath {
+		notes = append(notes, "unbound-paws isn't on PATH. For the command and upgrades:\n  curl -fsSL https://paws.getunbound.ai/install.sh | bash")
+	}
+	if did.guarded {
+		notes = append(notes, "A repo's hook tells a teammate without paws how to install it, and blocks the call.")
+	}
+	for _, t := range targets {
+		if t.a == defaultAdapter() {
+			continue
+		}
+		if filepath.Clean(t.path) == filepath.Clean(t.a.HookFile(true, "")) {
+			notes = append(notes, t.a.InstallNote())
+		} else {
+			notes = append(notes, t.a.Title()+" asks you to trust a repo's hook in each repo: start it there, run /hooks and\n"+
+				"trust paws. Set it up for every repo (--global) to trust it once.")
+		}
+	}
+	if len(notes) > 0 {
+		fmt.Println("\n" + strings.Join(notes, "\n"))
+	}
+}
+
+// shortPath is p as init prints it: relative to the repo inside it, with ~ for the home folder otherwise.
+func shortPath(p string) string {
+	cwd, _ := os.Getwd()
+	if rel, err := filepath.Rel(projectRoot(cwd), p); err == nil && !strings.HasPrefix(rel, "..") {
+		return rel
+	}
+	return tilde(p)
+}
+
 // initOne registers the hook for one harness in one hook file.
-func initOne(a harness.Adapter, settingsPath string) int {
+func initOne(a harness.Adapter, settingsPath string) (did initDone) {
+	did.code = 1
 	self, err := os.Executable()
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "paws: cannot resolve own path: %v\n", err)
-		return 1
+		return did
 	}
 	self, _ = filepath.Abs(self)
 	// The same command in project and user settings, so the harness runs the gate once. Run as the
@@ -62,22 +113,23 @@ func initOne(a harness.Adapter, settingsPath string) int {
 		bin, err := installSelf(self, gate.UserDir())
 		if err != nil {
 			fmt.Fprintf(os.Stderr, "paws: install binary: %v\n", err)
-			return 1
+			return did
 		}
 		command = a.HookCommand(hookCommand(bin))
-		if cliPath() == "" {
-			fmt.Printf("unbound-paws isn't installed, so the hook runs this copy. Install it for the `unbound-paws` command and upgrades:\n  curl -fsSL https://paws.getunbound.ai/install.sh | bash\n")
-		}
+		did.copied, did.offPath = true, cliPath() == ""
 	}
 
 	doc, err := readSettings(settingsPath)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "paws: %v\n", err)
-		return 1
+		return did
 	}
 	// A committed `unbound-paws gate` runs on teammates' machines too: guard it so a missing binary says how to
-	// install paws. The copied binary under ~/.paws/bin is not guarded, because `npm i -g` would not create it.
-	guard := hookGuard() && command == a.HookCommand(cliName+" gate")
+	// install paws. The copied binary under ~/.paws/bin is not guarded, because `npm i -g` would not create it. Nor
+	// is a user's own hook file: no teammate runs it, and a plain command stays the same across paws versions, so
+	// Codex, which asks to trust a hook again when its command changes, trusts it once.
+	global := filepath.Clean(settingsPath) == filepath.Clean(user)
+	guard := hookGuard() && !global && command == a.HookCommand(cliName+" gate")
 	written := command
 	if guard {
 		written = guardedCommand(command, "PreToolUse")
@@ -85,34 +137,31 @@ func initOne(a harness.Adapter, settingsPath string) int {
 	changed, err := ensureHooksFor(a, doc, command, guard)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "paws: %s: %v\n", settingsPath, err)
-		return 1
+		return did
 	}
+	did.code = 0
 	if !changed {
-		fmt.Printf("paws already registered in %s\n", settingsPath)
-		return 0
+		fmt.Printf("%s: paws already registered in %s\n", a.Title(), shortPath(settingsPath))
+		return did
 	}
 	if err := writeSettings(settingsPath, doc); err != nil {
 		fmt.Fprintf(os.Stderr, "paws: %v\n", err)
-		return 1
+		did.code = 1
+		return did
 	}
-	fmt.Printf("Registered paws in %s\n  command: %s\n", settingsPath, command)
-	if guard {
-		fmt.Println("  Where paws isn't installed, the hook says how to install it and blocks the tool call.")
-	}
-	if note := a.InstallNote(); note != "" {
-		fmt.Println(note)
-	}
+	did.guarded = guard
+	fmt.Printf("%s: registered paws in %s\n  command: %s\n", a.Title(), shortPath(settingsPath), command)
 	// A different paws hook in the other scope makes the harness run paws twice: say which init fixes it.
 	other, fix := user, "`"+cliName+" init --global"+agentFlag(a)+"`"
-	if filepath.Clean(settingsPath) == filepath.Clean(user) {
+	if global {
 		cwd, _ := os.Getwd()
 		root := projectRoot(cwd)
 		other, fix = a.HookFile(false, root), "`"+cliName+" init"+agentFlag(a)+"` in "+root
 	}
-	if c := pawsCommandIn(other); c != "" && c != written {
-		fmt.Printf("%s has a different paws hook. Run %s too, so %s runs paws once.\n", other, fix, a.Title())
+	if c := pawsCommandIn(other); c != "" && unguard(c) != unguard(written) {
+		fmt.Printf("%s has a different paws hook. Run %s too,\nso %s runs paws once.\n", shortPath(other), fix, a.Title())
 	}
-	return 0
+	return did
 }
 
 // initTarget is one hook file init writes: a harness and its hook file.
@@ -209,7 +258,12 @@ func askInit() (agents []harness.Adapter, global bool, err error) {
 			agents = append(agents, all[i])
 		}
 	}
-	where, err := c.one("Where?", []string{"This repo only", "Every repo (global)"}, 0)
+	// Codex asks to trust a repo's hook in each repo; a global hook it trusts once. So with Codex, every repo first.
+	def := 0
+	if slices.ContainsFunc(agents, func(a harness.Adapter) bool { return a != defaultAdapter() }) {
+		def = 1
+	}
+	where, err := c.one("Where?", []string{"This repo only", "Every repo (global)"}, def)
 	return agents, where == 1, err
 }
 
@@ -495,9 +549,6 @@ func installSelf(self, userDir string) (string, error) {
 	if err != nil {
 		os.Remove(tmp.Name())
 		return "", err
-	}
-	if self != dest {
-		fmt.Printf("Installed paws binary to %s\n", dest)
 	}
 	return dest, nil
 }

@@ -140,13 +140,13 @@ func Uninstall(args []string) int {
 		}
 	}
 	if len(keep) > 0 {
-		fmt.Println("paws will keep:")
+		fmt.Println("\npaws will keep:")
 		for _, k := range keep {
 			fmt.Println("  " + k)
 		}
 	}
 	if len(plan) > 0 && !f.yes {
-		fmt.Print("Remove these? [y/N] ")
+		fmt.Print("\nRemove these? [y/N] ")
 		line, err := c.in.ReadString('\n')
 		if err != nil && line == "" {
 			fmt.Println()
@@ -193,7 +193,8 @@ To remove the binary itself, use the way you installed it:
   brew uninstall --cask unbound-paws
   rm ~/.local/bin/unbound-paws     # the install script
 
-A repo that committed the paws hook keeps it until you remove it there (unbound-paws uninstall, run in that repo).
+A repo that committed the paws hook keeps it until you remove it there:
+run unbound-paws uninstall in that repo.
 `)
 	return code
 }

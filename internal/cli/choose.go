@@ -85,6 +85,7 @@ func (c *chooser) menu(title string, labels []string, on []bool, many bool) ([]b
 			break
 		}
 	}
+	status := "" // shown under the options: why enter didn't confirm
 	draw := func() {
 		for i, l := range labels {
 			mark := "  "
@@ -100,6 +101,7 @@ func (c *chooser) menu(title string, labels []string, on []bool, many bool) ([]b
 			}
 			fmt.Fprintf(c.out, "\r\x1b[2K%s%s%s\r\n", mark, box, l)
 		}
+		fmt.Fprintf(c.out, "\r\x1b[2K%s\r\n", status)
 	}
 	draw()
 	for {
@@ -107,6 +109,7 @@ func (c *chooser) menu(title string, labels []string, on []bool, many bool) ([]b
 		if err != nil {
 			return nil, errCancelled
 		}
+		status = ""
 		switch b {
 		case 3, 4: // Ctrl-C, Ctrl-D
 			return nil, errCancelled
@@ -139,8 +142,9 @@ func (c *chooser) menu(title string, labels []string, on []bool, many bool) ([]b
 			if anyOn(on) {
 				return on, nil
 			}
+			status = "  pick at least one agent (space ticks one)"
 		}
-		fmt.Fprintf(c.out, "\x1b[%dA", len(labels)) // back to the first option
+		fmt.Fprintf(c.out, "\x1b[%dA", len(labels)+1) // back to the first option
 		draw()
 	}
 }

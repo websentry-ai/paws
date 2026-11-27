@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"slices"
 	"strings"
 	"time"
 
@@ -74,9 +75,14 @@ func GateFor(args []string) (code int) {
 		syncInHook(h.Cwd)
 		return 0
 	case "PostToolUse":
-		gate.LogTelemetry("tool_result", ev, map[string]any{"tool": ev.Tool})
-		for _, c := range h.Calls {
-			gate.LogAction(c)
+		// A failed call (a Codex command that exited non-zero, a patch that didn't apply) logs nothing.
+		if h.Ran == nil || slices.Contains(h.Ran, true) {
+			gate.LogTelemetry("tool_result", ev, map[string]any{"tool": ev.Tool})
+		}
+		for i, c := range h.Calls {
+			if h.Ran == nil || h.Ran[i] {
+				gate.LogAction(c)
+			}
 		}
 		a.Observe(h, gate.Decision{})
 		return allow()

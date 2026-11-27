@@ -67,7 +67,10 @@ type Hook struct {
 	Calls  []gate.Event
 	Cwd    string
 	Source string // SessionStart: startup, resume, clear or compact
-	Native any    // the adapter's own reading of stdin
+	// Ran says, for a PostToolUse, which Calls ran and succeeded; nil is all of them (Claude Code sends PostToolUse
+	// only then).
+	Ran    []bool
+	Native any // the adapter's own reading of stdin
 }
 
 // TurnLog reads a session's tool calls by turn, for outcome grading.

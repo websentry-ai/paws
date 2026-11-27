@@ -2,6 +2,7 @@ package cli
 
 import (
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -334,4 +335,26 @@ func TestCodexRefusedRetryIsNoRetry(t *testing.T) {
 		}
 	}
 	t.Fatal("no outcome record")
+}
+
+// Codex sends PostToolUse for a failed command and for a patch that didn't apply: those log no tool_result and no
+// action, as on Claude Code, where only a call that ran gets one.
+func TestCodexFailedCallsLogNoAction(t *testing.T) {
+	home := portalEnv(t, http.NotFoundHandler())
+	post := func(id, tool string, input map[string]any, response string) {
+		runGate(t, codexCall("PostToolUse", "t1", map[string]any{"tool_name": tool, "tool_use_id": id, "tool_input": input, "tool_response": response}))
+	}
+	post("c1", "Bash", map[string]any{"command": "git push"}, "Exit code: 1\nOutput:\nrejected\n")
+	post("p1", "apply_patch", map[string]any{"command": "*** Begin Patch\n*** Update File: /repo/a.go\n@@\n+x\n*** End Patch"}, "Exit code: 1\nOutput:\nFailed to find expected lines\n")
+	if recs := auditLines(t, home); len(recs) != 0 {
+		t.Errorf("failed calls log nothing, got %v", recs)
+	}
+	post("c2", "Bash", map[string]any{"command": "git push"}, "Exit code: 0\nOutput:\nok\n")
+	var kinds []string
+	for _, rec := range auditLines(t, home) {
+		kinds = append(kinds, fmt.Sprint(rec["event"]))
+	}
+	if strings.Join(kinds, ",") != "tool_result,action" {
+		t.Errorf("a call that ran logs tool_result then its action, got %v", kinds)
+	}
 }

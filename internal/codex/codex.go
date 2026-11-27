@@ -114,7 +114,43 @@ func (a Adapter) Parse(stdin []byte) (*harness.Hook, error) {
 		}
 		h.Calls = append(h.Calls, ev)
 	}
+	if in.HookEventName == "PostToolUse" {
+		h.Ran = postRan(in, p.calls)
+	}
 	return h, nil
+}
+
+// postResult is what a PostToolUse says ran: ok for the call, and for a patch the files apply_patch lists as
+// changed (through the shell there is no exit code for the patch, so that list is the only sign it applied).
+func postResult(in *Input, calls int) (ok bool, files []string) {
+	ok = resultOK(in.ToolResponse)
+	if in.ToolName == "apply_patch" || in.ToolName == "Bash" && calls > 1 {
+		runs := shellPatches(cmdOf(in), in.CWD)
+		if in.ToolName == "apply_patch" {
+			str := func(k string) string { s, _ := in.ToolInput[k].(string); return s }
+			runs = []shellPatch{{text: cmp.Or(str("command"), str("input"), str("patch")), dir: in.CWD, dirs: []string{in.CWD}}} // the tool runs in the hook's cwd
+		}
+		files = patchedFiles(in.ToolResponse, runs)
+		if in.ToolName == "Bash" {
+			ok = len(files) > 0
+		}
+	}
+	return ok, files
+}
+
+// postRan says which of a PostToolUse's calls ran: Codex sends one for a command that failed too, and for a
+// patch that didn't apply. A file of a patch ran when apply_patch lists it; the shell command when it exited 0.
+func postRan(in *Input, calls []call) []bool {
+	_, files := postResult(in, len(calls))
+	ran := make([]bool, len(calls))
+	for i, c := range calls {
+		if c.tool == "Edit" || c.tool == "Write" {
+			ran[i] = slices.Contains(files, filepath.Clean(c.target))
+		} else {
+			ran[i] = resultOK(in.ToolResponse)
+		}
+	}
+	return ran
 }
 
 // skillRead names the skill whose SKILL.md a call reads, and whether the read alone prints all of it.
@@ -487,21 +523,7 @@ func (Adapter) Observe(h *harness.Hook, d gate.Decision) {
 		}
 		appendRecords(own, recs)
 	case in.HookEventName == "PostToolUse":
-		ok := resultOK(in.ToolResponse)
-		var files []string
-		if in.ToolName == "apply_patch" || in.ToolName == "Bash" && len(p.calls) > 1 {
-			// A patch: the files it changed are the ones apply_patch lists after its success line. Through the shell
-			// there is no exit code, so that line is the only sign it applied.
-			runs := shellPatches(cmdOf(in), in.CWD)
-			if in.ToolName == "apply_patch" {
-				str := func(k string) string { s, _ := in.ToolInput[k].(string); return s }
-				runs = []shellPatch{{text: cmp.Or(str("command"), str("input"), str("patch")), dir: in.CWD, dirs: []string{in.CWD}}} // the tool runs in the hook's cwd
-			}
-			files = patchedFiles(in.ToolResponse, runs)
-			if in.ToolName == "Bash" {
-				ok = len(files) > 0
-			}
-		}
+		ok, files := postResult(in, len(p.calls))
 		var out string
 		if json.Unmarshal(in.ToolResponse, &out) != nil {
 			out = string(in.ToolResponse)

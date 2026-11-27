@@ -591,7 +591,8 @@ func resultOK(raw json.RawMessage) bool {
 // or directory, bash: sed: command not found, sh: 1: sed: not found, zsh: command not found: sed). The name keeps a
 // SKILL.md line such as "Returns 404 when the page is not found" from reading as a failed read.
 var readError = regexp.MustCompile(`^(?:(?:` + errorSource + `): )+(?:.*: )?(?:No such file or directory|Permission denied|Is a directory|(?:command )?not found)$` +
-	`|^(?:(?:ba|z|da|k)?sh: )(?:line \d+: )?command not found: \S+$`)
+	`|^(?:(?:ba|z|da|k)?sh: )(?:line \d+: )?command not found: \S+$` +
+	`|^(?:No such file or directory|Permission denied|Is a directory)$`) // the bare error, no name: no skill line
 
 // errorSource is a program that names itself on an error line: a shell (with its line number), or a reader.
 const errorSource = `(?:ba|z|da|k)?sh|line \d+|\d+|(?:\S*/)?(?:g?sed|cat|head|tail|nl|less|more|bat|batcat|g?awk|mawk)`

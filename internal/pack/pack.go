@@ -189,7 +189,7 @@ func Add(c *catalog.Catalog, name string, bindings []string, picks map[string]st
 	}
 	res := &Result{Pack: name, Bindings: bindings}
 	fresh := map[string]bool{} // skills this call created where nothing was before
-	var mirrored [][2]string    // copies this call created in another harness's folder where nothing was before
+	var mirrored [][2]string   // copies this call created in another harness's folder where nothing was before
 	ok := false
 	defer func() {
 		if !ok { // a later step failed: take back the copies this call created, and only those

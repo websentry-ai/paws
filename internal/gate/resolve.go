@@ -30,7 +30,7 @@ type Event struct {
 	// (a chunk of it is still a skill read, never gated, but loads nothing alone).
 	SkillWhole bool
 	Log        Session // the session's past; nil reads Transcript and Own as Claude Code logs
-	Harness   Harness // skill folders and deny wording; nil is SkillTool
+	Harness    Harness // skill folders and deny wording; nil is SkillTool
 }
 
 // DefaultSkillWindow is how many turns back a skill load still counts for: the user's last 20 messages

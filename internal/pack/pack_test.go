@@ -381,3 +381,28 @@ func TestFailedAddRemovesItsMirrorCopies(t *testing.T) {
 		t.Error("the copy that was there before the add must stay")
 	}
 }
+
+// A failed add keeps a copy in another harness's folder that was there before it, even when its own copy is new.
+func TestFailedAddKeepsMirrorCopiesFromBefore(t *testing.T) {
+	repo, hash := goodHash(t)
+	fakeFetch(t, map[string]string{"github.com/example/humanizer": repo})
+	c := testCatalog(t, hash)
+	tg := ProjectTarget(t.TempDir())
+	good := t.TempDir()
+	tg.Mirrors = []string{good}
+	add(t, c, "writing", nil, tg) // humanizer in both folders
+	os.RemoveAll(filepath.Join(tg.SkillsDir, "humanizer"))
+	bad := filepath.Join(t.TempDir(), "file")
+	os.WriteFile(bad, []byte("not a folder"), 0o644) // copying into it fails
+	tg.Mirrors = []string{good, bad}
+	pk, bindings, picks, _ := Resolve(c, "writing", nil, nil)
+	if _, err := Add(c, pk, bindings, picks, tg); err == nil {
+		t.Fatal("the copy into a file should fail the add")
+	}
+	if _, err := os.Stat(filepath.Join(good, "humanizer", "SKILL.md")); err != nil {
+		t.Error("the mirror copy from before the add must stay")
+	}
+	if _, err := os.Stat(filepath.Join(tg.SkillsDir, "humanizer")); err == nil {
+		t.Error("the add's own new copy is taken back")
+	}
+}

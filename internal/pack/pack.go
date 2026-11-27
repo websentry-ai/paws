@@ -192,9 +192,9 @@ func Add(c *catalog.Catalog, name string, bindings []string, picks map[string]st
 	var mirrored [][2]string    // copies this call created in another harness's folder where nothing was before
 	ok := false
 	defer func() {
-		if !ok { // a later step failed: take back the skills this call created
+		if !ok { // a later step failed: take back the copies this call created, and only those
 			for s := range fresh {
-				t.removeSkill(s)
+				removeSkill(t.SkillsDir, s)
 			}
 			for _, m := range mirrored {
 				removeSkill(m[0], m[1])

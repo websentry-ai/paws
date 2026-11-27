@@ -175,7 +175,7 @@ func canonical(in *Input) []call {
 }
 
 // cdStep is one `cd <dir>` command of a chain.
-var cdStep = regexp.MustCompile(`^cd(?:\s+--)?(?:\s+(?:'([^']*)'|"([^"]*)"|(\S+)))?$`)
+var cdStep = regexp.MustCompile(`^(?:(?:builtin|command)\s+)?(?:cd|pushd)(?:\s+--)?(?:\s+(?:'([^']*)'|"([^"]*)"|(\S+)))?$`)
 
 // redirect is a redirection in a command: >/dev/null, 2>&1, &>log, < in.
 var redirect = regexp.MustCompile(`\s*(?:\d*>>?|&>>?|\d*<)&?\s*(?:'[^']*'|"[^"]*"|[^\s'"]+)`)

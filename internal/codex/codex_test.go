@@ -681,13 +681,16 @@ func TestSkillReadWholeOrPart(t *testing.T) {
 func TestShellPatchInWrappersAndRedirectedCd(t *testing.T) {
 	patch := "<<'EOF'\n*** Begin Patch\n*** Add File: 1.sql\n+x\n*** End Patch\nEOF"
 	for cmd, want := range map[string]string{
-		"bash -c \"apply_patch " + patch + "\"":                 "/repo/1.sql",
+		"bash -c \"apply_patch " + patch + "\"":                   "/repo/1.sql",
 		"bash -lc \"cd migrations && apply_patch " + patch + "\"": "/repo/migrations/1.sql",
-		"eval 'cd migrations'; apply_patch " + patch:             "/repo/migrations/1.sql",
-		"cd migrations >/dev/null && apply_patch " + patch:       "/repo/migrations/1.sql",
-		"cd migrations 2>&1 && apply_patch " + patch:             "/repo/migrations/1.sql",
-		"cd >/dev/null migrations && apply_patch " + patch:       "/repo/migrations/1.sql",
-		"echo " + patch + " | xargs -0 apply_patch":              "/repo/1.sql",
+		"eval 'cd migrations'; apply_patch " + patch:              "/repo/migrations/1.sql",
+		"cd migrations >/dev/null && apply_patch " + patch:        "/repo/migrations/1.sql",
+		"cd migrations 2>&1 && apply_patch " + patch:              "/repo/migrations/1.sql",
+		"cd >/dev/null migrations && apply_patch " + patch:        "/repo/migrations/1.sql",
+		"pushd migrations && apply_patch " + patch:                "/repo/migrations/1.sql",
+		"pushd migrations >/dev/null; apply_patch " + patch:       "/repo/migrations/1.sql",
+		"builtin cd migrations && apply_patch " + patch:           "/repo/migrations/1.sql",
+		"echo " + patch + " | xargs -0 apply_patch":               "/repo/1.sql",
 	} {
 		h := parse(t, stdin(t, "PreToolUse", "t1", map[string]any{"tool_name": "Bash", "tool_input": map[string]any{"command": cmd}}))
 		if !gated(h.Calls, want) {

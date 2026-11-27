@@ -146,7 +146,7 @@ func skillLoaded(path, skill string, window int, cwd string) bool {
 	}
 	// Reads of the skill's SKILL.md load it once those that succeeded cover the whole file.
 	reads := readCalls(lines, path, skill, cwd)
-	return len(reads) > 0 && Covered(succeededReads(lines, path, reads))
+	return len(reads) > 0 && Covered(OfResolved(succeededReads(lines, path, reads), SkillTool.SkillDirs(cwd), skill))
 }
 
 // skillChanged is when skill's SKILL.md in Claude Code's skill folders last changed, or zero when paws finds none

@@ -474,3 +474,29 @@ func TestVerboseHeadOrTailIsNoSKILLmdRead(t *testing.T) {
 		t.Error("head -q prints no header: a plain read")
 	}
 }
+
+// When a personal and a project skill share a name, the deny names the one Claude Code resolves (personal first),
+// and only a read of that file loads it: the other copy holds other instructions.
+func TestOnlyTheResolvedSkillsReadLoads(t *testing.T) {
+	home := portalEnv(t, http.NotFoundHandler())
+	writeRule(t, filepath.Join(home, "push.md"), "name: push\nevent: pre-tool\nmatcher:\n  tool: Bash\n  command_regex: git push\naction:\n  type: require-skill\n  skill: deployer\n")
+	personal := skillMD(t, "deployer")
+	repo := t.TempDir()
+	project := filepath.Join(repo, ".claude", "skills", "deployer", "SKILL.md")
+	writeFile(t, project, "---\nname: deployer\n---\n# other rules\n")
+	push := func(read string) string {
+		p := filepath.Join(t.TempDir(), "s.jsonl")
+		in, _ := json.Marshal(map[string]string{"command": "cat " + read})
+		writeFile(t, p, `{"type":"user","isSidechain":false,"message":{"role":"user","content":"push it"}}`+"\n"+
+			`{"type":"assistant","isSidechain":false,"message":{"content":[{"type":"tool_use","id":"toolu_r","name":"Bash","input":`+string(in)+`}]}}`+"\n"+
+			`{"type":"user","isSidechain":false,"message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"toolu_r","content":"x"}]},"toolUseResult":{"stdout":"x"}}`+"\n")
+		return runGate(t, map[string]any{"hook_event_name": "PreToolUse", "cwd": repo, "session_id": "s", "transcript_path": p,
+			"tool_name": "Bash", "tool_input": map[string]any{"command": "git push"}})
+	}
+	if out := push(project); !strings.Contains(out, `"deny"`) {
+		t.Errorf("the project copy isn't the skill the deny names, got %s", out)
+	}
+	if out := push(personal); out != "{}" {
+		t.Errorf("a read of the resolved SKILL.md loads it, got %s", out)
+	}
+}

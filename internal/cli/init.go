@@ -140,6 +140,7 @@ func initOne(a harness.Adapter, settingsPath string) (did initDone) {
 		return did
 	}
 	did.code = 0
+	mirrorInstalled(a, settingsPath, global)
 	if !changed {
 		fmt.Printf("%s: paws already registered in %s\n", a.Title(), shortPath(settingsPath))
 		return did
@@ -162,6 +163,35 @@ func initOne(a harness.Adapter, settingsPath string) (did initDone) {
 		fmt.Printf("%s has a different paws hook. Run %s too,\nso %s runs paws once.\n", shortPath(other), fix, a.Title())
 	}
 	return did
+}
+
+// mirrorInstalled copies the skills paws installed for Claude Code, in the hook file's scope, into another
+// harness's skills folder, as a pack install would have had the hook been there: a harness added later sees them.
+// A copy already there stays.
+func mirrorInstalled(a harness.Adapter, settingsPath string, global bool) {
+	to := a.SkillsDirFor(settingsPath)
+	if a == defaultAdapter() || to == "" {
+		return
+	}
+	cwd, _ := os.Getwd()
+	from := pack.ProjectTarget(projectRoot(cwd)).SkillsDir
+	if global {
+		from = pack.UserTarget(gate.UserDir()).SkillsDir
+	}
+	var copied []string
+	for _, s := range pack.PawsSkills(from) {
+		if s.Edited || fileExists(filepath.Join(to, s.Name)) {
+			continue
+		}
+		if ok, err := pack.MirrorSkill(from, to, s.Name); err != nil {
+			fmt.Fprintf(os.Stderr, "paws: copy skill %s to %s: %v\n", s.Name, shortPath(to), err)
+		} else if ok {
+			copied = append(copied, s.Name)
+		}
+	}
+	if len(copied) > 0 {
+		fmt.Printf("  copied %d skill(s) paws installed into %s: %s\n", len(copied), shortPath(to), strings.Join(copied, ", "))
+	}
 }
 
 // initTarget is one hook file init writes: a harness and its hook file.

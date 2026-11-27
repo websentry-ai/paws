@@ -91,7 +91,7 @@ func (a Adapter) Parse(stdin []byte) (*harness.Hook, error) {
 	}
 	p.calls = canonical(in)
 	base := gate.Event{Agent: Name, Session: in.SessionID, Cwd: in.CWD, AgentID: in.AgentID, AgentType: in.AgentType,
-		Log:     session{own: ledgerPath(in.SessionID, in.AgentID), main: ledgerPath(in.SessionID, ""), turn: in.TurnID, model: in.Model},
+		Log:     session{own: ledgerPath(in.SessionID, in.AgentID), main: ledgerPath(in.SessionID, ""), turn: in.TurnID, model: in.Model, cwd: in.CWD},
 		Harness: a}
 	h := &harness.Hook{Event: in.HookEventName, Cwd: in.CWD, Source: in.Source, Native: p}
 	for _, c := range p.calls {

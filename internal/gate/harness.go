@@ -132,14 +132,34 @@ func (ev Event) harness() Harness {
 }
 
 // skillFile is skill's SKILL.md in the event's harness's skill folders, or "".
-func (ev Event) skillFile(skill string) string {
-	for _, dir := range ev.harness().SkillDirs(ev.Cwd) {
+func (ev Event) skillFile(skill string) string { return SkillFileIn(ev.harness().SkillDirs(ev.Cwd), skill) }
+
+// SkillFileIn is skill's SKILL.md in the first of dirs that has one, as the harness resolves the name; "" if none.
+func SkillFileIn(dirs []string, skill string) string {
+	for _, dir := range dirs {
 		p := filepath.Join(dir, skill, "SKILL.md")
 		if st, err := os.Stat(p); err == nil && st.Mode().IsRegular() {
 			return p
 		}
 	}
 	return ""
+}
+
+// OfResolved keeps the reads of the SKILL.md the harness resolves skill to (dirs in its order): a read of another
+// skill by the same name loaded other instructions. When nothing resolves, every read stays.
+func OfResolved(reads []FileRead, dirs []string, skill string) []FileRead {
+	want := SkillFileIn(dirs, skill)
+	if want == "" {
+		return reads
+	}
+	ws, _ := os.Stat(want)
+	var out []FileRead
+	for _, r := range reads {
+		if rs, err := os.Stat(r.File); filepath.Clean(r.File) == want || err == nil && ws != nil && os.SameFile(ws, rs) {
+			out = append(out, r)
+		}
+	}
+	return out
 }
 
 // SkillRoots are where a SKILL.md read counts as a skill load, for cwd: dirs are skills folders (the file is

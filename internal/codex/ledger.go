@@ -216,6 +216,7 @@ type session struct {
 	model     string
 	spawning  bool   // the call being gated starts a subagent
 	spawnID   string // its spawn record in the main ledger, when the main thread spawns
+	cwd       string // the call's, where its skill names resolve
 }
 
 var _ gate.Session = session{}
@@ -274,7 +275,7 @@ func (s session) SkillLoaded(skill string, window int) bool {
 			}
 		}
 	}
-	return gate.Covered(reads)
+	return gate.Covered(gate.OfResolved(reads, Adapter{}.SkillDirs(s.cwd), skill))
 }
 
 // DenyDelivered: a paws deny in the window opened a paragraph with marker. Codex shows a PreToolUse deny to the model

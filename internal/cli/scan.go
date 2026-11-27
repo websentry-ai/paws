@@ -16,7 +16,6 @@ import (
 	"time"
 
 	"github.com/websentry-ai/paws/internal/gate"
-	"github.com/websentry-ai/paws/internal/harness"
 	"github.com/websentry-ai/paws/internal/history"
 	"github.com/websentry-ai/paws/internal/hook"
 	"github.com/websentry-ai/paws/internal/rule"
@@ -267,7 +266,7 @@ var scanNow = time.Now
 func Scan(args []string) int {
 	if name := agentArg(args); name != "" {
 		// Only Claude Code's session logs are read; Codex's rollout files aren't a stable format.
-		if a := harness.Find(adapters, name); a == nil || a != defaultAdapter() {
+		if a := findAgent(name); a == nil || a != defaultAdapter() {
 			fmt.Fprintf(os.Stderr, "paws: scan reads %s sessions only; it can't read %s sessions yet\n", defaultAdapter().Title(), name)
 			return 2
 		}

@@ -818,3 +818,25 @@ func TestTurnCallsKeepWhenTheDenyLanded(t *testing.T) {
 		t.Errorf("want a denied call with DeniedAt at or after At, got %+v (%v)", calls, err)
 	}
 }
+
+// A read of a same-named skill other than the one Codex resolves (~/.agents/skills first) loads nothing.
+func TestLedgerOnlyTheResolvedSkillsReadLoads(t *testing.T) {
+	md := ledgerEnv(t)
+	repo := onDisk(t, ".agents/skills/git/SKILL.md")
+	other := filepath.Join(repo, ".agents", "skills", "git", "SKILL.md")
+	read := func(id, file string) {
+		observe(t, stdin(t, "PreToolUse", "t1", in(repo, bashCall(id, "cat "+file))), gate.Decision{})
+		observe(t, stdin(t, "PostToolUse", "t1", in(repo, result(id, "x\n"))), gate.Decision{})
+	}
+	loaded := func() bool {
+		return parse(t, stdin(t, "PreToolUse", "t1", in(repo, bashCall("c9", "git push")))).Calls[0].Log.SkillLoaded("git", 20)
+	}
+	read("c1", other)
+	if loaded() {
+		t.Error("the repo's git skill isn't the one Codex resolves")
+	}
+	read("c2", md)
+	if !loaded() {
+		t.Error("a read of the resolved SKILL.md loads it")
+	}
+}

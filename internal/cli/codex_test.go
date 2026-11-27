@@ -406,3 +406,18 @@ func TestCodexReadOfSeveralSKILLmdFilesLoadsEach(t *testing.T) {
 		t.Errorf("the read loaded git, the second file: the push passes, got %s", out)
 	}
 }
+
+// Adding Codex copies the skills paws already installed for Claude Code into Codex's folder, as a pack install
+// would have.
+func TestCodexInitCopiesInstalledSkills(t *testing.T) {
+	_, repo := askEnv(t, "", false)
+	interactive = func() bool { return false }
+	captureStdout(t, func() int { return Skill([]string{"--settings", filepath.Join(repo, ".claude", "settings.json")}) })
+	code, out := captureStdout(t, func() int { return Init([]string{"--agent", "codex", "--project"}) })
+	if code != 0 || !strings.Contains(out, "copied 1 skill(s) paws installed into .agents/skills: paws") {
+		t.Fatalf("init exit %d:\n%s", code, out)
+	}
+	if _, err := os.Stat(filepath.Join(repo, ".agents", "skills", "paws", "SKILL.md")); err != nil {
+		t.Errorf("the paws skill is in .agents/skills: %v", err)
+	}
+}

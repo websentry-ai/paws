@@ -23,7 +23,7 @@ Apache-2.0 · no account · Claude Code and Codex CLI.
 
 ```bash
 curl -fsSL https://paws.getunbound.ai/install.sh | bash   # installs ~/.local/bin/unbound-paws
-unbound-paws init                                         # registers the hook in this repo's .claude/settings.json
+unbound-paws init                                         # asks which agents (Claude Code, Codex) and where
 unbound-paws add writing                                  # humanizer before PR bodies, commits and MCP sends
 ```
 
@@ -48,6 +48,7 @@ unbound-paws explain 'gh pr create --fill'
 
 ```bash
 unbound-paws init --agent codex            # this repo's .codex/hooks.json; --global for ~/.codex/hooks.json
+unbound-paws init --agent claude,codex     # both, without the questions
 ```
 
 Codex runs a new hook only after you trust it: start Codex, run `/hooks` and trust the paws hook. The same rules
@@ -196,12 +197,17 @@ only for `localhost`, `127.0.0.1` or `::1`, with a warning.
 
 ```bash
 curl -fsSL https://paws.getunbound.ai/install.sh | bash   # install or upgrade
-unbound-paws init                 # this repo (or this folder, outside a repo)
+unbound-paws init                 # on a terminal: pick the agents and this repo or every repo
+unbound-paws init --project       # Claude Code, this repo (or this folder, outside a repo): the default without a terminal
 unbound-paws init --global        # every repo for this user (~/.claude/settings.json)
 unbound-paws uninstall            # removes everything paws added, after listing it and asking
 unbound-paws uninstall --hook-only [--global]   # removes only the hook
 rm ~/.local/bin/unbound-paws      # then the binary itself (npm rm -g unbound-paws, or brew uninstall --cask unbound-paws)
 ```
+
+On a terminal, `init` asks which agents to set up (the ones found on this machine are ticked) and where, and
+`uninstall` asks the same. Any flag skips the questions: `--agent claude|codex` (repeat it or use a comma list),
+`--project`, `--global` or `--settings <path>`. Without a terminal, as for an agent or CI, nothing is asked.
 
 `uninstall` takes `--project` or `--global` to limit the scope, `--keep-skills` to leave the skills paws
 installed, and `--yes` to skip the question. It removes the hook, the packs and skills paws installed (a skill

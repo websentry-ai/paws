@@ -20,14 +20,31 @@ import (
 	"github.com/websentry-ai/paws/internal/pack"
 )
 
-// Init registers the paws binary as an agent hook: repo root's .claude/settings.json by default, ~/.claude with
-// --global; with --agent, the named harness's hook file instead.
+// Init registers the paws binary as an agent hook: `paws init [--agent claude|codex ...] [--global | --project |
+// --settings <path>]`. On a terminal with no flags it asks which agents and where; without a terminal and flags it
+// does what it always did: Claude Code, the repo root's .claude/settings.json.
 func Init(args []string) int {
-	a, settingsPath, code := installTarget(args)
+	targets, code := initTargets(args)
 	if code >= 0 {
 		return code
 	}
+	var set []string
+	for _, t := range targets {
+		if c := initOne(t.a, t.path); c != 0 {
+			code = c
+			continue
+		}
+		set = append(set, fmt.Sprintf("  %-12s %s", t.a.Title(), tilde(t.path)))
+	}
+	if len(set) > 0 {
+		fmt.Println("paws is set up for:")
+		fmt.Println(strings.Join(set, "\n"))
+	}
+	return max(code, 0)
+}
 
+// initOne registers the hook for one harness in one hook file.
+func initOne(a harness.Adapter, settingsPath string) int {
 	self, err := os.Executable()
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "paws: cannot resolve own path: %v\n", err)
@@ -96,6 +113,141 @@ func Init(args []string) int {
 		fmt.Printf("%s has a different paws hook. Run %s too, so %s runs paws once.\n", other, fix, a.Title())
 	}
 	return 0
+}
+
+// initTarget is one hook file init writes: a harness and its hook file.
+type initTarget struct {
+	a    harness.Adapter
+	path string
+}
+
+// initTargets reads init's flags, or asks on a terminal when there are none. code is -1 to go on, else the exit.
+func initTargets(args []string) (targets []initTarget, code int) {
+	var agents []harness.Adapter
+	global, project, explicit, flagged := false, false, "", len(args) > 0
+	for i := 0; i < len(args); i++ {
+		switch args[i] {
+		case "--agent":
+			if i+1 >= len(args) {
+				return nil, usageAgent()
+			}
+			for _, name := range strings.Split(args[i+1], ",") {
+				a := findAgent(strings.TrimSpace(name))
+				if a == nil {
+					return nil, usageAgent()
+				}
+				if !slices.Contains(agents, a) {
+					agents = append(agents, a)
+				}
+			}
+			i++
+		case "--global":
+			global = true
+		case "--project":
+			project = true
+		case "--settings":
+			if i+1 >= len(args) {
+				fmt.Fprintln(os.Stderr, "paws: --settings needs a path")
+				return nil, 2
+			}
+			explicit = args[i+1]
+			i++
+		default:
+			fmt.Fprintf(os.Stderr, "paws: unknown flag %q\n", args[i])
+			return nil, 2
+		}
+	}
+	switch {
+	case global && project:
+		fmt.Fprintln(os.Stderr, "paws: --global and --project: pick one")
+		return nil, 2
+	case explicit != "" && (global || project || len(agents) > 1):
+		fmt.Fprintln(os.Stderr, "paws: --settings names one hook file: use it with at most one --agent, without --global or --project")
+		return nil, 2
+	}
+	if !flagged && interactive() {
+		var err error
+		if agents, global, err = askInit(); err != nil {
+			fmt.Fprintln(os.Stderr, "paws: nothing set up")
+			return nil, 1
+		}
+	}
+	if len(agents) == 0 {
+		agents = []harness.Adapter{defaultAdapter()}
+	}
+	cwd, _ := os.Getwd()
+	for _, a := range agents {
+		path := explicit
+		if path == "" {
+			path = a.HookFile(global, projectRoot(cwd))
+		}
+		targets = append(targets, initTarget{a, path})
+	}
+	return targets, -1
+}
+
+// askInit asks which agents paws gates (the ones found on this machine ticked) and where.
+func askInit() (agents []harness.Adapter, global bool, err error) {
+	c := newChooser()
+	all := installOrder()
+	labels, on := make([]string, len(all)), make([]bool, len(all))
+	for i, a := range all {
+		labels[i], on[i] = a.Title(), agentFound(a)
+		if agentFound(a) {
+			labels[i] += " (found)"
+		}
+	}
+	if !anyOn(on) {
+		on[0] = true // nothing found: Claude Code, as without a terminal
+	}
+	picked, err := c.many("Which agents should paws gate?", labels, on)
+	if err != nil {
+		return nil, false, err
+	}
+	for i, p := range picked {
+		if p {
+			agents = append(agents, all[i])
+		}
+	}
+	where, err := c.one("Where?", []string{"This repo only", "Every repo (global)"}, 0)
+	return agents, where == 1, err
+}
+
+// installOrder lists the harnesses as init offers them: Claude Code first.
+func installOrder() []harness.Adapter {
+	all := []harness.Adapter{defaultAdapter()}
+	for _, a := range adapters {
+		if a != defaultAdapter() {
+			all = append(all, a)
+		}
+	}
+	return all
+}
+
+// agentFound reports whether a harness is on this machine: its command on PATH, or its config folder.
+func agentFound(a harness.Adapter) bool {
+	bin, dir := "claude", hook.ConfigDir()
+	if a != defaultAdapter() {
+		bin, dir = a.Name(), filepath.Dir(a.HookFile(true, ""))
+	}
+	if _, err := exec.LookPath(bin); err == nil {
+		return true
+	}
+	st, err := os.Stat(dir)
+	return err == nil && st.IsDir()
+}
+
+// findAgent is the harness --agent names: its name, or "claude" for Claude Code.
+func findAgent(name string) harness.Adapter {
+	if name == "claude" {
+		return defaultAdapter()
+	}
+	return harness.Find(adapters, name)
+}
+
+func usageAgent() int {
+	fmt.Fprintf(os.Stderr, "paws: --agent needs one or more of: claude, %s\n", strings.Join(adapterNames(), ", "))
+	return 2
 }
 
 // hookGuard reports whether init may wrap the hook command in the missing-binary guard, which needs sh.
@@ -239,11 +391,11 @@ func installTarget(args []string) (a harness.Adapter, path string, code int) {
 	for i := 0; i < len(args); i++ {
 		switch args[i] {
 		case "--agent":
-			if i+1 >= len(args) || harness.Find(adapters, args[i+1]) == nil {
-				fmt.Fprintf(os.Stderr, "paws: --agent needs one of: %s\n", strings.Join(adapterNames(), ", "))
+			if i+1 >= len(args) || findAgent(args[i+1]) == nil {
+				fmt.Fprintf(os.Stderr, "paws: --agent needs one of: claude, %s\n", strings.Join(adapterNames(), ", "))
 				return nil, "", 2
 			}
-			a = harness.Find(adapters, args[i+1])
+			a = findAgent(args[i+1])
 			i++
 		case "--global":
 			global = true

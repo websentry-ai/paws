@@ -1,7 +1,6 @@
 package cli
 
 import (
-	"bufio"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -12,6 +11,7 @@ import (
 	"strings"
 
 	"github.com/websentry-ai/paws/internal/gate"
+	"github.com/websentry-ai/paws/internal/harness"
 	"github.com/websentry-ai/paws/internal/hook"
 	"github.com/websentry-ai/paws/internal/pack"
 )
@@ -78,6 +78,17 @@ func Uninstall(args []string) int {
 		}
 		return uninstallHookOnly(f.rest)
 	}
+	c := newChooser()
+	agents := map[harness.Adapter]bool{} // the harnesses to remove paws from; empty is all of them
+	if !f.project && !f.global && !f.yes && interactive() {
+		var err error
+		if agents, f.project, f.global, err = askUninstall(c); err != nil {
+			fmt.Fprintln(os.Stderr, "paws: nothing removed")
+			return 1
+		}
+	}
+	all := len(agents) == 0
+	claude := all || agents[defaultAdapter()]
 	if !f.project && !f.global {
 		f.project, f.global = true, true
 	}
@@ -95,18 +106,19 @@ func Uninstall(args []string) int {
 		fmt.Fprintln(os.Stderr, "paws: this folder is not in a repo, so its project files are your global ones. Run --project from a repo, or use --global.")
 		return 2
 	}
-	if f.global {
+	// Claude Code's part is also what every harness shares: the login, portal and pack rules, and the pack state.
+	if claude && f.global {
 		plan = planPortal(plan) // first: tier 2 steps run in plan order, and the skills below need the login gone first
 	}
-	if f.project {
+	if claude && f.project {
 		hooks := []string{filepath.Join(root, ".claude", "settings.json"), filepath.Join(root, ".claude", "settings.local.json")}
 		plan, keep = planScope(plan, keep, "project", hooks, pack.ProjectTarget(root), f.keepSkills, shared)
 	}
-	if f.global {
+	if claude && f.global {
 		plan, keep = planScope(plan, keep, "global", []string{filepath.Join(hook.ConfigDir(), "settings.json")}, user, f.keepSkills, overlap{})
 		keep = planUserFiles(keep)
 	}
-	plan, keep = planOtherHarnesses(plan, keep, root, f.project, f.global, f.keepSkills)
+	plan, keep = planOtherHarnesses(plan, keep, root, f.project, f.global, f.keepSkills, func(a harness.Adapter) bool { return all || agents[a] })
 
 	if len(plan) == 0 {
 		fmt.Println("Nothing to remove: paws has not added anything here.")
@@ -124,7 +136,7 @@ func Uninstall(args []string) int {
 	}
 	if len(plan) > 0 && !f.yes {
 		fmt.Print("Remove these? [y/N] ")
-		line, err := bufio.NewReader(os.Stdin).ReadString('\n')
+		line, err := c.in.ReadString('\n')
 		if err != nil && line == "" {
 			fmt.Println()
 			fmt.Fprintln(os.Stderr, "paws: no answer; nothing removed. Pass --yes to skip the question.")
@@ -175,12 +187,41 @@ A repo that committed the paws hook keeps it until you remove it there (unbound-
 	return code
 }
 
+// askUninstall asks which agents to remove paws from (the ones it is set up for ticked) and from where.
+func askUninstall(c *chooser) (agents map[harness.Adapter]bool, project, global bool, err error) {
+	cwd, _ := os.Getwd()
+	root := projectRoot(cwd)
+	all := installOrder()
+	labels, on := make([]string, len(all)), make([]bool, len(all))
+	for i, a := range all {
+		labels[i] = a.Title()
+		if hasPawsHook(a.HookFile(false, root)) || hasPawsHook(a.HookFile(true, "")) {
+			labels[i], on[i] = labels[i]+" (paws set up)", true
+		}
+	}
+	if !anyOn(on) {
+		for i := range on {
+			on[i] = true
+		}
+	}
+	picked, err := c.many("Remove paws from which agents?", labels, on)
+	if err != nil {
+		return nil, false, false, err
+	}
+	agents = map[harness.Adapter]bool{}
+	for i, p := range picked {
+		agents[all[i]] = p
+	}
+	where, err := c.one("From where?", []string{"This repo and every repo (everything)", "This repo only", "Every repo (global) only"}, 0)
+	return agents, where != 2, where != 1, err
+}
+
 // planOtherHarnesses adds each other harness's paws hook and the skill copies paws made for it (Codex's
 // .codex/hooks.json and .agents/skills), for the scopes being removed. A copy goes even when its hook is gone.
-func planOtherHarnesses(plan []removal, keep []string, root string, project, global, keepSkills bool) ([]removal, []string) {
+func planOtherHarnesses(plan []removal, keep []string, root string, project, global, keepSkills bool, chosen func(harness.Adapter) bool) ([]removal, []string) {
 	seen := map[string]bool{} // outside a repo, the project's files can be the global ones
 	for _, a := range adapters {
-		if a == defaultAdapter() {
+		if a == defaultAdapter() || !chosen(a) {
 			continue
 		}
 		for _, g := range []bool{false, true} {

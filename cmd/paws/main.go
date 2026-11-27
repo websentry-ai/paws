@@ -74,9 +74,10 @@ func usage() {
 
 Usage:
   unbound-paws gate [--agent codex]                      Run as an agent hook (reads event JSON on stdin).
-  unbound-paws init [--agent codex] [--global | --settings <path>]
-                                                         Register paws in Claude Code's settings.json, or with
-                                                         --agent codex in Codex's hooks.json (.codex/ or ~/.codex/).
+  unbound-paws init [--agent claude|codex ...] [--project | --global | --settings <path>]
+                                                         Register paws in Claude Code's settings.json and/or
+                                                         Codex's hooks.json (.codex/ or ~/.codex/). On a terminal
+                                                         with no flags it asks which agents and where.
   unbound-paws uninstall [--project] [--global] [--keep-skills] [--yes]
                                                          Remove everything paws added; lists it and asks first.
   unbound-paws uninstall --hook-only [--agent codex] [--global | --settings <path>]

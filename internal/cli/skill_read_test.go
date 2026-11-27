@@ -370,3 +370,28 @@ func TestACutReadCoversOnlyWhatTheAgentSaw(t *testing.T) {
 		t.Errorf("an output cut in the middle covers only its first lines, got %s", out)
 	}
 }
+
+// A Skill tool load counts only while its SKILL.md is unchanged: once the file changes, the agent loads it again.
+func TestSkillLoadBeforeTheSKILLmdChangedIsNoLoad(t *testing.T) {
+	home := portalEnv(t, http.NotFoundHandler())
+	writeRule(t, filepath.Join(home, "catch-all.md"), "name: catch-all\nevent: pre-tool\naction:\n  type: require-skill\n  skill: deployer\n")
+	md := skillMD(t, "deployer")
+	at := time.Now().Add(-time.Minute)
+	ts := at.UTC().Format(time.RFC3339Nano)
+	transcript := filepath.Join(t.TempDir(), "s.jsonl")
+	writeFile(t, transcript, `{"type":"user","isSidechain":false,"timestamp":"`+at.Add(-time.Second).UTC().Format(time.RFC3339Nano)+`","message":{"role":"user","content":"deploy"}}`+"\n"+
+		`{"type":"assistant","isSidechain":false,"timestamp":"`+ts+`","message":{"role":"assistant","content":[{"type":"tool_use","id":"toolu_1","name":"Skill","input":{"skill":"deployer"}}]}}`+"\n"+
+		`{"type":"user","isSidechain":false,"timestamp":"`+ts+`","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"toolu_1","content":"Launching skill: deployer"}]},"toolUseResult":{"success":true,"commandName":"deployer"}}`+"\n")
+	gated := func() bool {
+		return strings.Contains(runGate(t, map[string]any{"hook_event_name": "PreToolUse", "session_id": "s", "cwd": t.TempDir(),
+			"transcript_path": transcript, "tool_name": "Bash", "tool_input": map[string]any{"command": "ls"}}), `"deny"`)
+	}
+	os.Chtimes(md, at.Add(-time.Hour), at.Add(-time.Hour))
+	if gated() {
+		t.Error("loaded after the SKILL.md last changed: the call passes")
+	}
+	os.Chtimes(md, time.Now(), time.Now())
+	if !gated() {
+		t.Error("the SKILL.md changed after the load: the call needs a new load")
+	}
+}

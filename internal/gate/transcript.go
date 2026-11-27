@@ -29,6 +29,7 @@ type transcriptEntry struct {
 	Type        string `json:"type"`
 	Subtype     string `json:"subtype"`
 	IsSidechain bool   `json:"isSidechain"`
+	Timestamp   string `json:"timestamp"`
 	// Polymorphic in the log: an object for tool results, a bare string for hook denials.
 	ToolUseResult json.RawMessage `json:"toolUseResult"`
 
@@ -119,7 +120,11 @@ func skillLoaded(path, skill string, window int, cwd string) bool {
 	for id := range calls {
 		needles = append(needles, []byte(id))
 	}
+	changed := skillChanged(skill, cwd)
 	loaded := scanLines(lines, path, needles, func(e transcriptEntry) bool {
+		if !loadedSince(e, changed) {
+			return false // the SKILL.md changed after this load: the agent saw an older skill
+		}
 		if e.Type == requestBlob {
 			// A tool_result answering a Skill tool_use for this skill, not an error. The pairing
 			// by id is what keeps a command that prints "Launching skill: x" from counting.
@@ -142,6 +147,24 @@ func skillLoaded(path, skill string, window int, cwd string) bool {
 	// Reads of the skill's SKILL.md load it once those that succeeded cover the whole file.
 	reads := readCalls(lines, path, skill, cwd)
 	return len(reads) > 0 && Covered(succeededReads(lines, path, reads))
+}
+
+// skillChanged is when skill's SKILL.md in Claude Code's skill folders last changed, or zero when paws finds none
+// (a plugin's skill, say).
+func skillChanged(skill, cwd string) time.Time {
+	for _, dir := range SkillTool.SkillDirs(cwd) {
+		if st, err := os.Stat(filepath.Join(dir, skill, "SKILL.md")); err == nil && st.Mode().IsRegular() {
+			return st.ModTime()
+		}
+	}
+	return time.Time{}
+}
+
+// loadedSince reports whether a record came after changed, as reads of a changed SKILL.md count only after it. A
+// record without a time counts.
+func loadedSince(e transcriptEntry, changed time.Time) bool {
+	at, err := time.Parse(time.RFC3339Nano, e.Timestamp)
+	return changed.IsZero() || err != nil || !at.Before(changed.Truncate(time.Millisecond)) // the log keeps milliseconds
 }
 
 // succeededReads are the reads whose tool_result, paired by id, is not an error: in a user record or a request blob.

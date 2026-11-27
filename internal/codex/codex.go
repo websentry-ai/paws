@@ -167,8 +167,9 @@ var chainSep = regexp.MustCompile(`&&|\|\||[;\n]`)
 type shellPatch struct{ text, dir string }
 
 // applyPatchCmd finds apply_patch where a command starts: at the line's start, after ; & | or (, as a whole word,
-// behind any of the wrappers that run the next word as the command (command apply_patch, exec, env, nohup, time).
-var applyPatchCmd = regexp.MustCompile(`(?m)(?:^|[;&|(])[ \t]*(?:(?:command|builtin|exec|env|nohup|time|sudo)[ \t]+)*(apply_patch)(?:[ \t<]|$)`)
+// behind any of the wrappers that run the next word as the command (command apply_patch, exec, env, nohup, time) and
+// any FOO=bar assignments.
+var applyPatchCmd = regexp.MustCompile(`(?m)(?:^|[;&|(])[ \t]*(?:(?:command|builtin|exec|env|nohup|time|sudo|[A-Za-z_][A-Za-z0-9_]*=\S*)[ \t]+)*(apply_patch)(?:[ \t<]|$)`)
 
 // shellPatches are the apply_patch runs of a shell command, each with the folder the commands before it moved to.
 func shellPatches(cmd, cwd string) []shellPatch {
@@ -329,8 +330,8 @@ func (Adapter) Observe(h *harness.Hook, d gate.Decision) {
 			// there is no exit code, so that line is the only sign it applied.
 			runs := shellPatches(cmdOf(in), in.CWD)
 			if in.ToolName == "apply_patch" {
-				patch, _ := in.ToolInput["command"].(string)
-				runs = []shellPatch{{text: patch, dir: in.CWD}} // the tool runs in the hook's cwd
+				str := func(k string) string { s, _ := in.ToolInput[k].(string); return s }
+				runs = []shellPatch{{text: cmp.Or(str("command"), str("input"), str("patch")), dir: in.CWD}} // the tool runs in the hook's cwd
 			}
 			files = patchedFiles(in.ToolResponse, runs)
 			if in.ToolName == "Bash" {

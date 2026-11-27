@@ -463,7 +463,7 @@ func TestTurnCallsGradesTheStopsTurn(t *testing.T) {
 // A wrapper that runs the next word as the command still runs apply_patch; a path two runs both name is no one's.
 func TestShellPatchWrappersAndAmbiguousResults(t *testing.T) {
 	h := parse(t, stdin(t, "PreToolUse", "t1", map[string]any{"tool_name": "Bash", "tool_input": map[string]any{
-		"command": "command apply_patch <<'EOF'\n*** Begin Patch\n*** Add File: migrations/1.sql\n+x\n*** End Patch\nEOF"}}))
+		"command": "env LANG=C command apply_patch <<'EOF'\n*** Begin Patch\n*** Add File: migrations/1.sql\n+x\n*** End Patch\nEOF"}}))
 	if len(h.Calls) != 2 || h.Calls[1].Target != "/repo/migrations/1.sql" {
 		t.Errorf("command apply_patch: want a Write of /repo/migrations/1.sql, got %+v", h.Calls)
 	}

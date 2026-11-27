@@ -228,3 +228,24 @@ func TestUninstallCodexOnlyRemovesWhatItShared(t *testing.T) {
 		t.Errorf("no agent runs paws any more: the skills paws installed go too\n%s", out)
 	}
 }
+
+// Skill copies paws made for Codex tick Codex in uninstall's list even after its hook is gone, so they go too.
+func TestUninstallTicksCodexForItsSkillCopies(t *testing.T) {
+	_, repo := askEnv(t, "\r\ry\n", true)
+	interactive = func() bool { return false }
+	captureStdout(t, func() int { return Init([]string{"--agent", "codex", "--project"}) })
+	captureStdout(t, func() int { return Uninstall([]string{"--hook-only", "--agent", "codex"}) })
+	captureStdout(t, func() int { return Skill([]string{"--agent", "codex"}) })
+	copy := filepath.Join(repo, ".agents", "skills", "paws")
+	if _, err := os.Stat(copy); err != nil || hasPawsHook(filepath.Join(repo, ".codex", "hooks.json")) {
+		t.Fatalf("set-up: a Codex skill copy without its hook: %v", err)
+	}
+	interactive = func() bool { return true }
+	code, out := captureStdout(t, func() int { return Uninstall(nil) })
+	if code != 0 || !strings.Contains(out, "Codex (paws set up)") {
+		t.Fatalf("uninstall exit %d:\n%s", code, out)
+	}
+	if _, err := os.Stat(copy); err == nil {
+		t.Errorf("the Codex skill copy goes:\n%s", out)
+	}
+}

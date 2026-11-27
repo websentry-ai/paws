@@ -232,7 +232,7 @@ func askUninstall(c *chooser) (agents map[harness.Adapter]bool, project, global 
 	labels, on := make([]string, len(all)), make([]bool, len(all))
 	for i, a := range all {
 		labels[i] = a.Title()
-		if hasPawsHook(a.HookFile(false, root)) || hasPawsHook(a.HookFile(true, "")) {
+		if pawsIn(a, root) {
 			labels[i], on[i] = labels[i]+" (paws set up)", true
 		}
 	}
@@ -251,6 +251,20 @@ func askUninstall(c *chooser) (agents map[harness.Adapter]bool, project, global 
 	}
 	where, err := c.one("From where?", []string{"This repo and every repo (everything)", "This repo only", "Every repo (global) only"}, 0)
 	return agents, where != 2, where != 1, err
+}
+
+// pawsIn reports whether paws left anything for a harness: its hook, or skill copies it made (they stay when the
+// hook went some other way).
+func pawsIn(a harness.Adapter, root string) bool {
+	for _, hookFile := range []string{a.HookFile(false, root), a.HookFile(true, "")} {
+		if hasPawsHook(hookFile) {
+			return true
+		}
+		if dir := a.SkillsDirFor(hookFile); dir != "" && len(pack.PawsSkills(dir)) > 0 {
+			return true
+		}
+	}
+	return false
 }
 
 // planOtherHarnesses adds each other harness's paws hook and the skill copies paws made for it (Codex's

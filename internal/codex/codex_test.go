@@ -737,3 +737,20 @@ func TestLedgerReaderNotFoundIsNoRead(t *testing.T) {
 		}
 	}
 }
+
+// Two spawns gated at the same time: both records land before either is decided, and the later one still counts
+// the earlier one.
+func TestLedgerConcurrentSpawnsCountEachOther(t *testing.T) {
+	ledgerEnv(t)
+	spawn := func(id string) map[string]any {
+		return map[string]any{"tool_name": "Agent", "tool_use_id": id, "tool_input": map[string]any{"prompt": "x"}}
+	}
+	first := parse(t, stdin(t, "PreToolUse", "t1", spawn("s1"))).Calls[0].Log
+	second := parse(t, stdin(t, "PreToolUse", "t1", spawn("s2"))).Calls[0].Log
+	if a, b := first.AgentsSinceUserTurn(), second.AgentsSinceUserTurn(); a != 1 || b != 2 {
+		t.Errorf("the first spawn is the first, the second the second: got %d and %d", a, b)
+	}
+	if n := parse(t, stdin(t, "PreToolUse", "t1", bashCall("c9", "ls"))).Calls[0].Log.AgentsSinceUserTurn(); n != 2 {
+		t.Errorf("a later call sees both spawns, got %d", n)
+	}
+}

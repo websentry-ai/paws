@@ -205,7 +205,8 @@ type session struct {
 	own, main string
 	turn      string // the calling call's turn
 	model     string
-	spawning  bool // the call being gated starts a subagent
+	spawning  bool   // the call being gated starts a subagent
+	spawnID   string // its spawn record in the main ledger, when the main thread spawns
 }
 
 var _ gate.Session = session{}
@@ -301,17 +302,31 @@ func (s session) EditedMatching(glob *regexp.Regexp) bool {
 
 // AgentsSinceUserTurn counts the subagents the main thread spawned in the current turn, the spawn being gated
 // included, as Claude Code's transcript holds it. A spawn a hook denied started no agent and isn't counted.
+//
+// A main-thread spawn appends its spawn record before it is decided, and counts only the spawns up to its own. One
+// append is one write, so the ledger orders spawns gated at the same time: the later one counts the earlier one.
 func (s session) AgentsSinceUserTurn() int {
-	n := 0
-	if s.spawning {
-		n++
-	}
-	for _, r := range readLedger(s.main) {
-		if r.Kind == "call" && r.Turn == s.turn && r.Verdict != "deny" && (r.Tool == "Agent" || r.Tool == "Task") {
-			n++
+	recs := readLedger(s.main)
+	denied := map[string]bool{}
+	for _, r := range recs {
+		if r.Kind == "call" && r.Verdict == "deny" {
+			denied[r.ID] = true
 		}
 	}
-	return n
+	seen := map[string]bool{}
+	for _, r := range recs {
+		spawn := r.Kind == "spawn" || r.Kind == "call" && (r.Tool == "Agent" || r.Tool == "Task")
+		if spawn && r.Turn == s.turn && !denied[r.ID] {
+			seen[r.ID] = true
+		}
+		if s.spawnID != "" && r.Kind == "spawn" && r.ID == s.spawnID {
+			return len(seen) // the spawns after it were gated after it
+		}
+	}
+	if s.spawning && !seen[s.spawnID] {
+		return len(seen) + 1 // its record didn't land (no ledger): it still counts itself
+	}
+	return len(seen)
 }
 
 func (s session) Model() string { return s.model }

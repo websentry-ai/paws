@@ -97,6 +97,10 @@ func (a Adapter) Parse(stdin []byte) (*harness.Hook, error) {
 		ev.Tool, ev.Target = c.tool, c.target
 		if s, ok := ev.Log.(session); ok && c.tool == "Agent" {
 			s.spawning = true // this call is a spawn the ledger doesn't hold yet
+			if in.HookEventName == "PreToolUse" && in.AgentID == "" && in.TurnID != "" && in.ToolUseID != "" {
+				s.spawnID = in.ToolUseID // recorded before it is decided: a spawn gated at the same time sees it
+				appendRecords(s.main, []record{{Kind: "spawn", At: time.Now(), Turn: in.TurnID, ID: in.ToolUseID}})
+			}
 			ev.Log = s
 		}
 		switch in.HookEventName {

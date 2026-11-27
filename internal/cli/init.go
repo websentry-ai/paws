@@ -255,6 +255,9 @@ func initTargets(args []string) (targets []initTarget, code int) {
 		agents = []harness.Adapter{defaultAdapter()}
 	}
 	cwd, _ := os.Getwd()
+	if !global && explicit == "" && !inRepo(cwd) {
+		fmt.Println("Not in a git repo: paws is set up for this folder only.")
+	}
 	for _, a := range agents {
 		path := explicit
 		if path == "" {
@@ -523,6 +526,12 @@ func projectRoot(cwd string) string {
 		}
 		cur = parent
 	}
+}
+
+// inRepo reports whether cwd is inside a git repo (projectRoot found its .git).
+func inRepo(cwd string) bool {
+	_, err := os.Stat(filepath.Join(projectRoot(cwd), ".git"))
+	return err == nil
 }
 
 // shellQuote wraps p in POSIX single quotes so $, backticks and spaces survive.

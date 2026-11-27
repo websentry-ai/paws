@@ -28,6 +28,27 @@ var makeRaw = func() (restore func(), err error) {
 	return func() { term.Restore(fd, st) }, nil
 }
 
+// termWidth is the terminal's width in columns, 0 when unknown.
+var termWidth = func() int {
+	w, _, err := term.GetSize(int(os.Stdout.Fd()))
+	if err != nil {
+		return 0
+	}
+	return w
+}
+
+// menuWidth is the narrowest terminal the arrow-key menu redraws on: its longest option or status line, unwrapped.
+const menuWidth = 50
+
+// rawMenu puts the terminal in raw mode for a menu, when it is wide enough that no line of the menu wraps.
+func rawMenu() (restore func(), ok bool) {
+	if w := termWidth(); w > 0 && w < menuWidth {
+		return nil, false
+	}
+	restore, err := makeRaw()
+	return restore, err == nil
+}
+
 var errCancelled = errors.New("cancelled")
 
 // chooser asks init's and uninstall's questions on one reader, so no answer is read ahead and lost.
@@ -40,7 +61,7 @@ func newChooser() *chooser { return &chooser{in: bufio.NewReader(os.Stdin), out:
 
 // many asks which of labels to pick, at least one; on are the ones ticked at the start.
 func (c *chooser) many(title string, labels []string, on []bool) ([]bool, error) {
-	if restore, err := makeRaw(); err == nil {
+	if restore, ok := rawMenu(); ok {
 		defer restore()
 		return c.menu(title, labels, append([]bool(nil), on...), true)
 	}
@@ -53,7 +74,7 @@ func (c *chooser) one(title string, labels []string, def int) (int, error) {
 	on[def] = true
 	var picked []bool
 	var err error
-	if restore, rerr := makeRaw(); rerr == nil {
+	if restore, ok := rawMenu(); ok {
 		defer restore()
 		picked, err = c.menu(title, labels, on, false)
 	} else {

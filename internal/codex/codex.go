@@ -127,7 +127,17 @@ func canonical(in *Input) []call {
 		cmd := str("command")
 		calls := []call{{tool: "Bash", target: cmd, text: cmd, input: map[string]any{"command": cmd}}}
 		for _, sp := range shellPatches(cmd, in.CWD) {
-			calls = append(calls, patchCalls(sp.text, sp.dir)...)
+			// Every folder the patch may run in: a cd behind && or || may not have run, so each file is gated as
+			// it would land from each. A rule that matches any of them asks for its skill.
+			seen := map[string]bool{}
+			for _, d := range sp.dirs {
+				for _, c := range patchCalls(sp.text, d) {
+					if !seen[c.tool+"\x00"+c.target] {
+						seen[c.tool+"\x00"+c.target] = true
+						calls = append(calls, c)
+					}
+				}
+			}
 		}
 		return calls
 	case in.ToolName == "apply_patch":
@@ -162,7 +172,11 @@ var cdStep = regexp.MustCompile(`^cd(?:\s+--)?(?:\s+(?:'([^']*)'|"([^"]*)"|(\S+)
 var chainSep = regexp.MustCompile(`&&|\|\||[;\n]`)
 
 // shellPatch is one apply_patch run in a shell command: its patch text and the folder it runs in.
-type shellPatch struct{ text, dir string }
+type shellPatch struct {
+	text string
+	dir  string   // where it runs if every cd before it ran
+	dirs []string // every folder it may run in: dir, and each folder the commands before it pass through
+}
 
 // applyPatchCmd finds apply_patch (or its applypatch alias) where a command starts: at the line's start, after ; & | or (, as a whole word,
 // behind any of the wrappers that run the next word as the command (command apply_patch, exec, env, nohup, time) and
@@ -181,7 +195,8 @@ func shellPatches(cmd, cwd string) []shellPatch {
 		if k+1 < len(starts) {
 			end = starts[k+1]
 		}
-		run := shellPatch{text: cmd[at:end], dir: patchDir(cmd[:at], cwd)}
+		dir, dirs := patchDir(cmd[:at], cwd)
+		run := shellPatch{text: cmd[at:end], dir: dir, dirs: dirs}
 		// A patch from a file (apply_patch < fix.patch, cat fix.patch | apply_patch) is that file as it is now, or as
 		// an earlier command in this call writes it: any patch text before the run.
 		file := ""
@@ -229,8 +244,9 @@ func readPatchFile(p, dir string) string {
 // patchDir is where a shell patch runs, given the command before it: the hook's cwd, moved by each `cd`, so a
 // relative path in `ls && cd migrations && apply_patch ...` is a file in migrations/. A cd inside a subshell that
 // closes before apply_patch moves nothing.
-func patchDir(before, cwd string) string {
-	var outer []string // the folder each open subshell started in
+func patchDir(before, cwd string) (string, []string) {
+	dirs := []string{cwd} // each folder the commands pass through: a cd behind && or || may not run
+	var outer []string    // the folder each open subshell started in
 	vars := map[string]string{}
 	for _, part := range chainSep.Split(withoutHeredocs(before), -1) {
 		part = strings.TrimSpace(part)
@@ -248,12 +264,15 @@ func patchDir(before, cwd string) string {
 				dir, _ = os.UserHomeDir() // a bare cd goes home
 			}
 			cwd = cdTo(dir, cwd)
+			if !slices.Contains(dirs, cwd) {
+				dirs = append(dirs, cwd)
+			}
 		}
 		for closes := strings.Count(part[len(inner):], ")"); closes > 0 && len(outer) > 0; closes-- {
 			cwd, outer = outer[len(outer)-1], outer[:len(outer)-1] // the subshell ended: back where it began
 		}
 	}
-	return cwd
+	return cwd, dirs
 }
 
 // assignStep is a `VAR=value` command of its own: the value bare, single-quoted (literal) or double-quoted.

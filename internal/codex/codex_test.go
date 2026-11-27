@@ -342,7 +342,7 @@ func TestLedgerShellPatchNeedsSuccess(t *testing.T) {
 func TestParseShellPatchAfterCd(t *testing.T) {
 	h := parse(t, stdin(t, "PreToolUse", "t1", map[string]any{"tool_name": "Bash", "tool_input": map[string]any{
 		"command": "ls && cd db; cd migrations && apply_patch <<'EOF'\n*** Begin Patch\n*** Add File: 1.sql\n+x\n*** End Patch\nEOF"}}))
-	if len(h.Calls) != 2 || h.Calls[1].Target != "/repo/db/migrations/1.sql" {
+	if !gated(h.Calls, "/repo/db/migrations/1.sql") {
 		t.Errorf("want /repo/db/migrations/1.sql, got %+v", h.Calls)
 	}
 }
@@ -369,7 +369,7 @@ func TestShellPatchNeedsApplyPatch(t *testing.T) {
 	}
 	h = parse(t, stdin(t, "PreToolUse", "t1", map[string]any{"tool_name": "Bash", "tool_input": map[string]any{
 		"command": "(cd migrations && apply_patch <<'EOF'\n*** Begin Patch\n*** Add File: 1.sql\n+x\n*** End Patch\nEOF\n)"}}))
-	if len(h.Calls) != 2 || h.Calls[1].Target != "/repo/migrations/1.sql" {
+	if !gated(h.Calls, "/repo/migrations/1.sql") {
 		t.Errorf("want /repo/migrations/1.sql, got %+v", h.Calls)
 	}
 }
@@ -378,7 +378,7 @@ func TestShellPatchNeedsApplyPatch(t *testing.T) {
 func TestShellPatchAfterAClosedSubshell(t *testing.T) {
 	h := parse(t, stdin(t, "PreToolUse", "t1", map[string]any{"tool_name": "Bash", "tool_input": map[string]any{
 		"command": "(cd tmp && ls) && cd db && apply_patch <<'EOF'\n*** Begin Patch\n*** Add File: 1.sql\n+x\n*** End Patch\nEOF"}}))
-	if len(h.Calls) != 2 || h.Calls[1].Target != "/repo/db/1.sql" {
+	if !gated(h.Calls, "/repo/db/1.sql") {
 		t.Errorf("want /repo/db/1.sql, got %+v", h.Calls)
 	}
 }
@@ -387,7 +387,7 @@ func TestShellPatchAfterAClosedSubshell(t *testing.T) {
 func TestShellPatchesEachFromTheirFolder(t *testing.T) {
 	h := parse(t, stdin(t, "PreToolUse", "t1", map[string]any{"tool_name": "Bash", "tool_input": map[string]any{
 		"command": "cd a && apply_patch <<'EOF'\n*** Begin Patch\n*** Add File: 1.sql\n+x\n*** End Patch\nEOF\ncd ../b && apply_patch <<'EOF'\n*** Begin Patch\n*** Add File: 2.sql\n+y\n*** End Patch\nEOF"}}))
-	if len(h.Calls) != 3 || h.Calls[1].Target != "/repo/a/1.sql" || h.Calls[2].Target != "/repo/b/2.sql" {
+	if !gated(h.Calls, "/repo/a/1.sql") || !gated(h.Calls, "/repo/b/2.sql") {
 		t.Errorf("want /repo/a/1.sql and /repo/b/2.sql, got %+v", h.Calls)
 	}
 }
@@ -398,7 +398,7 @@ func TestShellPatchResultsPairWithTheirFolders(t *testing.T) {
 	t.Setenv("MIGS", "/repo/db")
 	cmd := "cd a && apply_patch <<'EOF'\n*** Begin Patch\n*** Update File: x_test.go\n@@\n+x\n*** End Patch\nEOF\ncd $MIGS && apply_patch <<'EOF'\n*** Begin Patch\n*** Update File: y.sql\n@@\n+y\n*** End Patch\nEOF"
 	h := parse(t, stdin(t, "PreToolUse", "t1", bashCall("p1", cmd)))
-	if len(h.Calls) != 3 || h.Calls[2].Target != "/repo/db/y.sql" {
+	if !gated(h.Calls, "/repo/db/y.sql") {
 		t.Fatalf("cd $MIGS: want /repo/db/y.sql, got %+v", h.Calls)
 	}
 	Adapter{}.Observe(h, gate.Decision{})
@@ -464,7 +464,7 @@ func TestTurnCallsGradesTheStopsTurn(t *testing.T) {
 func TestShellPatchWrappersAndAmbiguousResults(t *testing.T) {
 	h := parse(t, stdin(t, "PreToolUse", "t1", map[string]any{"tool_name": "Bash", "tool_input": map[string]any{
 		"command": "env LANG=C command apply_patch <<'EOF'\n*** Begin Patch\n*** Add File: migrations/1.sql\n+x\n*** End Patch\nEOF"}}))
-	if len(h.Calls) != 2 || h.Calls[1].Target != "/repo/migrations/1.sql" {
+	if !gated(h.Calls, "/repo/migrations/1.sql") {
 		t.Errorf("command apply_patch: want a Write of /repo/migrations/1.sql, got %+v", h.Calls)
 	}
 	ledgerEnv(t)
@@ -482,7 +482,7 @@ func TestShellPatchWrappersAndAmbiguousResults(t *testing.T) {
 func TestShellPatchAliasAndCdDashDash(t *testing.T) {
 	h := parse(t, stdin(t, "PreToolUse", "t1", map[string]any{"tool_name": "Bash", "tool_input": map[string]any{
 		"command": "cd -- migrations && applypatch <<'EOF'\n*** Begin Patch\n*** Add File: 1.sql\n+x\n*** End Patch\nEOF"}}))
-	if len(h.Calls) != 2 || h.Calls[1].Target != "/repo/migrations/1.sql" {
+	if !gated(h.Calls, "/repo/migrations/1.sql") {
 		t.Errorf("want a Write of /repo/migrations/1.sql, got %+v", h.Calls)
 	}
 }
@@ -492,12 +492,12 @@ func TestShellPatchAfterBareCd(t *testing.T) {
 	t.Setenv("HOME", "/home/u")
 	h := parse(t, stdin(t, "PreToolUse", "t1", map[string]any{"tool_name": "Bash", "tool_input": map[string]any{
 		"command": "cd && apply_patch <<'EOF'\n*** Begin Patch\n*** Add File: notes.md\n+x\n*** End Patch\nEOF"}}))
-	if len(h.Calls) != 2 || h.Calls[1].Target != "/home/u/notes.md" {
+	if !gated(h.Calls, "/home/u/notes.md") {
 		t.Errorf("want /home/u/notes.md, got %+v", h.Calls)
 	}
 	h = parse(t, stdin(t, "PreToolUse", "t1", map[string]any{"tool_name": "Bash", "tool_input": map[string]any{
 		"command": "cdx foo && apply_patch <<'EOF'\n*** Begin Patch\n*** Add File: notes.md\n+x\n*** End Patch\nEOF"}}))
-	if len(h.Calls) != 2 || h.Calls[1].Target != "/repo/notes.md" {
+	if !gated(h.Calls, "/repo/notes.md") {
 		t.Errorf("cdx is not cd: want /repo/notes.md, got %+v", h.Calls)
 	}
 }
@@ -506,7 +506,7 @@ func TestShellPatchAfterBareCd(t *testing.T) {
 func TestShellPatchHeredocDataAndStdinFile(t *testing.T) {
 	h := parse(t, stdin(t, "PreToolUse", "t1", map[string]any{"tool_name": "Bash", "tool_input": map[string]any{
 		"command": "cat > notes.txt <<'EOF'\ncd elsewhere\nEOF\napply_patch <<'EOF'\n*** Begin Patch\n*** Add File: 1.sql\n+x\n*** End Patch\nEOF"}}))
-	if len(h.Calls) != 2 || h.Calls[1].Target != "/repo/1.sql" {
+	if !gated(h.Calls, "/repo/1.sql") {
 		t.Errorf("heredoc data moved the folder: want /repo/1.sql, got %+v", h.Calls)
 	}
 	dir := t.TempDir()
@@ -521,12 +521,12 @@ func TestShellPatchHeredocDataAndStdinFile(t *testing.T) {
 func TestShellPatchFileWrittenInTheSameCall(t *testing.T) {
 	h := parse(t, stdin(t, "PreToolUse", "t1", map[string]any{"tool_name": "Bash", "tool_input": map[string]any{
 		"command": "cat > /tmp/new.patch <<'EOF'\n*** Begin Patch\n*** Update File: migrations/3.sql\n@@\n+z\n*** End Patch\nEOF\napply_patch < /tmp/new.patch"}}))
-	if len(h.Calls) != 2 || h.Calls[1].Target != "/repo/migrations/3.sql" {
+	if !gated(h.Calls, "/repo/migrations/3.sql") {
 		t.Errorf("want an Edit of /repo/migrations/3.sql, got %+v", h.Calls)
 	}
 	h = parse(t, stdin(t, "PreToolUse", "t1", map[string]any{"tool_name": "Bash", "tool_input": map[string]any{
 		"command": "cat <<< foo\ncd migrations && apply_patch <<'EOF'\n*** Begin Patch\n*** Add File: 4.sql\n+x\n*** End Patch\nEOF"}}))
-	if len(h.Calls) != 2 || h.Calls[1].Target != "/repo/migrations/4.sql" {
+	if !gated(h.Calls, "/repo/migrations/4.sql") {
 		t.Errorf("a here-string hid the cd: want /repo/migrations/4.sql, got %+v", h.Calls)
 	}
 }
@@ -536,12 +536,12 @@ func TestShellPatchPipedFromAFile(t *testing.T) {
 	dir := t.TempDir()
 	os.WriteFile(filepath.Join(dir, "fix.patch"), []byte("*** Begin Patch\n*** Update File: migrations/5.sql\n@@\n+y\n*** End Patch\n"), 0o644)
 	h := parse(t, stdin(t, "PreToolUse", "t1", map[string]any{"tool_name": "Bash", "cwd": dir, "tool_input": map[string]any{"command": "cat fix.patch | apply_patch"}}))
-	if len(h.Calls) != 2 || h.Calls[1].Target != filepath.Join(dir, "migrations", "5.sql") {
+	if !gated(h.Calls, filepath.Join(dir, "migrations", "5.sql")) {
 		t.Errorf("want an Edit of migrations/5.sql, got %+v", h.Calls)
 	}
 	h = parse(t, stdin(t, "PreToolUse", "t1", map[string]any{"tool_name": "Bash", "cwd": dir, "tool_input": map[string]any{
 		"command": "cat > new.patch <<'EOF'\n*** Begin Patch\n*** Add File: migrations/6.sql\n+z\n*** End Patch\nEOF\ncat new.patch | apply_patch"}}))
-	if len(h.Calls) != 2 || h.Calls[1].Target != filepath.Join(dir, "migrations", "6.sql") {
+	if !gated(h.Calls, filepath.Join(dir, "migrations", "6.sql")) {
 		t.Errorf("a piped file written in the same call: want a Write of migrations/6.sql, got %+v", h.Calls)
 	}
 }
@@ -552,7 +552,7 @@ func TestShellPatchQuotedFileName(t *testing.T) {
 	os.WriteFile(filepath.Join(dir, "my fix.patch"), []byte("*** Begin Patch\n*** Update File: migrations/7.sql\n@@\n+y\n*** End Patch\n"), 0o644)
 	for _, cmd := range []string{`apply_patch < "my fix.patch"`, `cat 'my fix.patch' | apply_patch`} {
 		h := parse(t, stdin(t, "PreToolUse", "t1", map[string]any{"tool_name": "Bash", "cwd": dir, "tool_input": map[string]any{"command": cmd}}))
-		if len(h.Calls) != 2 || h.Calls[1].Target != filepath.Join(dir, "migrations", "7.sql") {
+		if !gated(h.Calls, filepath.Join(dir, "migrations", "7.sql")) {
 			t.Errorf("%s: want an Edit of migrations/7.sql, got %+v", cmd, h.Calls)
 		}
 	}
@@ -562,13 +562,32 @@ func TestShellPatchQuotedFileName(t *testing.T) {
 func TestShellPatchWithShellLocalVariables(t *testing.T) {
 	h := parse(t, stdin(t, "PreToolUse", "t1", map[string]any{"tool_name": "Bash", "tool_input": map[string]any{
 		"command": "D=sub; cd $D && apply_patch <<'EOF'\n*** Begin Patch\n*** Add File: x.txt\n+hi\n*** End Patch\nEOF"}}))
-	if len(h.Calls) != 2 || h.Calls[1].Target != "/repo/sub/x.txt" {
+	if !gated(h.Calls, "/repo/sub/x.txt") {
 		t.Errorf("want /repo/sub/x.txt, got %+v", h.Calls)
 	}
 	dir := t.TempDir()
 	os.WriteFile(filepath.Join(dir, "fix.patch"), []byte("*** Begin Patch\n*** Update File: migrations/8.sql\n@@\n+y\n*** End Patch\n"), 0o644)
 	h = parse(t, stdin(t, "PreToolUse", "t1", map[string]any{"tool_name": "Bash", "cwd": dir, "tool_input": map[string]any{"command": `P=fix.patch && apply_patch < "$P"`}}))
-	if len(h.Calls) != 2 || h.Calls[1].Target != filepath.Join(dir, "migrations", "8.sql") {
+	if !gated(h.Calls, filepath.Join(dir, "migrations", "8.sql")) {
 		t.Errorf(`apply_patch < "$P": want an Edit of migrations/8.sql, got %+v`, h.Calls)
+	}
+}
+
+// gated reports whether a call targets path.
+func gated(calls []gate.Event, path string) bool {
+	for _, c := range calls {
+		if c.Target == path && (c.Tool == "Write" || c.Tool == "Edit") {
+			return true
+		}
+	}
+	return false
+}
+
+// A cd behind && may not run: the patch's files are gated from the folder before it too.
+func TestShellPatchGatesEveryFolderItMayRunIn(t *testing.T) {
+	h := parse(t, stdin(t, "PreToolUse", "t1", map[string]any{"tool_name": "Bash", "tool_input": map[string]any{
+		"command": "false && cd migrations; apply_patch <<'EOF'\n*** Begin Patch\n*** Add File: 9.sql\n+x\n*** End Patch\nEOF"}}))
+	if !gated(h.Calls, "/repo/9.sql") || !gated(h.Calls, "/repo/migrations/9.sql") {
+		t.Errorf("want both /repo/9.sql and /repo/migrations/9.sql gated, got %+v", h.Calls)
 	}
 }

@@ -591,3 +591,21 @@ func TestShellPatchGatesEveryFolderItMayRunIn(t *testing.T) {
 		t.Errorf("want both /repo/9.sql and /repo/migrations/9.sql gated, got %+v", h.Calls)
 	}
 }
+
+// A skipped cd then a relative cd lands somewhere neither path alone names; a redirected patch is read from each folder.
+func TestShellPatchSkippedCdCombinations(t *testing.T) {
+	h := parse(t, stdin(t, "PreToolUse", "t1", map[string]any{"tool_name": "Bash", "tool_input": map[string]any{
+		"command": "false && cd a; cd b && apply_patch <<'EOF'\n*** Begin Patch\n*** Add File: x.sql\n+x\n*** End Patch\nEOF"}}))
+	for _, want := range []string{"/repo/x.sql", "/repo/a/x.sql", "/repo/b/x.sql", "/repo/a/b/x.sql"} {
+		if !gated(h.Calls, want) {
+			t.Errorf("want %s gated, got %+v", want, h.Calls)
+		}
+	}
+	dir := t.TempDir()
+	os.MkdirAll(filepath.Join(dir, "sub"), 0o755)
+	os.WriteFile(filepath.Join(dir, "fix.patch"), []byte("*** Begin Patch\n*** Update File: migrations/10.sql\n@@\n+y\n*** End Patch\n"), 0o644)
+	h = parse(t, stdin(t, "PreToolUse", "t1", map[string]any{"tool_name": "Bash", "cwd": dir, "tool_input": map[string]any{"command": "false && cd sub; apply_patch < fix.patch"}}))
+	if !gated(h.Calls, filepath.Join(dir, "migrations", "10.sql")) {
+		t.Errorf("the patch file in the folder before the skipped cd is read: got %+v", h.Calls)
+	}
+}

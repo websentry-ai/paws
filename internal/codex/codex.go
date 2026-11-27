@@ -209,7 +209,11 @@ func shellPatches(cmd, cwd string) []shellPatch {
 			if !strings.HasPrefix(file, "'") { // "$F" and $F expand; '$F' is literal
 				file = expandWith(shellVars(cmd[:at]), file)
 			}
-			run.text = readPatchFile(file, run.dir) + "\n" + strings.Join(patchBlock.FindAllString(cmd[:at], -1), "\n")
+			texts := patchBlock.FindAllString(cmd[:at], -1)
+			for _, d := range run.dirs { // the file from each folder the patch may run in
+				texts = append(texts, readPatchFile(file, d))
+			}
+			run.text = strings.Join(texts, "\n")
 		}
 		out = append(out, run)
 	}
@@ -245,8 +249,14 @@ func readPatchFile(p, dir string) string {
 // relative path in `ls && cd migrations && apply_patch ...` is a file in migrations/. A cd inside a subshell that
 // closes before apply_patch moves nothing.
 func patchDir(before, cwd string) (string, []string) {
-	dirs := []string{cwd} // each folder the commands pass through: a cd behind && or || may not run
-	var outer []string    // the folder each open subshell started in
+	// here is every folder the patch may be in by now: any cd may have been skipped (behind && or ||), so a cd adds
+	// where it leads from each folder so far and keeps them all. cwd follows the path where every cd ran.
+	here := []string{cwd}
+	type frame struct {
+		cwd  string
+		here []string
+	}
+	var outer []frame // where each open subshell began
 	vars := map[string]string{}
 	for _, part := range chainSep.Split(withoutHeredocs(before), -1) {
 		part = strings.TrimSpace(part)
@@ -255,7 +265,7 @@ func patchDir(before, cwd string) (string, []string) {
 			continue
 		}
 		for strings.HasPrefix(part, "(") {
-			outer, part = append(outer, cwd), strings.TrimSpace(part[1:])
+			outer, part = append(outer, frame{cwd, slices.Clone(here)}), strings.TrimSpace(part[1:])
 		}
 		inner := strings.TrimRight(part, ") ")
 		if m := cdStep.FindStringSubmatch(inner); m != nil {
@@ -264,16 +274,22 @@ func patchDir(before, cwd string) (string, []string) {
 				dir, _ = os.UserHomeDir() // a bare cd goes home
 			}
 			cwd = cdTo(dir, cwd)
-			if !slices.Contains(dirs, cwd) {
-				dirs = append(dirs, cwd)
+			for _, from := range slices.Clone(here) {
+				if to := cdTo(dir, from); !slices.Contains(here, to) && len(here) < maxPatchDirs {
+					here = append(here, to)
+				}
 			}
 		}
 		for closes := strings.Count(part[len(inner):], ")"); closes > 0 && len(outer) > 0; closes-- {
-			cwd, outer = outer[len(outer)-1], outer[:len(outer)-1] // the subshell ended: back where it began
+			f := outer[len(outer)-1] // the subshell ended: back where it began
+			cwd, here, outer = f.cwd, f.here, outer[:len(outer)-1]
 		}
 	}
-	return cwd, dirs
+	return cwd, here
 }
+
+// maxPatchDirs bounds the folders a shell patch is gated from; a command that cds this many ways is unheard of.
+const maxPatchDirs = 64
 
 // assignStep is a `VAR=value` command of its own: the value bare, single-quoted (literal) or double-quoted.
 var assignStep = regexp.MustCompile(`^([A-Za-z_][A-Za-z0-9_]*)=(?:"([^"]*)"|'([^']*)'|([^\s'"]*))$`)

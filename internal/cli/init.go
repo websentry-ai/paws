@@ -401,11 +401,17 @@ func Skill(args []string) int {
 		return 1
 	}
 	dest := filepath.Join(skillsDir, "paws")
+	mirrorFailed := false
 	if !slices.Contains(args, "--agent") && !slices.Contains(args, "--settings") {
 		// No harness named: every other harness that runs paws here gets the skill too, in its own folder.
 		cwd, _ := os.Getwd()
 		for _, m := range skillMirrors(slices.Contains(args, "--global"), projectRoot(cwd)) {
-			if st, err := pack.ReinstallBundledSkill(src, m, "paws", "paws "+Version); err == nil && st != pack.BundledKept {
+			st, err := pack.ReinstallBundledSkill(src, m, "paws", "paws "+Version)
+			switch {
+			case err != nil:
+				fmt.Fprintf(os.Stderr, "paws: install the paws skill in %s: %v\n", m, err)
+				mirrorFailed = true
+			case st != pack.BundledKept:
 				fmt.Printf("Installed the paws skill (paws %s) in %s\n", Version, filepath.Join(m, "paws"))
 			}
 		}
@@ -420,6 +426,9 @@ func Skill(args []string) int {
 		return 1
 	}
 	fmt.Printf("Installed the paws skill (paws %s) in %s\n", Version, dest)
+	if mirrorFailed {
+		return 1 // another harness's copy is missing or stale
+	}
 	return 0
 }
 

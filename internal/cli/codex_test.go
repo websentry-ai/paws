@@ -284,3 +284,24 @@ func TestFullUninstallRemovesCodex(t *testing.T) {
 		}
 	}
 }
+
+// paws skill fails when another harness's copy can't be written, after installing its own.
+func TestSkillReportsAFailedCodexCopy(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	t.Setenv("CODEX_HOME", "")
+	t.Setenv("CLAUDE_CONFIG_DIR", "")
+	t.Setenv("PAWS_HOME", filepath.Join(home, ".paws"))
+	repo := filepath.Join(home, "repo")
+	os.MkdirAll(filepath.Join(repo, ".git"), 0o755)
+	t.Chdir(repo)
+	captureStdout(t, func() int { return Init(nil) })
+	captureStdout(t, func() int { return Init([]string{"--agent", "codex"}) })
+	writeFile(t, filepath.Join(repo, ".agents"), "a file, not a folder") // the Codex copy can't be written
+	if code, _ := captureStdout(t, func() int { return Skill(nil) }); code == 0 {
+		t.Error("a failed Codex copy fails paws skill")
+	}
+	if _, err := os.Stat(filepath.Join(repo, ".claude", "skills", "paws", "SKILL.md")); err != nil {
+		t.Errorf("Claude Code's copy is still installed: %v", err)
+	}
+}

@@ -178,10 +178,11 @@ type shellPatch struct {
 	dirs []string // every folder it may run in: dir, and each folder the commands before it pass through
 }
 
-// applyPatchCmd finds apply_patch (or its applypatch alias) where a command starts: at the line's start, after ; & | or (, as a whole word,
+// applyPatchCmd finds apply_patch (or its applypatch alias) where a command starts (also after {, !, then, do,
+// else, elif): at the line's start, after ; & | or (, as a whole word,
 // behind any of the wrappers that run the next word as the command (command apply_patch, exec, env, nohup, time) and
 // any FOO=bar assignments.
-var applyPatchCmd = regexp.MustCompile(`(?m)(?:^|[;&|(])[ \t]*(?:(?:command|builtin|exec|env|nohup|time|sudo|[A-Za-z_][A-Za-z0-9_]*=\S*)[ \t]+)*(apply_?patch)(?:[ \t<]|$)`)
+var applyPatchCmd = regexp.MustCompile(`(?m)(?:^|[;&|({!]|\b(?:then|do|else|elif)[ \t])[ \t]*(?:(?:command|builtin|exec|env|nohup|time|sudo|[A-Za-z_][A-Za-z0-9_]*=\S*)[ \t]+)*(apply_?patch)(?:[ \t<]|$)`)
 
 // shellPatches are the apply_patch runs of a shell command, each with the folder the commands before it moved to.
 func shellPatches(cmd, cwd string) []shellPatch {
@@ -461,7 +462,7 @@ func (Adapter) Observe(h *harness.Hook, d gate.Decision) {
 			runs := shellPatches(cmdOf(in), in.CWD)
 			if in.ToolName == "apply_patch" {
 				str := func(k string) string { s, _ := in.ToolInput[k].(string); return s }
-				runs = []shellPatch{{text: cmp.Or(str("command"), str("input"), str("patch")), dir: in.CWD}} // the tool runs in the hook's cwd
+				runs = []shellPatch{{text: cmp.Or(str("command"), str("input"), str("patch")), dir: in.CWD, dirs: []string{in.CWD}}} // the tool runs in the hook's cwd
 			}
 			files = patchedFiles(in.ToolResponse, runs)
 			if in.ToolName == "Bash" {
@@ -515,11 +516,17 @@ func patchedFiles(raw json.RawMessage, runs []shellPatch) []string {
 			}
 			// When runs in different folders each name this path, the list can't say which one changed it: credit
 			// none, so a no-edit-matching rule still applies rather than passing on an edit that may not have happened.
+			// A run may be in any of its possible folders; an added or changed file is where it now exists.
 			var owners []string
 			for _, run := range runs {
+				named := false
 				for _, f := range parsePatch(run.text) {
-					if filepath.Clean(f.Path) == filepath.Clean(path) && !slices.Contains(owners, filepath.Join(run.dir, path)) {
-						owners = append(owners, filepath.Join(run.dir, path))
+					named = named || filepath.Clean(f.Path) == filepath.Clean(path)
+				}
+				for _, d := range run.dirs {
+					at := filepath.Join(d, path)
+					if _, err := os.Stat(at); named && (op == "D" || err == nil) && !slices.Contains(owners, at) {
+						owners = append(owners, at)
 					}
 				}
 			}

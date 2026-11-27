@@ -292,7 +292,7 @@ func (s session) EditedMatching(glob *regexp.Regexp) bool {
 		if r.Kind != "call" || r.Verdict != "allow" || r.Tool != "Edit" && r.Tool != "Write" || !glob.MatchString(r.Target) || !ok[r.ID] {
 			continue
 		}
-		if files, listed := changed[r.ID]; !listed || slices.Contains(files, filepath.Clean(r.Target)) {
+		if slices.Contains(changed[r.ID], filepath.Clean(r.Target)) { // only a file apply_patch says it changed
 			return true
 		}
 	}

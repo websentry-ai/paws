@@ -222,7 +222,7 @@ func TestLedgerDenyEditsAndAgents(t *testing.T) {
 	if log.EditedMatching(glob) {
 		t.Error("an edit with no result yet doesn't count")
 	}
-	observe(t, stdin(t, "PostToolUse", "t1", map[string]any{"tool_name": "apply_patch", "tool_use_id": "p1", "tool_response": "Exit code: 0\nWall time: 0.4 seconds\nOutput:\nSuccess."}), gate.Decision{})
+	observe(t, stdin(t, "PostToolUse", "t1", map[string]any{"tool_name": "apply_patch", "tool_use_id": "p1", "tool_response": "Exit code: 0\nWall time: 0.4 seconds\nOutput:\nSuccess. Updated the following files:\nM /repo/src/a_test.go\n"}), gate.Decision{})
 	log = parse(t, stdin(t, "PreToolUse", "t1", bashCall("c2", "ls"))).Calls[0].Log
 	if !log.EditedMatching(glob) {
 		t.Error("a successful patch to a test file counts")
@@ -350,9 +350,10 @@ func TestParseShellPatchAfterCd(t *testing.T) {
 // apply_patch lists the files it changed relative to where it ran: after a cd, that folder.
 func TestLedgerShellPatchResultAfterCd(t *testing.T) {
 	ledgerEnv(t)
+	repo := onDisk(t, "src/a_test.go")
 	cmd := "cd src && apply_patch <<'EOF'\n*** Begin Patch\n*** Update File: a_test.go\n@@\n+x\n*** End Patch\nEOF"
-	observe(t, stdin(t, "PreToolUse", "t1", bashCall("p1", cmd)), gate.Decision{})
-	post := bashCall("p1", cmd)
+	observe(t, stdin(t, "PreToolUse", "t1", in(repo, bashCall("p1", cmd))), gate.Decision{})
+	post := in(repo, bashCall("p1", cmd))
 	post["tool_response"] = "Success. Updated the following files:\nM a_test.go\n"
 	observe(t, stdin(t, "PostToolUse", "t1", post), gate.Decision{})
 	if !parse(t, stdin(t, "PreToolUse", "t1", bashCall("c9", "ls"))).Calls[0].Log.EditedMatching(regexp.MustCompile(`src/a_test\.go$`)) {
@@ -395,18 +396,19 @@ func TestShellPatchesEachFromTheirFolder(t *testing.T) {
 // apply_patch's file lists pair with their own runs' folders; a cd to $VAR resolves from the environment.
 func TestShellPatchResultsPairWithTheirFolders(t *testing.T) {
 	ledgerEnv(t)
-	t.Setenv("MIGS", "/repo/db")
+	repo := onDisk(t, "a/x_test.go", "db/y.sql")
+	t.Setenv("MIGS", filepath.Join(repo, "db"))
 	cmd := "cd a && apply_patch <<'EOF'\n*** Begin Patch\n*** Update File: x_test.go\n@@\n+x\n*** End Patch\nEOF\ncd $MIGS && apply_patch <<'EOF'\n*** Begin Patch\n*** Update File: y.sql\n@@\n+y\n*** End Patch\nEOF"
-	h := parse(t, stdin(t, "PreToolUse", "t1", bashCall("p1", cmd)))
-	if !gated(h.Calls, "/repo/db/y.sql") {
-		t.Fatalf("cd $MIGS: want /repo/db/y.sql, got %+v", h.Calls)
+	h := parse(t, stdin(t, "PreToolUse", "t1", in(repo, bashCall("p1", cmd))))
+	if !gated(h.Calls, filepath.Join(repo, "db", "y.sql")) {
+		t.Fatalf("cd $MIGS: want db/y.sql, got %+v", h.Calls)
 	}
 	Adapter{}.Observe(h, gate.Decision{})
-	post := bashCall("p1", cmd)
+	post := in(repo, bashCall("p1", cmd))
 	post["tool_response"] = "Success. Updated the following files:\nM x_test.go\nSuccess. Updated the following files:\nM y.sql\n"
 	observe(t, stdin(t, "PostToolUse", "t1", post), gate.Decision{})
 	log := parse(t, stdin(t, "PreToolUse", "t1", bashCall("c9", "ls"))).Calls[0].Log
-	if !log.EditedMatching(regexp.MustCompile(`^/repo/a/x_test\.go$`)) || !log.EditedMatching(regexp.MustCompile(`^/repo/db/y\.sql$`)) {
+	if !log.EditedMatching(regexp.MustCompile(`/a/x_test\.go$`)) || !log.EditedMatching(regexp.MustCompile(`/db/y\.sql$`)) {
 		t.Error("each file is the edit of its own run's folder")
 	}
 }
@@ -434,13 +436,14 @@ func TestShellPatchNamedApplyPatch(t *testing.T) {
 // A failed run lists no files; the next run's list still pairs with its own folder.
 func TestShellPatchResultsAfterAFailedRun(t *testing.T) {
 	ledgerEnv(t)
+	repo := onDisk(t, "a/x.go", "b/y_test.go")
 	cmd := "cd a && apply_patch <<'EOF'\n*** Begin Patch\n*** Update File: x.go\n@@\n+x\n*** End Patch\nEOF\ncd ../b && apply_patch <<'EOF'\n*** Begin Patch\n*** Update File: y_test.go\n@@\n+y\n*** End Patch\nEOF"
-	observe(t, stdin(t, "PreToolUse", "t1", bashCall("p1", cmd)), gate.Decision{})
-	post := bashCall("p1", cmd)
+	observe(t, stdin(t, "PreToolUse", "t1", in(repo, bashCall("p1", cmd))), gate.Decision{})
+	post := in(repo, bashCall("p1", cmd))
 	post["tool_response"] = "Failed to find expected lines in x.go\nSuccess. Updated the following files:\nM y_test.go\n"
 	observe(t, stdin(t, "PostToolUse", "t1", post), gate.Decision{})
 	log := parse(t, stdin(t, "PreToolUse", "t1", bashCall("c9", "ls"))).Calls[0].Log
-	if !log.EditedMatching(regexp.MustCompile(`^/repo/b/y_test\.go$`)) || log.EditedMatching(regexp.MustCompile(`x\.go$`)) {
+	if !log.EditedMatching(regexp.MustCompile(`/b/y_test\.go$`)) || log.EditedMatching(regexp.MustCompile(`x\.go$`)) {
 		t.Error("y_test.go in b was edited; x.go wasn't")
 	}
 }
@@ -608,4 +611,42 @@ func TestShellPatchSkippedCdCombinations(t *testing.T) {
 	if !gated(h.Calls, filepath.Join(dir, "migrations", "10.sql")) {
 		t.Errorf("the patch file in the folder before the skipped cd is read: got %+v", h.Calls)
 	}
+}
+
+// apply_patch after {, !, then, do, else or elif starts a shell patch too; a native patch with no file list edits nothing.
+func TestShellPatchAfterCompoundStarts(t *testing.T) {
+	for _, cmd := range []string{"{ apply_patch", "if true; then apply_patch", "! apply_patch"} {
+		h := parse(t, stdin(t, "PreToolUse", "t1", map[string]any{"tool_name": "Bash", "tool_input": map[string]any{
+			"command": cmd + " <<'EOF'\n*** Begin Patch\n*** Add File: m.sql\n+x\n*** End Patch\nEOF"}}))
+		if !gated(h.Calls, "/repo/m.sql") {
+			t.Errorf("%s: want /repo/m.sql gated, got %+v", cmd, h.Calls)
+		}
+	}
+	ledgerEnv(t)
+	patch := map[string]any{"tool_name": "apply_patch", "tool_use_id": "n1", "tool_input": map[string]any{
+		"command": "*** Begin Patch\n*** Update File: /repo/src/b_test.go\n@@\n+x\n*** End Patch"}}
+	observe(t, stdin(t, "PreToolUse", "t1", patch), gate.Decision{})
+	patch["tool_response"] = "Exit code: 0\nOutput:\nSuccess."
+	observe(t, stdin(t, "PostToolUse", "t1", patch), gate.Decision{})
+	if parse(t, stdin(t, "PreToolUse", "t1", bashCall("c9", "ls"))).Calls[0].Log.EditedMatching(regexp.MustCompile(`b_test\.go$`)) {
+		t.Error("a result that lists no file credits no edit")
+	}
+}
+
+// onDisk makes a folder holding files at the given relative paths, as a patch leaves them.
+func onDisk(t *testing.T, rels ...string) string {
+	t.Helper()
+	root := t.TempDir()
+	for _, r := range rels {
+		p := filepath.Join(root, r)
+		os.MkdirAll(filepath.Dir(p), 0o755)
+		os.WriteFile(p, []byte("x\n"), 0o644)
+	}
+	return root
+}
+
+// in sets a hook call's cwd.
+func in(cwd string, m map[string]any) map[string]any {
+	m["cwd"] = cwd
+	return m
 }

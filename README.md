@@ -198,9 +198,15 @@ only for `localhost`, `127.0.0.1` or `::1`, with a warning.
 curl -fsSL https://paws.getunbound.ai/install.sh | bash   # install or upgrade
 unbound-paws init                 # this repo (or this folder, outside a repo)
 unbound-paws init --global        # every repo for this user (~/.claude/settings.json)
-unbound-paws uninstall [--global] # removes the hook (and the paws skill, if unedited)
-rm ~/.local/bin/unbound-paws
+unbound-paws uninstall            # removes everything paws added, after listing it and asking
+unbound-paws uninstall --hook-only [--global]   # removes only the hook
+rm ~/.local/bin/unbound-paws      # then the binary itself (npm rm -g unbound-paws, or brew uninstall --cask unbound-paws)
 ```
+
+`uninstall` takes `--project` or `--global` to limit the scope, `--keep-skills` to leave the skills paws
+installed, and `--yes` to skip the question. It removes the hook, the packs and skills paws installed (a skill
+you wrote or edited stays), and `credentials.json` after logging out of the portal. Rule files you wrote
+in `.paws/` outside `packs/` stay, and so do the audit history and the binary copy in `~/.paws`, which other repos' hooks may still run.
 
 `install.sh` downloads the release archive for your OS and CPU from GitHub,
 checks it against the release's `checksums.txt`, installs it as

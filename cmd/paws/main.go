@@ -77,8 +77,10 @@ Usage:
   unbound-paws init [--agent codex] [--global | --settings <path>]
                                                          Register paws in Claude Code's settings.json, or with
                                                          --agent codex in Codex's hooks.json (.codex/ or ~/.codex/).
-  unbound-paws uninstall [--agent codex] [--global | --settings <path>]
-                                                         Remove paws from that file.
+  unbound-paws uninstall [--project] [--global] [--keep-skills] [--yes]
+                                                         Remove everything paws added; lists it and asks first.
+  unbound-paws uninstall --hook-only [--agent codex] [--global | --settings <path>]
+                                                         Remove only the hook from that file (--agent codex implies it).
   unbound-paws skill [--agent codex] [--global | --settings <path>]
                                                          Install or reinstall the paws skill (the agent writes rules with it).
   unbound-paws explain [--tool T] [--event E] <command>  Dry-run: show matching rules and the decision.

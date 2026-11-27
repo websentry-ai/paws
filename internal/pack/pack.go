@@ -83,6 +83,11 @@ func LoadState(file string) (*State, error) {
 	if s.Packs == nil {
 		s.Packs = map[string]*Installed{}
 	}
+	for name, p := range s.Packs {
+		if p == nil { // `writing: null` in a damaged or hand-edited file: still an installed pack, with no record
+			s.Packs[name] = &Installed{}
+		}
+	}
 	return s, nil
 }
 

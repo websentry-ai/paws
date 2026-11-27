@@ -118,7 +118,7 @@ func TestInitRegistersHookOnly(t *testing.T) {
 		t.Error("init must not install the paws skill; that's `paws skill`")
 	}
 	// Uninstall leaves no empty settings.json or .claude folder behind.
-	if code := Uninstall(nil); code != 0 {
+	if code := Uninstall([]string{"--hook-only"}); code != 0 {
 		t.Fatalf("uninstall exit %d", code)
 	}
 	if _, err := os.Stat(filepath.Join(repo, ".claude")); err == nil {
@@ -128,7 +128,7 @@ func TestInitRegistersHookOnly(t *testing.T) {
 	os.MkdirAll(filepath.Join(repo, ".claude"), 0o755)
 	os.WriteFile(filepath.Join(repo, ".claude", "settings.json"), []byte(`{"env":{"A":"1"}}`), 0o644)
 	Init(nil)
-	Uninstall(nil)
+	Uninstall([]string{"--hook-only"})
 	if data, _ := os.ReadFile(filepath.Join(repo, ".claude", "settings.json")); !strings.Contains(string(data), `"A"`) {
 		t.Errorf("uninstall must keep other settings, got %q", data)
 	}
@@ -154,7 +154,7 @@ func TestSkillInstallsAndReinstalls(t *testing.T) {
 	}
 	// Uninstall removes the unedited copy, even though paws was never registered here, and the
 	// folders it leaves empty.
-	if code := Uninstall([]string{"--settings", settings}); code != 0 {
+	if code := Uninstall([]string{"--hook-only", "--settings", settings}); code != 0 {
 		t.Fatalf("uninstall exit %d", code)
 	}
 	if _, err := os.Stat(filepath.Join(dir, ".claude")); err == nil {

@@ -674,10 +674,9 @@ func (Adapter) SkillDirs(cwd string) []string {
 		gate.SkillTool.SkillDirs(cwd)...)
 }
 
-// LoadSkills tells Codex to read each SKILL.md in full and follow it, then make the call again, changed if the skill
-// says so. Codex has no Skill tool, and told to retry "this exact command" it re-runs the blocked call unchanged.
+// LoadSkills tells Codex to read each SKILL.md, then make the call again. Codex has no Skill tool, so it names the file.
 func (Adapter) LoadSkills(skills []gate.Skill, noun string) string {
-	return fmt.Sprintf("Read %s, %s", readList(skills), gate.FollowAndRetry(skills, noun))
+	return fmt.Sprintf("Read %s, then %s again.", readList(skills), gate.Retry(noun))
 }
 
 func (Adapter) LoadAtStart(s gate.Skill) string {

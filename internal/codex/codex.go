@@ -183,12 +183,17 @@ func shellPatches(cmd, cwd string) []shellPatch {
 		}
 		run := shellPatch{text: cmd[at:end], dir: patchDir(cmd[:at], cwd)}
 		if m := patchFromFile.FindStringSubmatch(run.text); m != nil {
-			run.text = readPatchFile(m[1], run.dir) // apply_patch < fix.patch: the patch is that file
+			// apply_patch < fix.patch: the patch is that file, as it is now, or as an earlier command in this call
+			// writes it (any patch text before the run).
+			run.text = readPatchFile(m[1], run.dir) + "\n" + strings.Join(patchBlock.FindAllString(cmd[:at], -1), "\n")
 		}
 		out = append(out, run)
 	}
 	return out
 }
+
+// patchBlock is a whole patch in a command's text: a here-document body that writes a patch file, say.
+var patchBlock = regexp.MustCompile(`(?s)\*\*\* Begin Patch.*?\*\*\* End Patch`)
 
 // patchFromFile is an apply_patch that reads its patch from a file on stdin: apply_patch < fix.patch (not <<).
 var patchFromFile = regexp.MustCompile(`^apply_?patch[ \t]*<[ \t]*([^<\s]\S*)`)
@@ -243,8 +248,8 @@ func cdTo(dir, cwd string) string {
 	return filepath.Clean(dir)
 }
 
-// heredocStart opens a here-document: <<EOF, <<'EOF', <<"EOF", <<-EOF.
-var heredocStart = regexp.MustCompile(`<<-?[ \t]*['"]?([A-Za-z_][A-Za-z0-9_]*)['"]?`)
+// heredocStart opens a here-document: <<EOF, <<'EOF', <<"EOF", <<-EOF; not a here-string (<<< word).
+var heredocStart = regexp.MustCompile(`(?:^|[^<])<<-?[ \t]*['"]?([A-Za-z_][A-Za-z0-9_]*)['"]?`)
 
 // withoutHeredocs is a command line with its here-document bodies taken out: their lines are data, not commands, so
 // a `cd x` line inside one moves nothing.

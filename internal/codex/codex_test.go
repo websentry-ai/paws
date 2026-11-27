@@ -516,3 +516,17 @@ func TestShellPatchHeredocDataAndStdinFile(t *testing.T) {
 		t.Errorf("apply_patch < fix.patch: want an Edit of migrations/2.sql, got %+v", h.Calls)
 	}
 }
+
+// A patch file the same call writes first is the patch apply_patch reads; a here-string is not a here-document.
+func TestShellPatchFileWrittenInTheSameCall(t *testing.T) {
+	h := parse(t, stdin(t, "PreToolUse", "t1", map[string]any{"tool_name": "Bash", "tool_input": map[string]any{
+		"command": "cat > /tmp/new.patch <<'EOF'\n*** Begin Patch\n*** Update File: migrations/3.sql\n@@\n+z\n*** End Patch\nEOF\napply_patch < /tmp/new.patch"}}))
+	if len(h.Calls) != 2 || h.Calls[1].Target != "/repo/migrations/3.sql" {
+		t.Errorf("want an Edit of /repo/migrations/3.sql, got %+v", h.Calls)
+	}
+	h = parse(t, stdin(t, "PreToolUse", "t1", map[string]any{"tool_name": "Bash", "tool_input": map[string]any{
+		"command": "cat <<< foo\ncd migrations && apply_patch <<'EOF'\n*** Begin Patch\n*** Add File: 4.sql\n+x\n*** End Patch\nEOF"}}))
+	if len(h.Calls) != 2 || h.Calls[1].Target != "/repo/migrations/4.sql" {
+		t.Errorf("a here-string hid the cd: want /repo/migrations/4.sql, got %+v", h.Calls)
+	}
+}

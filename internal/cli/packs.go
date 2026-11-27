@@ -108,35 +108,42 @@ func loadCatalog(dir string, names ...string) (*catalog.Catalog, error) {
 
 func target(project bool) pack.Target {
 	cwd, _ := os.Getwd()
+	root := projectRoot(cwd)
 	t := pack.UserTarget(gate.UserDir())
 	if project {
-		t = pack.ProjectTarget(projectRoot(cwd))
+		t = pack.ProjectTarget(root)
 	}
-	t.Mirrors = skillMirrors(!project, projectRoot(cwd))
-	t.Elsewhere = otherSkillDirs(!project, projectRoot(cwd), t.Mirrors)
+	stores := skillStores(!project, root)
+	t.SkillsDir, t.Mirrors = stores[0], stores[1:]
+	t.Elsewhere = otherSkillDirs(!project, root, stores)
 	return t
 }
 
-// skillMirrors are the skills folders, user (global) or the project's at root, of each harness other than Claude Code
-// that runs paws here: paws installs skills into Claude Code's folders, and copies them into these.
-func skillMirrors(global bool, root string) []string {
+// skillStores are the skills folders, user (global) or the project's at root, of each harness that runs paws here:
+// paws installs skills into the first and copies them into the rest. Claude Code's comes first when its hook is
+// there; with no harness hooked, Claude Code's folder alone, so a skill added before init is in place.
+func skillStores(global bool, root string) []string {
 	var dirs []string
-	for _, a := range adapters {
-		if a == defaultAdapter() || !hookedIn(a) {
+	for _, a := range installOrder() {
+		if !hookedIn(a) {
 			continue
 		}
 		if d := a.SkillsDirFor(a.HookFile(global, root)); d != "" {
 			dirs = append(dirs, d)
 		}
 	}
+	if len(dirs) == 0 {
+		a := defaultAdapter()
+		dirs = []string{a.SkillsDirFor(a.HookFile(global, root))}
+	}
 	return dirs
 }
 
-// otherSkillDirs are the same scope's skills folders of every other harness, hooked or not, minus skip.
+// otherSkillDirs are the same scope's skills folders of every harness, hooked or not, minus skip.
 func otherSkillDirs(global bool, root string, skip []string) []string {
 	var dirs []string
 	for _, a := range adapters {
-		if d := a.SkillsDirFor(a.HookFile(global, root)); a != defaultAdapter() && d != "" && !slices.Contains(skip, d) {
+		if d := a.SkillsDirFor(a.HookFile(global, root)); d != "" && !slices.Contains(skip, d) {
 			dirs = append(dirs, d)
 		}
 	}
@@ -189,11 +196,11 @@ func Add(args []string) int {
 		for _, s := range res.Installed {
 			fmt.Printf("  %-12s installed in %s\n", s, tilde(filepath.Join(t.SkillsDir, s)))
 		}
-		for _, s := range res.Kept {
-			fmt.Printf("  %-12s already in %s, not from paws; left as is\n", s, tilde(filepath.Join(t.SkillsDir, s)))
+		for _, dir := range res.Kept {
+			fmt.Printf("  %-12s %s\n", filepath.Base(dir), keptNote(dir))
 		}
 		for _, m := range t.Mirrors {
-			if len(res.Installed) > 0 {
+			if slices.ContainsFunc(res.Installed, func(s string) bool { return !slices.Contains(res.Kept, filepath.Join(m, s)) }) {
 				fmt.Printf("  %-12s copied to %s\n", "skills", tilde(m))
 			}
 		}
@@ -205,6 +212,14 @@ func Add(args []string) int {
 		}
 	}
 	return 0
+}
+
+// keptNote says why paws left the skill folder dir as it is: the user's own, or a paws copy edited since.
+func keptNote(dir string) string {
+	if pack.FromPaws(dir) {
+		return "already in " + tilde(dir) + ", edited since paws installed it; left as is"
+	}
+	return "already in " + tilde(dir) + ", not from paws; left as is"
 }
 
 // didYouMean is " Did you mean a, b?" for the catalog names nearest to name, or "" when none is close or the

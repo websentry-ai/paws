@@ -178,7 +178,9 @@ type Result struct {
 	Pack      string
 	Bindings  []string
 	Installed []string // skills paws installed or updated
-	Kept      []string // skills already present that paws does not own; left as they are
+	// Kept are the skill folders, in SkillsDir or a mirror, that were already there and paws may not replace (the
+	// user's own, or a paws copy edited since); left as they are.
+	Kept []string
 }
 
 // Add installs bindings as pack name into t. Re-adding a pack replaces it (an upgrade).
@@ -221,16 +223,19 @@ func Add(c *catalog.Catalog, name string, bindings []string, picks map[string]st
 			}
 			for _, m := range t.Mirrors {
 				was := exists(filepath.Join(m, b.Action.Skill))
-				if _, err := MirrorSkill(t.SkillsDir, m, b.Action.Skill); err != nil {
+				copied, err := MirrorSkill(t.SkillsDir, m, b.Action.Skill)
+				if err != nil {
 					return nil, fmt.Errorf("skill %s: copy to %s: %w", b.Action.Skill, m, err)
 				}
 				if !was {
 					mirrored = append(mirrored, [2]string{m, b.Action.Skill})
+				} else if !copied {
+					res.Kept = append(res.Kept, filepath.Join(m, b.Action.Skill))
 				}
 			}
 			res.Installed = append(res.Installed, b.Action.Skill)
 		} else {
-			res.Kept = append(res.Kept, b.Action.Skill)
+			res.Kept = append(res.Kept, filepath.Join(t.SkillsDir, b.Action.Skill))
 		}
 	}
 

@@ -240,6 +240,9 @@ func printSyncReport(rep syncReport) {
 	for _, s := range rep.Config.Skipped {
 		fmt.Printf("  skipped %s\n", printable(s))
 	}
+	for _, dir := range rep.Config.Kept {
+		fmt.Printf("  %-12s %s\n", filepath.Base(dir), keptNote(dir))
+	}
 }
 
 // skillList renders "3 skills (humanizer, tdd, git)".

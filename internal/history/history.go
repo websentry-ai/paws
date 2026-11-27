@@ -22,6 +22,8 @@ type Call struct {
 	At     time.Time
 	// Session is the agent's id for the session the call was made in; a subagent's calls carry their parent's.
 	Session string
+	// Cwd is where the session ran, when the log says: a relative path in the call is taken from it.
+	Cwd string
 }
 
 // Source reads one agent's past sessions.

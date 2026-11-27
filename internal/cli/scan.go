@@ -114,7 +114,7 @@ type skillReads struct{ history.Source }
 
 func (s skillReads) Calls(since, until time.Time, fn func(history.Call)) (int, error) {
 	return s.Source.Calls(since, until, func(c history.Call) {
-		if skill := gate.PastSkillRead(c.Tool, c.Target, ""); skill != "" {
+		if skill := gate.PastSkillRead(c.Tool, c.Target, c.Cwd); skill != "" { // from the session's folder
 			c.Tool, c.Target = history.SkillTool, skill
 		}
 		fn(c)

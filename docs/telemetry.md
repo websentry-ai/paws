@@ -79,7 +79,7 @@ A deny with no outcome record (you interrupted, or the turn never ended) counts 
 
 | `event` | Written on | Extra fields |
 |---|---|---|
-| `skill_invoked` | PreToolUse on a skill load: the Skill tool, or a plain read of a skill's `SKILL.md` (`Read`, or a lone `cat`/`sed -n`/`head`/... of the file) | `skill` |
+| `skill_invoked` | PreToolUse on a skill load: the Skill tool, or a plain read that prints a skill's whole `SKILL.md` (`Read`, or a lone `cat`/`sed -n`/`head`/... of the file; a part of it is not an invocation) | `skill` |
 | `tool_result` | PostToolUse: a tool call that ran and succeeded (denied and failed calls write none) | `tool` |
 | `turn_end` | Stop (the agent finished its turn) | — |
 
@@ -192,8 +192,9 @@ trigger's id), `tool`, `outcome`, `checks` and `retry_command` (the call Claude 
 another route; a Bash command, redacted and cut to 4 KB, else the tool with its repo-relative file or MCP tool; empty
 when Claude stopped), `harness` and `model`, as in the audit log (above).
 
-**Inventory:** the directory names in `~/.claude/skills` and the project's
-`.claude/skills`, and every paws rule in scope with its skill and a display
+**Inventory:** the directory names in every harness's skill folders, whether or not its hook is installed:
+`~/.claude/skills` and the project's `.claude/skills` (Claude Code), `~/.agents/skills`, the project's
+`.agents/skills` and `$CODEX_HOME/skills` (Codex), and every paws rule in scope with its skill and a display
 form of what it runs before (a portal rule's label; otherwise its matcher,
 shortened, e.g. `gh pr create`, `edit docs/**`, `each new session`).
 

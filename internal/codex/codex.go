@@ -126,7 +126,7 @@ func canonical(in *Input) []call {
 		// also edits files: those are gated too, as Codex's apply_patch tool is.
 		cmd := str("command")
 		calls := []call{{tool: "Bash", target: cmd, text: cmd, input: map[string]any{"command": cmd}}}
-		if before, _, ok := strings.Cut(cmd, "*** Begin Patch"); ok && strings.Contains(before, "apply_patch") {
+		if before, _, ok := strings.Cut(cmd, "*** Begin Patch"); ok && applyPatchCmd.MatchString(before) {
 			for _, sp := range shellPatches(cmd, in.CWD) {
 				calls = append(calls, patchCalls(sp.text, sp.dir)...)
 			}
@@ -158,7 +158,7 @@ func canonical(in *Input) []call {
 }
 
 // cdStep is one `cd <dir>` command of a chain.
-var cdStep = regexp.MustCompile(`^cd\s+(?:'([^']*)'|"([^"]*)"|(\S+))$`)
+var cdStep = regexp.MustCompile(`^cd\s+(?:--\s+)?(?:'([^']*)'|"([^"]*)"|(\S+))$`)
 
 // chainSep splits a command line into its commands.
 var chainSep = regexp.MustCompile(`&&|\|\||[;\n]`)
@@ -166,10 +166,10 @@ var chainSep = regexp.MustCompile(`&&|\|\||[;\n]`)
 // shellPatch is one apply_patch run in a shell command: its patch text and the folder it runs in.
 type shellPatch struct{ text, dir string }
 
-// applyPatchCmd finds apply_patch where a command starts: at the line's start, after ; & | or (, as a whole word,
+// applyPatchCmd finds apply_patch (or its applypatch alias) where a command starts: at the line's start, after ; & | or (, as a whole word,
 // behind any of the wrappers that run the next word as the command (command apply_patch, exec, env, nohup, time) and
 // any FOO=bar assignments.
-var applyPatchCmd = regexp.MustCompile(`(?m)(?:^|[;&|(])[ \t]*(?:(?:command|builtin|exec|env|nohup|time|sudo|[A-Za-z_][A-Za-z0-9_]*=\S*)[ \t]+)*(apply_patch)(?:[ \t<]|$)`)
+var applyPatchCmd = regexp.MustCompile(`(?m)(?:^|[;&|(])[ \t]*(?:(?:command|builtin|exec|env|nohup|time|sudo|[A-Za-z_][A-Za-z0-9_]*=\S*)[ \t]+)*(apply_?patch)(?:[ \t<]|$)`)
 
 // shellPatches are the apply_patch runs of a shell command, each with the folder the commands before it moved to.
 func shellPatches(cmd, cwd string) []shellPatch {

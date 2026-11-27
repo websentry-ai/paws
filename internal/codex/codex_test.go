@@ -477,3 +477,12 @@ func TestShellPatchWrappersAndAmbiguousResults(t *testing.T) {
 		t.Error("which run changed x_test.go is unknown: a's copy isn't credited")
 	}
 }
+
+// Codex's applypatch alias and a `cd -- dir` count like apply_patch and cd dir.
+func TestShellPatchAliasAndCdDashDash(t *testing.T) {
+	h := parse(t, stdin(t, "PreToolUse", "t1", map[string]any{"tool_name": "Bash", "tool_input": map[string]any{
+		"command": "cd -- migrations && applypatch <<'EOF'\n*** Begin Patch\n*** Add File: 1.sql\n+x\n*** End Patch\nEOF"}}))
+	if len(h.Calls) != 2 || h.Calls[1].Target != "/repo/migrations/1.sql" {
+		t.Errorf("want a Write of /repo/migrations/1.sql, got %+v", h.Calls)
+	}
+}

@@ -143,6 +143,24 @@ func TestWhenAgentCount(t *testing.T) {
 	}
 }
 
+// A spawn a hook denied started no agent: its retry is still the first spawn.
+func TestWhenAgentCountSkipsDeniedSpawns(t *testing.T) {
+	r := mustRule(t, "---\nname: par\nevent: pre-tool\nmatcher:\n  tool: Agent\nwhen: agent-count>1\naction:\n  type: require-skill\n  skill: s\n---\n")
+	lnDenied := `{"type":"user","isSidechain":false,"message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"a1","content":"PreToolUse:Agent hook error: paws (x): load s first","is_error":true}]}}`
+	lnRetry := `{"type":"assistant","isSidechain":false,"message":{"role":"assistant","content":[{"type":"tool_use","id":"a3","name":"Agent","input":{"prompt":"x"}}]}}`
+	lnOne := `{"type":"assistant","isSidechain":false,"message":{"role":"assistant","content":[{"type":"tool_use","id":"a1","name":"Agent","input":{"prompt":"x"}}]}}`
+	ev := Event{Kind: rule.KindTool, Tool: "Agent", Target: "x"}
+	ev.Transcript = write(t, lnUserTyped, lnOne, lnDenied, lnRetry)
+	if Applies(r, ev) {
+		t.Error("a denied spawn and its retry are one agent, not two")
+	}
+	lnFailed := `{"type":"user","isSidechain":false,"message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"a1","content":"agent crashed","is_error":true}]}}`
+	ev.Transcript = write(t, lnUserTyped, lnOne, lnFailed, lnRetry)
+	if !Applies(r, ev) {
+		t.Error("an agent that started and failed still counts")
+	}
+}
+
 // A subagent's call keeps the session log as Transcript: agent-count still sees the main thread's spawns,
 // which its own log (Own) does not hold.
 func TestWhenAgentCountForASubagentCall(t *testing.T) {

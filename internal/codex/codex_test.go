@@ -545,3 +545,15 @@ func TestShellPatchPipedFromAFile(t *testing.T) {
 		t.Errorf("a piped file written in the same call: want a Write of migrations/6.sql, got %+v", h.Calls)
 	}
 }
+
+// A quoted patch file name may hold spaces.
+func TestShellPatchQuotedFileName(t *testing.T) {
+	dir := t.TempDir()
+	os.WriteFile(filepath.Join(dir, "my fix.patch"), []byte("*** Begin Patch\n*** Update File: migrations/7.sql\n@@\n+y\n*** End Patch\n"), 0o644)
+	for _, cmd := range []string{`apply_patch < "my fix.patch"`, `cat 'my fix.patch' | apply_patch`} {
+		h := parse(t, stdin(t, "PreToolUse", "t1", map[string]any{"tool_name": "Bash", "cwd": dir, "tool_input": map[string]any{"command": cmd}}))
+		if len(h.Calls) != 2 || h.Calls[1].Target != filepath.Join(dir, "migrations", "7.sql") {
+			t.Errorf("%s: want an Edit of migrations/7.sql, got %+v", cmd, h.Calls)
+		}
+	}
+}

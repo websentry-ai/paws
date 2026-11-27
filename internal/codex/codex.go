@@ -202,10 +202,10 @@ func shellPatches(cmd, cwd string) []shellPatch {
 var patchBlock = regexp.MustCompile(`(?s)\*\*\* Begin Patch.*?\*\*\* End Patch`)
 
 // pipedFrom is a `cat <file> |` right before an apply_patch: the patch it pipes in is that file.
-var pipedFrom = regexp.MustCompile(`(?:^|[;&(\n])[ \t]*cat[ \t]+([^\s|;&]+)[ \t]*\|[ \t]*(?:(?:command|builtin|exec|env|nohup|time|sudo|[A-Za-z_][A-Za-z0-9_]*=\S*)[ \t]+)*$`)
+var pipedFrom = regexp.MustCompile(`(?:^|[;&(\n])[ \t]*cat[ \t]+('[^']*'|"[^"]*"|[^\s|;&'"]+)[ \t]*\|[ \t]*(?:(?:command|builtin|exec|env|nohup|time|sudo|[A-Za-z_][A-Za-z0-9_]*=\S*)[ \t]+)*$`)
 
 // patchFromFile is an apply_patch that reads its patch from a file on stdin: apply_patch < fix.patch (not <<).
-var patchFromFile = regexp.MustCompile(`^apply_?patch[ \t]*<[ \t]*([^<\s]\S*)`)
+var patchFromFile = regexp.MustCompile(`^apply_?patch[ \t]*<[ \t]*('[^']*'|"[^"]*"|[^<\s'"]\S*)`)
 
 // maxPatchFile bounds the patch file paws reads: far past any patch an agent writes, short of exhausting memory.
 const maxPatchFile = 256 << 20

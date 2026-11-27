@@ -126,7 +126,9 @@ func canonical(in *Input) []call {
 		cmd := str("command")
 		calls := []call{{tool: "Bash", target: cmd, text: cmd, input: map[string]any{"command": cmd}}}
 		if before, _, ok := strings.Cut(cmd, "*** Begin Patch"); ok && strings.Contains(before, "apply_patch") {
-			calls = append(calls, patchCalls(cmd, patchDir(cmd, in.CWD))...)
+			for _, sp := range shellPatches(cmd, in.CWD) {
+				calls = append(calls, patchCalls(sp.text, sp.dir)...)
+			}
 		}
 		return calls
 	case in.ToolName == "apply_patch":
@@ -160,14 +162,34 @@ var cdStep = regexp.MustCompile(`^cd\s+(?:'([^']*)'|"([^"]*)"|(\S+))$`)
 // chainSep splits a command line into its commands.
 var chainSep = regexp.MustCompile(`&&|\|\||[;\n]`)
 
-// patchDir is where a shell patch runs: the hook's cwd, moved by each `cd` in the commands before apply_patch, so a
+// shellPatch is one apply_patch run in a shell command: its patch text and the folder it runs in.
+type shellPatch struct{ text, dir string }
+
+// shellPatches are the apply_patch runs of a shell command, each with the folder the commands before it moved to.
+func shellPatches(cmd, cwd string) []shellPatch {
+	var out []shellPatch
+	starts := []int{}
+	for i := 0; ; {
+		j := strings.Index(cmd[i:], "apply_patch")
+		if j < 0 {
+			break
+		}
+		starts, i = append(starts, i+j), i+j+len("apply_patch")
+	}
+	for k, at := range starts {
+		end := len(cmd)
+		if k+1 < len(starts) {
+			end = starts[k+1]
+		}
+		out = append(out, shellPatch{text: cmd[at:end], dir: patchDir(cmd[:at], cwd)})
+	}
+	return out
+}
+
+// patchDir is where a shell patch runs, given the command before it: the hook's cwd, moved by each `cd`, so a
 // relative path in `ls && cd migrations && apply_patch ...` is a file in migrations/. A cd inside a subshell that
 // closes before apply_patch moves nothing.
-func patchDir(cmd, cwd string) string {
-	before, _, ok := strings.Cut(cmd, "apply_patch")
-	if !ok {
-		return cwd
-	}
+func patchDir(before, cwd string) string {
 	var outer []string // the folder each open subshell started in
 	for _, part := range chainSep.Split(before, -1) {
 		part = strings.TrimSpace(part)
@@ -304,7 +326,14 @@ func (Adapter) Observe(h *harness.Hook, d gate.Decision) {
 		if in.ToolName == "apply_patch" || in.ToolName == "Bash" && len(p.calls) > 1 {
 			// A patch: the files it changed are the ones apply_patch lists after its success line. Through the shell
 			// there is no exit code, so that line is the only sign it applied.
-			files = patchedFiles(in.ToolResponse, patchDir(cmdOf(in), in.CWD))
+			var dirs []string
+			for _, sp := range shellPatches(cmdOf(in), in.CWD) {
+				dirs = append(dirs, sp.dir)
+			}
+			if len(dirs) == 0 {
+				dirs = []string{in.CWD} // the apply_patch tool runs in the hook's cwd
+			}
+			files = patchedFiles(in.ToolResponse, dirs...)
 			if in.ToolName == "Bash" {
 				ok = len(files) > 0
 			}
@@ -330,7 +359,7 @@ func cmdOf(in *Input) string {
 
 // patchedFiles are the files apply_patch says it changed: the "A path", "M path" and "D path" lines after its
 // "Success. Updated the following files:" line, absolute.
-func patchedFiles(raw json.RawMessage, cwd string) []string {
+func patchedFiles(raw json.RawMessage, dirs ...string) []string {
 	var s string
 	if json.Unmarshal(raw, &s) != nil {
 		s = string(raw)
@@ -345,10 +374,13 @@ func patchedFiles(raw json.RawMessage, cwd string) []string {
 		if !ok || len(op) != 1 || !strings.Contains("AMD", op) {
 			continue
 		}
-		if !filepath.IsAbs(path) {
-			path = filepath.Join(cwd, path)
+		if filepath.IsAbs(path) {
+			files = append(files, filepath.Clean(path))
+			continue
 		}
-		files = append(files, filepath.Clean(path))
+		for _, d := range dirs { // a shell command's patches may each run in their own folder
+			files = append(files, filepath.Join(d, path))
+		}
 	}
 	return files
 }

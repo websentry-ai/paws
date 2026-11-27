@@ -382,3 +382,12 @@ func TestShellPatchAfterAClosedSubshell(t *testing.T) {
 		t.Errorf("want /repo/db/1.sql, got %+v", h.Calls)
 	}
 }
+
+// Each apply_patch in one command resolves from its own folder.
+func TestShellPatchesEachFromTheirFolder(t *testing.T) {
+	h := parse(t, stdin(t, "PreToolUse", "t1", map[string]any{"tool_name": "Bash", "tool_input": map[string]any{
+		"command": "cd a && apply_patch <<'EOF'\n*** Begin Patch\n*** Add File: 1.sql\n+x\n*** End Patch\nEOF\ncd ../b && apply_patch <<'EOF'\n*** Begin Patch\n*** Add File: 2.sql\n+y\n*** End Patch\nEOF"}}))
+	if len(h.Calls) != 3 || h.Calls[1].Target != "/repo/a/1.sql" || h.Calls[2].Target != "/repo/b/2.sql" {
+		t.Errorf("want /repo/a/1.sql and /repo/b/2.sql, got %+v", h.Calls)
+	}
+}

@@ -587,9 +587,14 @@ func resultOK(raw json.RawMessage) bool {
 	return !readError.MatchString(first)
 }
 
-// readError also takes a reader the shell couldn't find: "bash: sed: command not found", "zsh: command not found:
-// sed", "sh: 1: sed: not found".
-var readError = regexp.MustCompile(`(^|: )(No such file or directory|Permission denied|Is a directory|(command )?not found)$|(^|: )command not found: \S+$`)
+// readError is a reader's or the shell's error line: it opens with the program's name (sed: <path>: No such file
+// or directory, bash: sed: command not found, sh: 1: sed: not found, zsh: command not found: sed). The name keeps a
+// SKILL.md line such as "Returns 404 when the page is not found" from reading as a failed read.
+var readError = regexp.MustCompile(`^(?:(?:` + errorSource + `): )+(?:.*: )?(?:No such file or directory|Permission denied|Is a directory|(?:command )?not found)$` +
+	`|^(?:(?:ba|z|da|k)?sh: )(?:line \d+: )?command not found: \S+$`)
+
+// errorSource is a program that names itself on an error line: a shell (with its line number), or a reader.
+const errorSource = `(?:ba|z|da|k)?sh|line \d+|\d+|(?:\S*/)?(?:g?sed|cat|head|tail|nl|less|more|bat|batcat|g?awk|mawk)`
 
 // Turns is the ledger of the session, from the Stop's turn id.
 func (Adapter) Turns(h *harness.Hook) harness.TurnLog {

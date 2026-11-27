@@ -6,6 +6,7 @@ import (
 	"path/filepath"
 	"regexp"
 	"slices"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -770,5 +771,24 @@ func TestPatchContextLineIsNotAHeader(t *testing.T) {
 	}
 	if got[0].Added != "new" {
 		t.Errorf("README.md adds %q, want new", got[0].Added)
+	}
+}
+
+// Skill text on the first line of a read is the file, even when it ends like an error.
+func TestLedgerSkillTextLikeAnErrorIsARead(t *testing.T) {
+	for _, first := range []string{"Returns 404 when the page is not found", "Note: Permission denied", "deploy: command not found"} {
+		md := ledgerEnv(t)
+		os.WriteFile(md, []byte(first+"\n"), 0o644)
+		read := "sed -n '1,240p' " + md
+		observe(t, stdin(t, "PreToolUse", "t1", bashCall("c1", read)), gate.Decision{})
+		observe(t, stdin(t, "PostToolUse", "t1", result("c1", first+"\n")), gate.Decision{})
+		if !parse(t, stdin(t, "PreToolUse", "t1", bashCall("c9", "git push"))).Calls[0].Log.SkillLoaded("git", 20) {
+			t.Errorf("%q: the skill was read", first)
+		}
+	}
+	for _, out := range []string{"sed: /x/SKILL.md: No such file or directory", "cat: /x: Permission denied", "bash: line 1: sed: command not found"} {
+		if resultOK(json.RawMessage(strconv.Quote(out + "\n"))) {
+			t.Errorf("%q is a failed read", out)
+		}
 	}
 }

@@ -49,7 +49,7 @@ func TestCodexRequireSkillRound(t *testing.T) {
 	}
 	runGate(t, codexCall("UserPromptSubmit", "t1", nil))
 	r := reasonOf(t, runGate(t, codexCall("PreToolUse", "t1", bash("c1", "git push"))))
-	want := `paws (rule push): this is paws working as intended, nothing is broken. This command needs the "git" skill. Read ` + md + ` in full on its own, follow it, then run the command again, changed if the skill says so`
+	want := `paws (rule push): this command needs the "git" skill. Read ` + md + ` in full on its own, follow it, then run the command again, changed if the skill says so. This is paws working as intended, nothing is broken`
 	if r != want {
 		t.Fatalf("deny:\n got %q\nwant %q", r, want)
 	}
@@ -61,6 +61,7 @@ func TestCodexRequireSkillRound(t *testing.T) {
 	if out := runGate(t, codexCall("PreToolUse", "t1", bash("c3", "git push"))); out != "{}" {
 		t.Fatalf("the retry after the read should pass, got %s", out)
 	}
+	runGate(t, codexCall("PostToolUse", "t1", map[string]any{"tool_name": "Bash", "tool_use_id": "c3", "tool_input": map[string]any{"command": "git push"}, "tool_response": "Exit code: 0\nOutput:\nok\n"}))
 	runGate(t, codexCall("Stop", "t1", map[string]any{"stop_hook_active": false, "last_assistant_message": "done"}))
 	var deny, allow, graded map[string]any
 	for _, rec := range auditLines(t, home) {
@@ -95,7 +96,7 @@ func TestCodexPatchMatchesFileRules(t *testing.T) {
 		}
 		return map[string]any{"tool_name": "apply_patch", "tool_use_id": "p1", "tool_input": map[string]any{"command": body + "*** End Patch"}}
 	}
-	if r := reasonOf(t, runGate(t, codexCall("PreToolUse", "t1", patch("src/a.go", "migrations/0001.sql")))); !strings.Contains(r, "This edit needs the \"db\" skill") || strings.HasSuffix(r, ".") {
+	if r := reasonOf(t, runGate(t, codexCall("PreToolUse", "t1", patch("src/a.go", "migrations/0001.sql")))); !strings.Contains(r, "this edit needs the \"db\" skill") || strings.HasSuffix(r, ".") {
 		t.Errorf("a patch touching a migration is gated once, without a trailing period: %q", r)
 	}
 	if out := runGate(t, codexCall("PreToolUse", "t1", patch("src/a.go"))); out != "{}" {
@@ -304,4 +305,33 @@ func TestSkillReportsAFailedCodexCopy(t *testing.T) {
 	if _, err := os.Stat(filepath.Join(repo, ".claude", "skills", "paws", "SKILL.md")); err != nil {
 		t.Errorf("Claude Code's copy is still installed: %v", err)
 	}
+}
+
+// A retry paws allowed but Codex refused (no PostToolUse came back) never ran: the block isn't graded as retried.
+func TestCodexRefusedRetryIsNoRetry(t *testing.T) {
+	home := portalEnv(t, http.NotFoundHandler())
+	writeRule(t, filepath.Join(home, "push.md"), "name: push\nevent: pre-tool\nmatcher:\n  tool: Bash\naction:\n  type: require-skill\n  skill: git\n")
+	md := codexSkill(t, "git")
+	bash := func(id, cmd string) map[string]any {
+		return map[string]any{"tool_name": "Bash", "tool_use_id": id, "tool_input": map[string]any{"command": cmd}}
+	}
+	runGate(t, codexCall("UserPromptSubmit", "t1", nil))
+	runGate(t, codexCall("PreToolUse", "t1", bash("c1", "git push")))
+	read := "sed -n '1,240p' " + md
+	runGate(t, codexCall("PreToolUse", "t1", bash("c2", read)))
+	runGate(t, codexCall("PostToolUse", "t1", map[string]any{"tool_name": "Bash", "tool_use_id": "c2", "tool_input": map[string]any{"command": read}, "tool_response": "# git\n"}))
+	if out := runGate(t, codexCall("PreToolUse", "t1", bash("c3", "git push"))); out != "{}" {
+		t.Fatalf("paws allows the retry, got %s", out)
+	}
+	// Codex's own sandbox refuses it: no PostToolUse for c3.
+	runGate(t, codexCall("Stop", "t1", map[string]any{"stop_hook_active": false, "last_assistant_message": "done"}))
+	for _, rec := range auditLines(t, home) {
+		if rec["event"] == "outcome" {
+			if rec["outcome"] == "same_retry" || rec["outcome"] == "fixed" || rec["retry_command"] != nil {
+				t.Errorf("the refused retry never ran, got %v", rec)
+			}
+			return
+		}
+	}
+	t.Fatal("no outcome record")
 }

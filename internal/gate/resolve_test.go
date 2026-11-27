@@ -83,7 +83,7 @@ func TestRequireSkillReasonTellsAgentToRetry(t *testing.T) {
 	ev := Event{Kind: rule.KindTool, Tool: "Bash", Target: "x"}
 	rules := []*rule.Rule{mustRule(t, "---\nname: s\nevent: pre-tool\naction:\n  type: require-skill\n  skill: foo\n---\n")}
 
-	want := `paws (rule s): this is paws working as intended, nothing is broken. This command needs the "foo" skill. Load it with the Skill tool, then retry this exact command.`
+	want := `paws (rule s): this command needs the "foo" skill. Load it with the Skill tool, then retry this exact command. This is paws working as intended, nothing is broken.`
 	if got := Decide(ev, rules).Reason; got != want {
 		t.Errorf("require-skill deny:\n got %q\nwant %q", got, want)
 	}
@@ -100,9 +100,9 @@ func TestRequireSkillReasonMergesMissingSkills(t *testing.T) {
 	rules := []*rule.Rule{gate("git--git", "git"), gate("humanizer-commit", "humanizer"), gate("git--again", "git"), custom}
 
 	for _, tc := range []struct{ tool, want string }{
-		{"Bash", `paws (rules git--git, humanizer-commit, git--again): this is paws working as intended, nothing is broken. This command needs the "git" and "humanizer" skills. Load them with the Skill tool, then retry this exact command.` + "\n\nLoad house first."},
-		{"Edit", `paws (rules git--git, humanizer-commit, git--again): this is paws working as intended, nothing is broken. This edit needs the "git" and "humanizer" skills. Load them with the Skill tool, then retry this exact edit.` + "\n\nLoad house first."},
-		{"mcp__github__create_pull_request", `paws (rules git--git, humanizer-commit, git--again): this is paws working as intended, nothing is broken. This tool call needs the "git" and "humanizer" skills. Load them with the Skill tool, then retry this exact tool call.` + "\n\nLoad house first."},
+		{"Bash", `paws (rules git--git, humanizer-commit, git--again): this command needs the "git" and "humanizer" skills. Load them with the Skill tool, then retry this exact command. This is paws working as intended, nothing is broken.` + "\n\nLoad house first."},
+		{"Edit", `paws (rules git--git, humanizer-commit, git--again): this edit needs the "git" and "humanizer" skills. Load them with the Skill tool, then retry this exact edit. This is paws working as intended, nothing is broken.` + "\n\nLoad house first."},
+		{"mcp__github__create_pull_request", `paws (rules git--git, humanizer-commit, git--again): this tool call needs the "git" and "humanizer" skills. Load them with the Skill tool, then retry this exact tool call. This is paws working as intended, nothing is broken.` + "\n\nLoad house first."},
 	} {
 		d := Decide(Event{Kind: rule.KindTool, Tool: tc.tool, Target: "x"}, rules)
 		if d.Verdict != Deny || d.Reason != tc.want {

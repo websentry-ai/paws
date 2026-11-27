@@ -633,7 +633,7 @@ func (Adapter) LoadSkills(skills []gate.Skill, noun string) string {
 		verb = "run the command"
 	}
 	// "On its own": a read chained with other commands isn't a load, and Codex likes to chain.
-	return fmt.Sprintf("Read %s in full on its own, follow %s, then %s again, changed if %s so", readList(skills), it, verb, says)
+	return fmt.Sprintf("Read %s in full on its own, follow %s, then %s again, changed if %s so. %s", readList(skills), it, verb, says, gate.Reassurance)
 }
 
 func (Adapter) LoadAtStart(s gate.Skill) string {

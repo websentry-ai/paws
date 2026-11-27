@@ -394,6 +394,7 @@ func (t turns) TurnCalls(until time.Time) ([]outcome.Call, time.Time, error) {
 	}
 	var start time.Time
 	var calls []outcome.Call
+	ran := ranCalls(main)
 	for _, r := range main {
 		if r.Turn != turn || r.At.After(until) {
 			continue
@@ -402,14 +403,16 @@ func (t turns) TurnCalls(until time.Time) ([]outcome.Call, time.Time, error) {
 			start = r.At
 		}
 		if r.Kind == "call" {
-			calls = append(calls, toCall(r))
+			calls = append(calls, toCall(r, ran))
 		}
 	}
 	subs, _ := filepath.Glob(filepath.Join(filepath.Dir(ledgerPath(t.session, "")), idPart.ReplaceAllString(t.session, "")+".*.jsonl"))
 	for _, p := range subs {
-		for _, r := range readLedger(p) {
+		recs := readLedger(p)
+		ran := ranCalls(recs)
+		for _, r := range recs {
 			if r.Kind == "call" && !r.At.Before(start) && !r.At.After(until) {
-				calls = append(calls, toCall(r))
+				calls = append(calls, toCall(r, ran))
 			}
 		}
 	}
@@ -417,10 +420,27 @@ func (t turns) TurnCalls(until time.Time) ([]outcome.Call, time.Time, error) {
 	return calls, start, nil
 }
 
-func toCall(r record) outcome.Call {
+// ranCalls are the ids of a ledger's calls whose PostToolUse came back: Codex ran them.
+func ranCalls(recs []record) map[string]bool {
+	ran := map[string]bool{}
+	for _, r := range recs {
+		if r.Kind == "result" {
+			ran[r.ID] = true
+		}
+	}
+	return ran
+}
+
+// reportsResult are the tools Codex sends a PostToolUse for once they ran: a shell command, apply_patch.
+var reportsResult = map[string]bool{"Bash": true, "Edit": true, "Write": true}
+
+// toCall is a ledger call as the grader sees it. A call paws allowed but Codex itself refused (no PostToolUse came
+// back) never ran: it is no retry.
+func toCall(r record, ran map[string]bool) outcome.Call {
+	never := r.Verdict == "deny" || reportsResult[r.Tool] && !ran[r.ID]
 	c := outcome.Call{ID: r.ID + "/" + strconv.Itoa(r.Part), Tool: r.Tool, Target: r.Target, Text: r.Text, Input: r.Input,
-		At: r.At, Agent: r.Agent, Denied: r.Verdict == "deny", SkillLoad: r.SkillLoad}
-	if c.Denied {
+		At: r.At, Agent: r.Agent, Denied: never, SkillLoad: r.SkillLoad}
+	if r.Verdict == "deny" {
 		c.DeniedAt = r.End // the hook finished: Codex got the deny then
 	}
 	if server, tool, ok := gate.MCPParts(r.Tool); ok {

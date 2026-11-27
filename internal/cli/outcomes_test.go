@@ -812,8 +812,8 @@ func TestOutcomeKeepsTheBlockedCallsModel(t *testing.T) {
 	t.Fatal("no outcome record")
 }
 
-// A deny logged without a model leaves the outcome without one: the Stop's model may be another call's.
-func TestOutcomeWithoutTheDenysModelHasNone(t *testing.T) {
+// A deny logged without a model (the session's first call, before any assistant record) takes the model at Stop.
+func TestOutcomeWithoutTheDenysModelTakesTheStops(t *testing.T) {
 	home, _ := syncEnv(t)
 	cwd, _ := os.Getwd()
 	writeRule(t, filepath.Join(cwd, ".paws", "pre-tool", "rm-gate.md"), rmRule)
@@ -839,8 +839,8 @@ func TestOutcomeWithoutTheDenysModelHasNone(t *testing.T) {
 	runGate(t, map[string]any{"hook_event_name": "Stop", "session_id": "sess-q", "transcript_path": transcript, "cwd": cwd})
 	for _, rec := range auditLines(t, home) {
 		if rec["event"] == "outcome" {
-			if _, has := rec["model"]; has {
-				t.Errorf("the deny had no model; the outcome takes none, got %v", rec["model"])
+			if rec["model"] != "claude-haiku-4-5" {
+				t.Errorf("the deny had no model; the outcome takes the Stop's, got %v", rec["model"])
 			}
 			return
 		}

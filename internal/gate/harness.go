@@ -35,7 +35,7 @@ type Harness interface {
 	// SkillDirs are the folders this harness loads skills from for cwd: the user's, then the project's.
 	SkillDirs(cwd string) []string
 	// LoadSkills ends a require-skill deny: how to load skills (each with the SKILL.md paws found, or ""), then retry
-	// the call, named by noun ("command", "edit", "tool call").
+	// the call, named by noun ("command", "edit", "tool call"), and then Reassurance.
 	LoadSkills(skills []Skill, noun string) string
 	// LoadAtStart ends the session-start context of a rule that needs skill.
 	LoadAtStart(skill Skill) string
@@ -95,8 +95,11 @@ func (skillTool) LoadSkills(skills []Skill, noun string) string {
 	if len(skills) > 1 {
 		pronoun = "them"
 	}
-	return fmt.Sprintf("Load %s with the Skill tool, then retry this exact %s.", pronoun, noun)
+	return fmt.Sprintf("Load %s with the Skill tool, then retry this exact %s. %s.", pronoun, noun, Reassurance)
 }
+
+// Reassurance ends a require-skill deny, after its instruction: the harness shows a deny as an error.
+const Reassurance = "This is paws working as intended, nothing is broken"
 
 func (skillTool) LoadAtStart(Skill) string {
 	return "Load it with the Skill tool before you start work."

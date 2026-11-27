@@ -263,7 +263,9 @@ func TestLedgerTurnCalls(t *testing.T) {
 	observe(t, stdin(t, "UserPromptSubmit", "t2", nil), gate.Decision{})
 	observe(t, stdin(t, "PreToolUse", "t2", bashCall("c1", "git push")), gate.Decision{Verdict: gate.Deny, Reason: "no"})
 	observe(t, stdin(t, "PreToolUse", "t2", bashCall("c2", "cat "+md)), gate.Decision{})
+	observe(t, stdin(t, "PostToolUse", "t2", result("c2", "# git\n")), gate.Decision{})
 	observe(t, stdin(t, "PreToolUse", "t2", bashCall("c3", "git push")), gate.Decision{})
+	observe(t, stdin(t, "PostToolUse", "t2", result("c3", "ok\n")), gate.Decision{})
 	tl := Adapter{}.Turns(parse(t, stdin(t, "Stop", "t2", nil)))
 	at, ok := tl.LastRecordAt(time.Now())
 	if !ok {

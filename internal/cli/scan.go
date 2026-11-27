@@ -113,9 +113,8 @@ type skillReads struct{ history.Source }
 
 func (s skillReads) Calls(since, until time.Time, fn func(history.Call)) (int, error) {
 	return s.Source.Calls(since, until, func(c history.Call) {
-		// From the session's folder. A Read takes no offset or limit here (history keeps only the path): its range is
-		// the default, the file's first 2000 lines.
-		if r, ok := gate.ReadOf(c.Tool, c.Target, nil, c.Cwd, false); ok && r.Lines.From == 1 && (r.Lines.To == 0 || c.Tool == "Read") {
+		// From the session's folder. A Read of the whole file sets no offset or limit (Partial).
+		if r, ok := gate.ReadOf(c.Tool, c.Target, nil, c.Cwd, false); ok && r.Lines.From == 1 && (r.Lines.To == 0 || c.Tool == "Read" && !c.Partial) {
 			c.Tool, c.Target = history.SkillTool, r.Skill
 		}
 		fn(c)

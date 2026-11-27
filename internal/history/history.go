@@ -24,6 +24,8 @@ type Call struct {
 	Session string
 	// Cwd is where the session ran, when the log says: a relative path in the call is taken from it.
 	Cwd string
+	// Partial is set on a Read of part of a file (an offset or a limit).
+	Partial bool
 }
 
 // Source reads one agent's past sessions.

@@ -506,6 +506,11 @@ func (Adapter) Observe(h *harness.Hook, d gate.Decision) {
 		if json.Unmarshal(in.ToolResponse, &out) != nil {
 			out = string(in.ToolResponse)
 		}
+		if strings.HasPrefix(out, "Exit code: ") { // Codex's header (exit code, wall time) is no line of the file
+			if _, body, found := strings.Cut(out, "\nOutput:\n"); found {
+				out = body
+			}
+		}
 		c, shown := gate.ShownLines(out) // what the model got of a read
 		appendRecords(own, []record{{Kind: "result", At: p.at, Turn: in.TurnID, ID: in.ToolUseID, OK: &ok, Files: files,
 			Cut: c, Shown: shown, Agent: in.AgentID}})

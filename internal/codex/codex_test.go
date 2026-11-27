@@ -792,3 +792,15 @@ func TestLedgerSkillTextLikeAnErrorIsARead(t *testing.T) {
 		}
 	}
 }
+
+// Codex's result header isn't part of the file: a read cut three lines short of the end is still cut.
+func TestLedgerCutReadDoesNotCountTheHeader(t *testing.T) {
+	md := ledgerEnv(t)
+	os.WriteFile(md, []byte(strings.Repeat("rule line\n", 10)), 0o644)
+	observe(t, stdin(t, "PreToolUse", "t1", bashCall("c1", "cat "+md)), gate.Decision{})
+	out := "Exit code: 0\nWall time: 0.1 seconds\nOutput:\n" + strings.Repeat("rule line\n", 7) + "…40 tokens truncated…\n"
+	observe(t, stdin(t, "PostToolUse", "t1", result("c1", out)), gate.Decision{})
+	if parse(t, stdin(t, "PreToolUse", "t1", bashCall("c9", "git push"))).Calls[0].Log.SkillLoaded("git", 20) {
+		t.Error("seven lines of ten reached the model: not loaded")
+	}
+}

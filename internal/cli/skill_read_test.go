@@ -311,3 +311,47 @@ func TestASKILLmdReadBeforeTheFileChangedDoesntCount(t *testing.T) {
 		t.Errorf("a blob copy of a read from before the change doesn't count either, got %s", out)
 	}
 }
+
+// A read counts only for what reached the agent: Claude Code shows a long output as a 2KB preview, so a cat of a big
+// SKILL.md loads it only once later reads cover the rest.
+func TestACutReadCoversOnlyWhatTheAgentSaw(t *testing.T) {
+	home := portalEnv(t, http.NotFoundHandler())
+	writeRule(t, filepath.Join(home, "push.md"), "name: push\nevent: pre-tool\nmatcher:\n  tool: Bash\n  command_regex: git push\naction:\n  type: require-skill\n  skill: deployer\n")
+	md := skillMD(t, "deployer")
+	var body strings.Builder
+	for i := 1; i <= 1000; i++ {
+		fmt.Fprintf(&body, "rule line %d with enough text to make the file long\n", i)
+	}
+	os.WriteFile(md, []byte(body.String()), 0o644)
+	preview := "<persisted-output>\nOutput too large (52.1KB). Full output saved to: /x/tool-results/b1.txt\n\nPreview (first 2KB):\n"
+	for i := 1; i <= 40; i++ {
+		preview += fmt.Sprintf("rule line %d with enough text to make the file long\n", i)
+	}
+	preview += "rule line 41 with eno"
+	log := func(results ...[2]string) string { // each a command and the tool_result the agent got
+		p := filepath.Join(t.TempDir(), "s.jsonl")
+		lines := []string{`{"type":"user","isSidechain":false,"message":{"role":"user","content":"push it"}}`}
+		for i, r := range results {
+			in, _ := json.Marshal(map[string]string{"command": r[0]})
+			out, _ := json.Marshal(r[1])
+			id := fmt.Sprintf("toolu_%d", i)
+			lines = append(lines,
+				`{"type":"assistant","isSidechain":false,"message":{"content":[{"type":"tool_use","id":"`+id+`","name":"Bash","input":`+string(in)+`}]}}`,
+				`{"type":"user","isSidechain":false,"message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"`+id+`","is_error":false,"content":`+string(out)+`}]}}`)
+		}
+		os.WriteFile(p, []byte(strings.Join(lines, "\n")+"\n"), 0o600)
+		return p
+	}
+	push := map[string]any{"command": "git push"}
+	if out := gateCall(t, "Bash", push, log([2]string{"cat " + md, preview})); !strings.Contains(out, `"deny"`) {
+		t.Errorf("a cat shown as a 40-line preview doesn't load a 1000-line skill, got %s", out)
+	}
+	rest := [2]string{"sed -n '41,1000p' " + md, "rule line 41 ..."}
+	if out := gateCall(t, "Bash", push, log([2]string{"cat " + md, preview}, rest)); out != "{}" {
+		t.Errorf("the preview's 40 lines and lines 41-1000 cover it, got %s", out)
+	}
+	codexCut := "rule line 1\nrule line 2\n…48211 tokens truncated…\nrule line 1000\n"
+	if out := gateCall(t, "Bash", push, log([2]string{"cat " + md, codexCut})); !strings.Contains(out, `"deny"`) {
+		t.Errorf("an output cut in the middle covers only its first lines, got %s", out)
+	}
+}

@@ -159,6 +159,7 @@ func succeededReads(lines [][]byte, path string, reads map[string]FileRead) []Fi
 		for _, b := range e.blocks() {
 			if r, isRead := reads[b.ToolUseID]; isRead && b.Type == "tool_result" && !b.IsError && !done[b.ToolUseID] {
 				done[b.ToolUseID] = true
+				r.Cut, r.Shown = ShownLines(b.text()) // what the agent got, not what the command printed
 				ok = append(ok, r)
 			}
 		}

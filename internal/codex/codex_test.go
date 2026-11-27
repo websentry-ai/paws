@@ -690,6 +690,8 @@ func TestShellPatchInWrappersAndRedirectedCd(t *testing.T) {
 		"pushd migrations && apply_patch " + patch:                "/repo/migrations/1.sql",
 		"pushd migrations >/dev/null; apply_patch " + patch:       "/repo/migrations/1.sql",
 		"builtin cd migrations && apply_patch " + patch:           "/repo/migrations/1.sql",
+		"/usr/local/bin/apply_patch " + patch:                     "/repo/1.sql",
+		"cd migrations && ./bin/applypatch " + patch:              "/repo/migrations/1.sql",
 		"echo " + patch + " | xargs -0 apply_patch":               "/repo/1.sql",
 	} {
 		h := parse(t, stdin(t, "PreToolUse", "t1", map[string]any{"tool_name": "Bash", "tool_input": map[string]any{"command": cmd}}))
@@ -718,5 +720,18 @@ func TestLedgerAgentCountSkipsDeniedSpawns(t *testing.T) {
 	observe(t, stdin(t, "PreToolUse", "t1", spawn("s2")), gate.Decision{})
 	if n := parse(t, stdin(t, "PreToolUse", "t1", bashCall("c9", "ls"))).Calls[0].Log.AgentsSinceUserTurn(); n != 1 {
 		t.Errorf("one agent started, got %d", n)
+	}
+}
+
+// A reader the shell couldn't find read nothing: the skill isn't loaded.
+func TestLedgerReaderNotFoundIsNoRead(t *testing.T) {
+	for _, out := range []string{"bash: sed: command not found\n", "zsh: command not found: sed\n", "sh: 1: sed: not found\n"} {
+		md := ledgerEnv(t)
+		read := "sed -n '1,240p' " + md
+		observe(t, stdin(t, "PreToolUse", "t1", bashCall("c1", read)), gate.Decision{})
+		observe(t, stdin(t, "PostToolUse", "t1", result("c1", out)), gate.Decision{})
+		if parse(t, stdin(t, "PreToolUse", "t1", bashCall("c9", "git push"))).Calls[0].Log.SkillLoaded("git", 20) {
+			t.Errorf("%q: the read never ran", out)
+		}
 	}
 }

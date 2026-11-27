@@ -193,10 +193,11 @@ type shellPatch struct {
 	dirs []string // every folder it may run in: dir, and each folder the commands before it pass through
 }
 
-// applyPatchCmd finds apply_patch (or its applypatch alias) as a word anywhere in the command, not part of a
-// file name (apply_patch.py, tools/apply_patch). Every place a shell can run it (after a wrapper, in bash -c or
-// eval, behind xargs) counts: a mention that runs nothing gates only the patch text after it.
-var applyPatchCmd = regexp.MustCompile(`(?:^|[^\w./-])(apply_?patch)(?:[^\w./-]|$)`)
+// applyPatchCmd finds apply_patch (or its applypatch alias) as a word anywhere in the command, by path too
+// (/usr/local/bin/apply_patch, ./apply_patch), not part of a longer name (apply_patch.py, my-apply_patch). Every
+// place a shell can run it (after a wrapper, in bash -c or eval, behind xargs) counts: a mention that runs nothing
+// gates only the patch text after it.
+var applyPatchCmd = regexp.MustCompile(`(?:^|[^\w.-])(apply_?patch)(?:[^\w./-]|$)`)
 
 // shellPatches are the apply_patch runs of a shell command, each with the folder the commands before it moved to.
 func shellPatches(cmd, cwd string) []shellPatch {
@@ -582,7 +583,9 @@ func resultOK(raw json.RawMessage) bool {
 	return !readError.MatchString(first)
 }
 
-var readError = regexp.MustCompile(`(^|: )(No such file or directory|Permission denied|Is a directory)$`)
+// readError also takes a reader the shell couldn't find: "bash: sed: command not found", "zsh: command not found:
+// sed", "sh: 1: sed: not found".
+var readError = regexp.MustCompile(`(^|: )(No such file or directory|Permission denied|Is a directory|(command )?not found)$|(^|: )command not found: \S+$`)
 
 // Turns is the ledger of the session, from the Stop's turn id.
 func (Adapter) Turns(h *harness.Hook) harness.TurnLog {

@@ -650,3 +650,15 @@ func in(cwd string, m map[string]any) map[string]any {
 	m["cwd"] = cwd
 	return m
 }
+
+// A read of part of SKILL.md is still a skill read, but only a read of all of it loads the skill alone.
+func TestSkillReadWholeOrPart(t *testing.T) {
+	md := ledgerEnv(t)
+	os.WriteFile(md, []byte(strings.Repeat("rule line\n", 30)), 0o644)
+	for cmd, whole := range map[string]bool{"sed -n '1,240p' " + md: true, "sed -n '1,10p' " + md: false, "cat " + md: true} {
+		ev := parse(t, stdin(t, "PreToolUse", "t1", bashCall("c1", cmd))).Calls[0]
+		if ev.SkillLoad != "git" || ev.SkillWhole != whole {
+			t.Errorf("%s: want skill git, whole %v; got %q, %v", cmd, whole, ev.SkillLoad, ev.SkillWhole)
+		}
+	}
+}

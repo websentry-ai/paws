@@ -358,3 +358,26 @@ func TestFetchStopsWithItsContext(t *testing.T) {
 		t.Errorf("Fetch with a canceled context: %v", err)
 	}
 }
+
+// A failed add takes back the copies it made in other harnesses' folders, also for a skill that was
+// already in its own folder (added before the other harness was set up).
+func TestFailedAddRemovesItsMirrorCopies(t *testing.T) {
+	repo, hash := goodHash(t)
+	fakeFetch(t, map[string]string{"github.com/example/humanizer": repo})
+	c := testCatalog(t, hash)
+	tg := ProjectTarget(t.TempDir())
+	add(t, c, "writing", nil, tg) // no mirrors yet
+	good, bad := t.TempDir(), filepath.Join(t.TempDir(), "file")
+	os.WriteFile(bad, []byte("not a folder"), 0o644) // copying into it fails
+	tg.Mirrors = []string{good, bad}
+	pk, bindings, picks, _ := Resolve(c, "writing", nil, nil)
+	if _, err := Add(c, pk, bindings, picks, tg); err == nil {
+		t.Fatal("the copy into a file should fail the add")
+	}
+	if _, err := os.Stat(filepath.Join(good, "humanizer")); err == nil {
+		t.Error("the new mirror copy is left behind")
+	}
+	if _, err := os.Stat(filepath.Join(tg.SkillsDir, "humanizer", "SKILL.md")); err != nil {
+		t.Error("the copy that was there before the add must stay")
+	}
+}

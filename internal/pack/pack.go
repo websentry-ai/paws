@@ -189,11 +189,15 @@ func Add(c *catalog.Catalog, name string, bindings []string, picks map[string]st
 	}
 	res := &Result{Pack: name, Bindings: bindings}
 	fresh := map[string]bool{} // skills this call created where nothing was before
+	var mirrored [][2]string    // copies this call created in another harness's folder where nothing was before
 	ok := false
 	defer func() {
 		if !ok { // a later step failed: take back the skills this call created
 			for s := range fresh {
 				t.removeSkill(s)
+			}
+			for _, m := range mirrored {
+				removeSkill(m[0], m[1])
 			}
 		}
 	}()
@@ -216,8 +220,12 @@ func Add(c *catalog.Catalog, name string, bindings []string, picks map[string]st
 				fresh[b.Action.Skill] = true
 			}
 			for _, m := range t.Mirrors {
+				was := exists(filepath.Join(m, b.Action.Skill))
 				if _, err := MirrorSkill(t.SkillsDir, m, b.Action.Skill); err != nil {
 					return nil, fmt.Errorf("skill %s: copy to %s: %w", b.Action.Skill, m, err)
+				}
+				if !was {
+					mirrored = append(mirrored, [2]string{m, b.Action.Skill})
 				}
 			}
 			res.Installed = append(res.Installed, b.Action.Skill)

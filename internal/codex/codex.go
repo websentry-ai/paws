@@ -102,15 +102,24 @@ func (a Adapter) Parse(stdin []byte) (*harness.Hook, error) {
 		switch in.HookEventName {
 		case "PreToolUse":
 			ev.Kind = rule.KindTool
-			ev.SkillLoad = gate.SkillRead(c.tool, c.target, in.CWD)
+			ev.SkillLoad, ev.SkillWhole = skillRead(c, in.CWD)
 		case "PostToolUse":
-			ev.SkillLoad = gate.SkillRead(c.tool, c.target, in.CWD)
+			ev.SkillLoad, ev.SkillWhole = skillRead(c, in.CWD)
 		case "SessionStart":
 			ev.Kind, ev.Target = rule.KindSession, in.Source
 		}
 		h.Calls = append(h.Calls, ev)
 	}
 	return h, nil
+}
+
+// skillRead names the skill whose SKILL.md a call reads, and whether the read alone prints all of it.
+func skillRead(c call, cwd string) (string, bool) {
+	r, ok := gate.ReadOf(c.tool, c.target, c.input, cwd, true)
+	if !ok {
+		return "", false
+	}
+	return r.Skill, gate.Covered([]gate.FileRead{r})
 }
 
 // canonical maps a Codex tool call to canonical calls: Bash as is, apply_patch to a Write (new file) or Edit per

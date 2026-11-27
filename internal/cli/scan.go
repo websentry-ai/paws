@@ -107,6 +107,21 @@ func (s skipSynced) Calls(since, until time.Time, fn func(history.Call)) (int, e
 	return len(counted), nil // sessions with a call left in
 }
 
+// skillReads is a history.Source whose calls that read a whole SKILL.md are the skill loads they are: they count
+// toward `loaded`, like the Skill tool. A read of part of the file stays an ordinary call: alone it loads nothing.
+type skillReads struct{ history.Source }
+
+func (s skillReads) Calls(since, until time.Time, fn func(history.Call)) (int, error) {
+	return s.Source.Calls(since, until, func(c history.Call) {
+		// From the session's folder, by the gate's own rule: the read alone covers the whole file (a Read with an
+		// offset or a limit, Partial, never does; a default Read does for a file of up to 2000 lines).
+		if r, ok := gate.ReadOf(c.Tool, c.Target, nil, c.Cwd, false); ok && !c.Partial && gate.Covered([]gate.FileRead{r}) {
+			c.Tool, c.Target = history.SkillTool, r.Skill
+		}
+		fn(c)
+	})
+}
+
 // take marks and reports the earliest unused record of c's session that is c: same tool, the same command (Bash,
 // as the hook redacts it), file (as the hook keeps it, relative to the repo) or action key, written while c could
 // have been running. The log has whole seconds, so a record may read up to a second before the call.
@@ -114,7 +129,9 @@ func (s skipSynced) take(c history.Call) bool {
 	want := gate.DescribeAction(gate.Event{Tool: c.Tool, Target: c.Target})
 	hash := gate.TargetHash(c.Target)
 	for _, r := range s.logged[c.Session] {
-		if r.used || r.tool != c.Tool || r.at.Before(c.At.Add(-time.Second)) || !r.at.Before(c.At.Add(maxCallTime)) {
+		// The hook logs a read of a SKILL.md as a Skill action: its input hash names the call whatever the tool.
+		sameTool := r.tool == c.Tool || r.tool == history.SkillTool && r.hash != "" && r.hash == hash
+		if r.used || !sameTool || r.at.Before(c.At.Add(-time.Second)) || !r.at.Before(c.At.Add(maxCallTime)) {
 			continue
 		}
 		switch {
@@ -247,6 +264,14 @@ var scanNow = time.Now
 
 // Scan is `paws scan [--days 30|90] [--dry-run]`.
 func Scan(args []string) int {
+	if name := agentArg(args); name != "" {
+		// Only Claude Code's session logs are read; Codex's rollout files aren't a stable format.
+		if a := findAgent(name); a == nil || a != defaultAdapter() {
+			fmt.Fprintf(os.Stderr, "paws: scan reads %s sessions only; it can't read %s sessions yet\n", defaultAdapter().Title(), name)
+			return 2
+		}
+		args = withoutAgent(args)
+	}
 	days, dry, ok := scanFlags(args)
 	if !ok {
 		fmt.Fprintln(os.Stderr, scanUsage)
@@ -262,6 +287,19 @@ func Scan(args []string) int {
 		return 1
 	}
 	return runScan(creds, days, dry)
+}
+
+// withoutAgent is args without --agent and its value.
+func withoutAgent(args []string) []string {
+	var out []string
+	for i := 0; i < len(args); i++ {
+		if args[i] == "--agent" && i+1 < len(args) {
+			i++
+			continue
+		}
+		out = append(out, args[i])
+	}
+	return out
 }
 
 // scanFlags reads --days N and --dry-run.
@@ -332,8 +370,9 @@ func buildScan(creds *credentials, days int) ([]byte, history.Summary, error) {
 	}
 	until := scanNow().UTC()
 	since := until.AddDate(0, 0, -days)
-	transcripts := hook.Transcripts{Dir: filepath.Join(userClaudeDir(), "projects")}
-	var src history.Source = transcripts
+	a := defaultAdapter()
+	src, dir := a.History()
+	src = skillReads{src}
 	// Once logged in, sync uploads every call the hook logged, from before the login too (the first sync sends the
 	// whole audit log). Each of those reached the portal already, so it is left out; a call the hook never logged (paws
 	// not registered there, or not yet) still counts.
@@ -342,10 +381,10 @@ func buildScan(creds *credentials, days int) ([]byte, history.Summary, error) {
 		// earlier account may have received the older ones).
 		src = skipSynced{Source: src, from: syncCursor{TS: creds.SyncFrom, N: creds.SyncFromN}}
 	}
-	fmt.Fprintf(os.Stderr, "Reading the Claude Code sessions in %s from %s to %s...\n", transcripts.Dir, since.Format(time.DateOnly), until.Format(time.DateOnly))
+	fmt.Fprintf(os.Stderr, "Reading the %s sessions in %s from %s to %s...\n", a.Title(), dir, since.Format(time.DateOnly), until.Format(time.DateOnly))
 	sum, err := history.Summarize(src, since, until, days, catalog)
 	if err != nil {
-		return nil, sum, fmt.Errorf("reading %s: %w", transcripts.Dir, err)
+		return nil, sum, fmt.Errorf("reading %s: %w", dir, err)
 	}
 	body, err := json.MarshalIndent(historyUpload{Summary: sum, CatalogVersion: cat.Version}, "", "  ")
 	return append(body, '\n'), sum, err

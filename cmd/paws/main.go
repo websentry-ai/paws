@@ -23,7 +23,7 @@ func run(args []string) int {
 	}
 	switch args[0] {
 	case "gate":
-		return cli.Gate()
+		return cli.GateFor(args[1:])
 	case "init":
 		return cli.Init(args[1:])
 	case "uninstall":
@@ -73,13 +73,17 @@ func usage() {
 	fmt.Fprint(os.Stderr, `paws — Pre-tool Agent Workflow System
 
 Usage:
-  unbound-paws gate                                      Run as a Claude Code hook (reads event JSON on stdin).
-  unbound-paws init [--global | --settings <path>]       Register paws in a Claude Code settings.json.
+  unbound-paws gate [--agent codex]                      Run as an agent hook (reads event JSON on stdin).
+  unbound-paws init [--agent claude|codex ...] [--project | --global | --settings <path>]
+                                                         Register paws in Claude Code's settings.json and/or
+                                                         Codex's hooks.json (.codex/ or ~/.codex/). On a terminal
+                                                         with no flags it asks which agents and where.
   unbound-paws uninstall [--project] [--global] [--keep-skills] [--yes]
                                                          Remove everything paws added; lists it and asks first.
-  unbound-paws uninstall --hook-only [--global | --settings <path>]
-                                                         Remove only the hook from a settings.json.
-  unbound-paws skill [--global | --settings <path>]      Install or reinstall the paws skill (Claude writes rules with it).
+  unbound-paws uninstall --hook-only [--agent codex] [--global | --settings <path>]
+                                                         Remove only the hook from that file (--agent codex implies it).
+  unbound-paws skill [--agent codex] [--global | --settings <path>]
+                                                         Install or reinstall the paws skill (the agent writes rules with it).
   unbound-paws explain [--tool T] [--event E] <command>  Dry-run: show matching rules and the decision.
   echo '<event json>' | unbound-paws explain -           Dry-run a full event JSON.
   unbound-paws add [--project] [--pick g=o] <pack|cat/binding>...

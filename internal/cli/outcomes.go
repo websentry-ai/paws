@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/websentry-ai/paws/internal/gate"
+	"github.com/websentry-ai/paws/internal/harness"
 	"github.com/websentry-ai/paws/internal/hook"
 	"github.com/websentry-ai/paws/internal/outcome"
 	"github.com/websentry-ai/paws/internal/rule"
@@ -19,20 +20,23 @@ import (
 // outcomeTail bounds how much of the audit log's end the turn grader reads: a turn's records, many times over.
 const outcomeTail = 4 << 20
 
-// gradeTurn runs in the Stop hook (async: Claude isn't waiting). For each call a require-skill rule denied in the turn
-// that just ended, it reads what followed in Claude Code's log and appends an outcome record: the outcome and each
-// expect check's result, and the one call that answered the block (see gate.DescribeCall), never the rest of the turn.
-// Best effort: anything it can't read, it leaves ungraded.
+// gradeTurn grades the turn a Claude Code Stop hook ended (see gradeTurnIn).
 func gradeTurn(in *hook.Input, ev gate.Event, stoppedAt time.Time) {
-	if in.TranscriptPath == "" || ev.Session == "" {
+	gradeTurnIn(hook.Claude{}.Turns(&harness.Hook{Native: in}), ev, in.CWD, stoppedAt)
+}
+
+// gradeTurnIn runs in the Stop hook (async: the agent isn't waiting). For each call a require-skill rule denied in the
+// turn that just ended, it reads what followed in the harness's log of the turn and appends an outcome record: the
+// outcome and each expect check's result, and the one call that answered the block (see gate.DescribeCall), never the
+// rest of the turn. Best effort: anything it can't read, it leaves ungraded.
+func gradeTurnIn(turns harness.TurnLog, ev gate.Event, cwd string, stoppedAt time.Time) {
+	if turns == nil || ev.Session == "" {
 		return
 	}
-	// The hook starts a moment after Claude Code fires Stop, and the next turn may already have made a call by then. The
-	// turn ended with its final message, which the Stop names; without one (an older Claude Code), with its log's last
-	// record.
-	if at, ok := hook.StopRecordAt(in.TranscriptPath, in.LastAssistantMessage); ok && !at.After(stoppedAt) {
-		stoppedAt = at
-	} else if at, ok := hook.LastRecordAt(in.TranscriptPath, stoppedAt); ok {
+	// The hook starts a moment after the harness fires Stop, and the next turn may already have made a call by then.
+	// The turn ended when the harness's log says it did (Claude Code: the final message the Stop names, else the log's
+	// last record).
+	if at, ok := turns.LastRecordAt(stoppedAt); ok {
 		stoppedAt = at
 	}
 	// Stop hooks run async and can overlap: one grader at a time, so two never grade the same block.
@@ -69,7 +73,7 @@ func gradeTurn(in *hook.Input, ev gate.Event, stoppedAt time.Time) {
 	// The turn that stopped: a prompt the user sends while this async hook runs belongs to the next turn.
 	// No calls since the last prompt: that prompt came after the Stop, and the denies before it are the turn before's,
 	// graded below. A deny of this turn with no call to match is left eligible by gradeCalls.
-	calls, start, err := hook.TurnCalls(in.TranscriptPath, stoppedAt)
+	calls, start, err := turns.TurnCalls(stoppedAt)
 	if err != nil {
 		settle = false
 		return
@@ -89,30 +93,30 @@ func gradeTurn(in *hook.Input, ev gate.Event, stoppedAt time.Time) {
 	// Denies left eligible by a Stop that couldn't read its turn (the log not flushed yet) belong to the turn before
 	// this one: read that turn, which ended when this one began.
 	if len(earlier) > 0 && !start.IsZero() {
-		if prev, prevStart, err := hook.TurnCalls(in.TranscriptPath, start.Add(-time.Nanosecond)); err == nil && len(prev) > 0 {
+		if prev, prevStart, err := turns.TurnCalls(start.Add(-time.Nanosecond)); err == nil && len(prev) > 0 {
 			var mine []auditRecord
 			for _, d := range all {
 				if denyIn(d, prevStart, start.Add(-time.Nanosecond)) {
 					mine = append(mine, d)
 				}
 			}
-			gradeCalls(in, ev, prev, mine, allows, graded)
+			gradeCalls(cwd, ev, prev, mine, allows, graded)
 		}
 	}
 	if len(denies) == 0 {
 		return
 	}
-	if !gradeCalls(in, ev, calls, denies, allows, graded) {
+	if !gradeCalls(cwd, ev, calls, denies, allows, graded) {
 		settle = false
 	}
 }
 
 // gradeCalls grades each deny against the calls of its turn and appends the outcome records. It reports false when a
 // deny's call isn't in the calls (another agent's turn, or the log isn't flushed): that deny is left ungraded.
-func gradeCalls(in *hook.Input, ev gate.Event, calls []outcome.Call, denies, allows []auditRecord, graded map[string]int) bool {
+func gradeCalls(cwd string, ev gate.Event, calls []outcome.Call, denies, allows []auditRecord, graded map[string]int) bool {
 	complete := true
 	rules := map[string]*rule.Rule{}
-	for _, r := range gate.Collect(in.CWD).Rules {
+	for _, r := range gate.Collect(cwd).Rules {
 		rules[r.SourcePath+"|"+r.Name] = r
 	}
 	// One call can be denied by several rules (one deny names every skill): each rule claims its own blocked calls.
@@ -150,12 +154,18 @@ func gradeCalls(in *hook.Input, ev gate.Event, calls []outcome.Call, denies, all
 			ids := appliedCalls(calls, allows, ruleKey)
 			applied = func(c outcome.Call) bool { return ids[c.ID] }
 		}
-		calls[i].DeniedAt = at
+		if at.After(calls[i].DeniedAt) { // the later of the audit's deny time and the harness's own (Codex: hook end)
+			calls[i].DeniedAt = at
+		}
 		res := outcome.GradeWhere(r, calls, i, applied)
 		rec := map[string]any{"session": ev.Session, "agent": ev.Agent, "rule": d.Rule, "skill": r.Action.Skill,
 			"source": d.Source, "tool": d.Tool, "outcome": res.Outcome, "checks": res.Checks, "blocked_at": d.TS}
 		if ran := cmp.Or(res.Retry, res.Other); ran != nil {
-			rec["retry_command"] = gate.DescribeCall(gate.Event{Tool: ran.Tool, Target: ran.Target, Cwd: in.CWD})
+			rec["retry_command"] = gate.DescribeCall(gate.Event{Tool: ran.Tool, Target: ran.Target, Cwd: cwd})
+		}
+		gate.Stamp(rec, ev) // the model at Stop: the fallback when the deny logged none (a session's or subagent's first call)
+		if d.Model != "" {
+			rec["model"] = d.Model // the model that made the blocked call (a subagent's, or before a /model switch)
 		}
 		if d.AgentID != "" {
 			rec["agent_id"] = d.AgentID

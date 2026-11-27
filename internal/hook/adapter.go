@@ -31,13 +31,45 @@ func ToEvent(in *Input) gate.Event {
 		AgentID:    in.AgentID,
 		AgentType:  in.AgentType,
 	}
+	ev.Log = gate.TranscriptLog(ev.Transcript, ev.Own, in.CWD)
+	ev.Harness = Claude{}
 	switch in.HookEventName {
 	case "PreToolUse":
 		ev.Kind = rule.KindTool
+		ev.SkillLoad, ev.SkillWhole = skillLoad(in, ev.Target)
+		ev.SkillLoads = skillLoads(in, ev.Target)
+	case "PostToolUse":
+		ev.SkillLoad, ev.SkillWhole = skillLoad(in, ev.Target)
+		ev.SkillLoads = skillLoads(in, ev.Target)
 	case "SessionStart":
 		ev.Kind = rule.KindSession
 	}
 	return ev
+}
+
+// skillLoad names the skill a call loads: the Skill tool's skill, or the one whose SKILL.md it reads.
+func skillLoad(in *Input, target string) (skill string, whole bool) {
+	if in.ToolName == "Skill" {
+		s, _ := in.ToolInput["skill"].(string)
+		return s, s != ""
+	}
+	skills, whole := gate.SkillLoadOf(in.ToolName, target, in.ToolInput, in.CWD)
+	if len(skills) == 0 {
+		return "", false
+	}
+	return skills[0], whole
+}
+
+// skillLoads is every skill a call loads (see skillLoad).
+func skillLoads(in *Input, target string) []string {
+	if in.ToolName == "Skill" {
+		if s, _ := in.ToolInput["skill"].(string); s != "" {
+			return []string{s}
+		}
+		return nil
+	}
+	skills, _ := gate.SkillLoadOf(in.ToolName, target, in.ToolInput, in.CWD)
+	return skills
 }
 
 // agentIDRe is what Claude Code's agent ids look like; anything else (a "/" or "..") could name a file

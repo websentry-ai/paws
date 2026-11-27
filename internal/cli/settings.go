@@ -7,8 +7,10 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
+	"regexp"
 	"strings"
 
+	"github.com/websentry-ai/paws/internal/harness"
 	"github.com/websentry-ai/paws/internal/hook"
 )
 
@@ -91,24 +93,33 @@ func writeSettings(path string, doc settingsDoc) error {
 	return nil
 }
 
-// ensureHooks adds (or repoints, if the binary moved) a paws entry per registered event; idempotent,
-// other hooks untouched.
+// ensureHooks is ensureHooksFor Claude Code.
 func ensureHooks(doc settingsDoc, command string, guard bool) (bool, error) {
+	return ensureHooksFor(hook.Claude{}, doc, command, guard)
+}
+
+// ensureHooksFor adds (or repoints, if the binary moved) a paws entry per event the harness registers; idempotent,
+// other hooks untouched.
+func ensureHooksFor(a harness.Adapter, doc settingsDoc, command string, guard bool) (bool, error) {
 	hooks, err := hooksBlock(doc)
 	if err != nil {
 		return false, err
 	}
 	changed := false
-	for _, event := range hook.RegisteredEvents {
+	for _, event := range a.Events() {
 		var list []json.RawMessage
 		if raw, ok := hooks[event]; ok {
 			if err := json.Unmarshal(raw, &list); err != nil {
 				return false, fmt.Errorf("hooks.%s: %w", event, err)
 			}
 		}
-		desired := hook.RawEntry(event, command)
+		entry := a.Entry(event, command)
 		if guard {
-			desired = hook.RawEntry(event, guardedCommand(command, event))
+			entry = a.Entry(event, guardedCommand(command, event))
+		}
+		desired, err := marshalPlain(entry, "")
+		if err != nil {
+			return false, err
 		}
 		idx := pawsEntryIndex(list)
 		switch {
@@ -279,7 +290,8 @@ func guardedCommand(command, event string) string {
 	if event == "PreToolUse" {
 		exit = "2"
 	}
-	return "command -v " + strings.TrimSuffix(command, " gate") + guardMid(exit) + command
+	prog, _, _ := strings.Cut(command, " gate") // `unbound-paws gate --agent codex` runs unbound-paws too
+	return "command -v " + prog + guardMid(exit) + command
 }
 
 // unguard returns the plain `<prog> gate` inside a command guardedCommand wrote, or command itself.
@@ -291,13 +303,16 @@ func unguard(command string) string {
 	for _, exit := range []string{"1", "2"} {
 		mid := guardMid(exit)
 		if i := strings.Index(rest, mid); i >= 0 {
-			if prog, plain := rest[:i], rest[i+len(mid):]; plain == prog+" gate" {
+			if prog, plain := rest[:i], rest[i+len(mid):]; plain == prog+" gate" || strings.HasPrefix(plain, prog+" gate --agent ") {
 				return plain
 			}
 		}
 	}
 	return command
 }
+
+// agentName is a harness id as `paws gate --agent` takes it.
+var agentName = regexp.MustCompile(`^[a-z][a-z-]*$`)
 
 // legacyMarker prefixed hook commands written by paws 0.3.0 and earlier; still recognised so
 // init upgrades and uninstall removes those entries.
@@ -309,6 +324,9 @@ const legacyMarker = "PAWS_MANAGED=1 "
 func isPawsCommand(command string) bool {
 	command = unguard(command)
 	rest, marked := strings.CutPrefix(command, legacyMarker)
+	if i := strings.LastIndex(rest, " gate --agent "); i >= 0 && agentName.MatchString(rest[i+len(" gate --agent "):]) {
+		rest = rest[:i+len(" gate")] // a harness named after the gate: `unbound-paws gate --agent codex`
+	}
 	prog, ok := strings.CutSuffix(rest, " gate")
 	if !ok {
 		return false

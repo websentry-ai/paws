@@ -9,7 +9,17 @@ Files are 0600 in a 0700 directory. Past 50 MB the log moves to
 ## Records (schema v2)
 
 Every record has `v` (2), `ts`, `agent`, `event` and `session`, plus
-`agent_id` when a subagent made the call.
+`agent_id` when a subagent made the call, `harness` (the harness that ran the hook: `claude-code` or `codex`; `agent`
+holds the same value, for older readers) and `model` when known (on Claude Code, the model of the session's last
+assistant message, so one response behind right after `/model`; on Codex, the model the hook names).
+
+On Codex, paws also keeps a ledger per session thread, because Codex's own session files are not a stable format:
+`$PAWS_HOME/sessions/codex/<session>.jsonl` (`<session>.<agent>.jsonl` for a subagent), 0600. It holds each tool
+call with paws's verdict and its input (secrets masked as in the audit log), whether it succeeded, a marker per
+turn (never the prompt) and per compaction. The gate reads it for skill loads, delivered digests, `when:` conditions
+and outcome grading. It never leaves the machine, and a ledger nobody wrote for 7 days is deleted. Like Claude Code's
+transcript, it is a file the agent's own user can write: paws guides an agent that follows its rules, it does not
+stop code running as that user from forging a load.
 
 **Rule records** (a rule matched): `rule`, `action`, `skill` (the skill
 the rule requires), `verdict` (`allow` or `deny`), `tool`, `target` (the
@@ -69,7 +79,7 @@ A deny with no outcome record (you interrupted, or the turn never ended) counts 
 
 | `event` | Written on | Extra fields |
 |---|---|---|
-| `skill_invoked` | PreToolUse on the Skill tool | `skill` |
+| `skill_invoked` | PreToolUse on a skill load: the Skill tool, or a plain read that prints a skill's whole `SKILL.md` (`Read`, or a lone `cat`/`sed -n`/`head`/... of the file, or of several SKILL.md files at once: one record per skill; a part of a file is not an invocation) | `skill` |
 | `tool_result` | PostToolUse: a tool call that ran and succeeded (denied and failed calls write none) | `tool` |
 | `turn_end` | Stop (the agent finished its turn) | — |
 
@@ -172,17 +182,19 @@ most 1,000 records and 1 MB. `unbound-paws sync --dry-run` prints the request bo
 | `verdict` | `allow` or `deny` |
 | `already_loaded` | `true` when allowed via `skill-load` in a session where this rule had not denied first |
 | `satisfied_by` | `skill-load` or `digest-delivered`, when set |
+| `harness`, `model` | as in the audit log, when the record has them; a record without `harness` is from Claude Code |
 
 **Action record:** `kind: action`, `ts`, `tool`, `action`, and `command`,
-`file`, `mcp` as in the audit log (above).
+`file`, `mcp`, `harness`, `model` as in the audit log (above).
 
 **Outcome record:** `kind: outcome`, `ts`, `blocked_at`, `skill`, `action_id` (catalog and portal rules: the
 trigger's id), `tool`, `outcome`, `checks` and `retry_command` (the call Claude ran after the block, whether it retried or went
 another route; a Bash command, redacted and cut to 4 KB, else the tool with its repo-relative file or MCP tool; empty
-when Claude stopped), as in the audit log (above).
+when Claude stopped), `harness` and `model`, as in the audit log (above).
 
-**Inventory:** the directory names in `~/.claude/skills` and the project's
-`.claude/skills`, and every paws rule in scope with its skill and a display
+**Inventory:** the directory names in every harness's skill folders, whether or not its hook is installed:
+`~/.claude/skills` and the project's `.claude/skills` (Claude Code), `~/.agents/skills`, the project's
+`.agents/skills` and `$CODEX_HOME/skills` (Codex), and every paws rule in scope with its skill and a display
 form of what it runs before (a portal rule's label; otherwise its matcher,
 shortened, e.g. `gh pr create`, `edit docs/**`, `each new session`).
 
@@ -247,7 +259,8 @@ config and applies it:
   skills, are removed. Every write is atomic;
 - an action that would gate the Skill tool (no tool and no matcher, or tool
   `Skill`) is skipped and reported: it would deny the call that loads the
-  skill. The gate never gates the Skill tool in any case;
+  skill. The gate never gates a skill load in any case: the Skill tool, or a
+  plain read of the skill's `SKILL.md`;
 - a `load: rule` skill becomes `on_miss: digest` with its rule text as the
   digest (`~/.paws/portal/digests/<skill>.md`); no SKILL.md is installed.
   Rule text over 7,000 bytes is skipped;

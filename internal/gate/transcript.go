@@ -2,6 +2,7 @@ package gate
 
 import (
 	"bytes"
+	"cmp"
 	"encoding/json"
 	"errors"
 	"io"
@@ -10,6 +11,7 @@ import (
 	"regexp"
 	"strconv"
 	"strings"
+	"time"
 )
 
 // tailBytes is how much of a transcript's end the `when` conditions read.
@@ -27,6 +29,7 @@ type transcriptEntry struct {
 	Type        string `json:"type"`
 	Subtype     string `json:"subtype"`
 	IsSidechain bool   `json:"isSidechain"`
+	Timestamp   string `json:"timestamp"`
 	// Polymorphic in the log: an object for tool results, a bare string for hook denials.
 	ToolUseResult json.RawMessage `json:"toolUseResult"`
 
@@ -94,14 +97,18 @@ type skillResult struct {
 }
 
 // SkillLoaded reports whether skill was invoked successfully within the last `window`
-// turns of the transcript at path. A turn is one message the user typed and everything
-// the agent did to answer it, however many tool calls that took.
+// turns of the transcript at path: with the Skill tool, or by reading its SKILL.md (see
+// SkillRead) with a result that isn't an error. A turn is one message the user typed and
+// everything the agent did to answer it, however many tool calls that took.
 //
 // False is the answer for every uncertain case — no transcript, unreadable file,
 // window exhausted, or a context compaction between the load and now — because
 // the caller gates on false. A compaction ends the search: the skill's text was
 // dropped from the agent's context, so the load no longer means it has the guidance.
-func SkillLoaded(path, skill string, window int) bool {
+func SkillLoaded(path, skill string, window int) bool { return skillLoaded(path, skill, window, "") }
+
+// skillLoaded is SkillLoaded with the session's cwd, for a relative SKILL.md read in a record that names none.
+func skillLoaded(path, skill string, window int, cwd string) bool {
 	if skill == "" {
 		return false
 	}
@@ -113,7 +120,11 @@ func SkillLoaded(path, skill string, window int) bool {
 	for id := range calls {
 		needles = append(needles, []byte(id))
 	}
-	return scanLines(lines, path, needles, func(e transcriptEntry) bool {
+	changed := skillChanged(skill, cwd)
+	loaded := scanLines(lines, path, needles, func(e transcriptEntry) bool {
+		if !loadedSince(e, changed) {
+			return false // the SKILL.md changed after this load: the agent saw an older skill
+		}
 		if e.Type == requestBlob {
 			// A tool_result answering a Skill tool_use for this skill, not an error. The pairing
 			// by id is what keeps a command that prints "Launching skill: x" from counting.
@@ -130,6 +141,54 @@ func SkillLoaded(path, skill string, window int) bool {
 		var sr skillResult
 		return json.Unmarshal(e.ToolUseResult, &sr) == nil && sr.Success && sr.CommandName == skill
 	})
+	if loaded {
+		return true
+	}
+	// Reads of the skill's SKILL.md load it once those that succeeded cover the whole file.
+	reads := readCalls(lines, path, skill, cwd)
+	return len(reads) > 0 && Covered(OfResolved(succeededReads(lines, path, reads), SkillTool.SkillDirs(cwd), skill))
+}
+
+// skillChanged is when skill's SKILL.md in Claude Code's skill folders last changed, or zero when paws finds none
+// (a plugin's skill, say).
+func skillChanged(skill, cwd string) time.Time {
+	for _, dir := range SkillTool.SkillDirs(cwd) {
+		if st, err := os.Stat(filepath.Join(dir, skill, "SKILL.md")); err == nil && st.Mode().IsRegular() {
+			return st.ModTime()
+		}
+	}
+	return time.Time{}
+}
+
+// loadedSince reports whether a record came after changed, as reads of a changed SKILL.md count only after it. A
+// record without a time counts.
+func loadedSince(e transcriptEntry, changed time.Time) bool {
+	at, err := time.Parse(time.RFC3339Nano, e.Timestamp)
+	return changed.IsZero() || err != nil || !at.Before(changed.Truncate(time.Millisecond)) // the log keeps milliseconds
+}
+
+// succeededReads are the reads whose tool_result, paired by id, is not an error: in a user record or a request blob.
+func succeededReads(lines [][]byte, path string, reads map[string]FileRead) []FileRead {
+	var needles [][]byte
+	for id := range reads {
+		needles = append(needles, []byte(id))
+	}
+	var ok []FileRead
+	done := map[string]bool{}
+	scanLines(lines, path, needles, func(e transcriptEntry) bool {
+		if e.Type != "user" && e.Type != requestBlob {
+			return false
+		}
+		for _, b := range e.blocks() {
+			if r, isRead := reads[b.ToolUseID]; isRead && b.Type == "tool_result" && !b.IsError && !done[b.ToolUseID] {
+				done[b.ToolUseID] = true
+				r.Cut, r.Shown = ShownLines(b.text()) // what the agent got, not what the command printed
+				ok = append(ok, r)
+			}
+		}
+		return false // read every line: the reads add up
+	})
+	return ok
 }
 
 var skillToolName = []byte(`"name":"Skill"`)
@@ -153,6 +212,91 @@ func skillCalls(lines [][]byte, path, skill string) map[string]bool {
 	}
 	return calls
 }
+
+// readCalls returns the log's own Read and Bash tool_use blocks that read skill's SKILL.md, by id, with the lines
+// each one printed.
+func readCalls(lines [][]byte, path, skill, cwd string) map[string]FileRead {
+	calls := map[string]FileRead{}
+	file := []byte("SKILL.md") // skips every line that can't name the file; a relative `cat SKILL.md` names it too
+	for _, l := range lines {
+		var e transcriptEntry
+		if !bytes.Contains(l, file) || !bytes.Contains(l, toolUseType) || json.Unmarshal(l, &e) != nil || foreign(e, path) || (e.Type != "assistant" && e.Type != requestBlob) {
+			continue
+		}
+		var m struct {
+			Cwd       string    `json:"cwd"`
+			Timestamp time.Time `json:"timestamp"`
+			Message   struct {
+				Content []struct {
+					Type  string         `json:"type"`
+					ID    string         `json:"id"`
+					Name  string         `json:"name"`
+					Input map[string]any `json:"input"`
+				} `json:"content"`
+			} `json:"message"`
+		}
+		if json.Unmarshal(l, &m) != nil {
+			continue
+		}
+		for _, b := range m.Message.Content {
+			key := "command"
+			if b.Name == "Read" {
+				key = "file_path"
+			}
+			target, _ := b.Input[key].(string)
+			// The file may be gone since: a read that succeeded put the skill in the agent's context all the same.
+			if b.Type != "tool_use" {
+				continue
+			}
+			for _, r := range ReadsOf(b.Name, target, b.Input, cmp.Or(m.Cwd, cwd), false) {
+				if r.Skill != skill {
+					continue
+				}
+				r.At = m.Timestamp
+				if prev, seen := calls[b.ID]; !seen || r.At.After(prev.At) {
+					calls[b.ID] = r // a request blob has no time: the call's own record, once written, gives it
+				}
+			}
+		}
+	}
+	return calls
+}
+
+var toolUseType = []byte(`"type":"tool_use"`)
+
+// transcriptModel is the model of the last assistant message in the log at path: Claude Code names it on each one,
+// so after a /model switch it is one response behind at most. "" when the tail has none.
+func transcriptModel(path string) string {
+	lines, err := tailLines(path)
+	if err != nil {
+		return ""
+	}
+	for i := len(lines) - 1; i >= 0; i-- {
+		l := lines[i]
+		if !bytes.Contains(l, assistantType) || !bytes.Contains(l, modelKey) {
+			continue
+		}
+		var e struct {
+			Type        string `json:"type"`
+			IsSidechain bool   `json:"isSidechain"`
+			Message     struct {
+				Model string `json:"model"`
+			} `json:"message"`
+		}
+		if json.Unmarshal(l, &e) != nil || e.Type != "assistant" || e.IsSidechain && !subagentLog(path) {
+			continue
+		}
+		if m := e.Message.Model; m != "" && m != "<synthetic>" { // <synthetic>: a message Claude Code wrote itself
+			return m
+		}
+	}
+	return ""
+}
+
+var (
+	assistantType = []byte(`"type":"assistant"`)
+	modelKey      = []byte(`"model":"`)
+)
 
 // hookDenyPrefix is how Claude Code records a PreToolUse deny in toolUseResult:
 // "Error: PreToolUse:<Tool> hook error: <reason>". A failed command is recorded as

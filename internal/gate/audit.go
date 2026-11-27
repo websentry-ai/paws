@@ -64,7 +64,18 @@ func logAudit(ev Event, r *rule.Rule, oc outcome) {
 	if ev.AgentType != "" {
 		rec["agent_type"] = ev.AgentType
 	}
+	Stamp(rec, ev)
 	appendAudit(path, rec)
+}
+
+// Stamp adds the harness and the model the call ran on, when known. agent stays beside harness for older readers.
+func Stamp(rec map[string]any, ev Event) {
+	if ev.Agent != "" {
+		rec["harness"] = ev.Agent
+	}
+	if m := ev.session().Model(); m != "" {
+		rec["model"] = m
+	}
 }
 
 // maxTarget bounds the matched text kept per record; a heredoc can be megabytes. Above maxCommand, so an uploaded
@@ -105,6 +116,7 @@ func LogTelemetry(event string, ev Event, fields map[string]any) {
 	for k, v := range fields {
 		rec[k] = v
 	}
+	Stamp(rec, ev)
 	appendAudit(path, rec)
 }
 

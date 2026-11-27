@@ -15,7 +15,7 @@ import (
 
 // Applies reports whether r matches ev and every `when:` condition holds.
 func Applies(r *rule.Rule, ev Event) bool {
-	if ev.Kind == "" || rule.Kind(r.Event) != ev.Kind || !r.Matches(ev.Tool, ev.Target) {
+	if ev.Kind == "" || rule.Kind(r.Event) != ev.Kind || !r.Matches(ev.Tool, ev.Target) && !(ev.AnyFile && r.MatchesAnyFile(ev.Tool)) {
 		return false
 	}
 	for _, c := range r.When {
@@ -44,9 +44,9 @@ func conditionHolds(c rule.Condition, ev Event) bool {
 		_, err := os.Stat(path)
 		return os.IsNotExist(err)
 	case rule.WhenNoEditMatching:
-		return !editedMatching(ev.Transcript, c.Glob)
+		return !ev.session().EditedMatching(c.Glob)
 	case rule.WhenAgentCount:
-		return agentsSinceUserTurn(ev.Transcript) > c.N
+		return ev.session().AgentsSinceUserTurn() > c.N
 	}
 	return false
 }
@@ -54,6 +54,9 @@ func conditionHolds(c rule.Condition, ev Event) bool {
 func fileTool(tool string) bool {
 	return tool == "Read" || tool == "Write" || tool == "Edit" || tool == "NotebookEdit"
 }
+
+// RepoRoot is the nearest ancestor of cwd holding .git, or cwd itself: where a harness's project skills live.
+func RepoRoot(cwd string) string { return repoRoot(cwd) }
 
 // repoRoot is the nearest ancestor of cwd holding .git, or cwd itself.
 func repoRoot(cwd string) string {
@@ -271,9 +274,16 @@ type toolUse struct {
 
 // toolResult is one tool_result block inside a user transcript message.
 type toolResult struct {
-	Type      string `json:"type"`
-	ToolUseID string `json:"tool_use_id"`
-	IsError   bool   `json:"is_error"`
+	Type      string          `json:"type"`
+	ToolUseID string          `json:"tool_use_id"`
+	IsError   bool            `json:"is_error"`
+	Content   json.RawMessage `json:"content"`
+}
+
+// hookDenied reports whether a tool_result is a PreToolUse hook's deny: the call never ran.
+func (r toolResult) hookDenied() bool {
+	var text string
+	return r.IsError && json.Unmarshal(r.Content, &text) == nil && blobDenyPrefix.MatchString(text)
 }
 
 type contentMessage struct {
@@ -329,13 +339,15 @@ func editedMatching(path string, glob *regexp.Regexp) bool {
 	return false
 }
 
-// agentsSinceUserTurn counts Agent (formerly Task) spawns after the last prompt the user typed.
+// agentsSinceUserTurn counts Agent (formerly Task) spawns after the last prompt the user typed. A spawn a hook
+// denied started no agent and isn't counted.
 func agentsSinceUserTurn(path string) int {
 	lines, err := tailLines(path)
 	if err != nil {
 		return 0
 	}
 	n := 0
+	denied := map[string]bool{} // read backwards, a call's result comes before the call
 	for i := len(lines) - 1; i >= 0; i-- {
 		var e mainEntry
 		if json.Unmarshal(lines[i], &e) != nil || e.IsSidechain {
@@ -344,17 +356,39 @@ func agentsSinceUserTurn(path string) int {
 		if isUserPrompt(e) {
 			break
 		}
-		if e.Type != "assistant" {
-			continue
+		switch e.Type {
+		case "user":
+			markDenied(e, denied)
+		case "assistant":
+			n += agentSpawns(e, denied)
 		}
-		var blocks []toolUse
-		if json.Unmarshal(e.Message.Content, &blocks) != nil {
-			continue
+	}
+	return n
+}
+
+// markDenied adds the tool_use ids of a user entry's hook-denied results to denied.
+func markDenied(e mainEntry, denied map[string]bool) {
+	var blocks []toolResult
+	if json.Unmarshal(e.Message.Content, &blocks) != nil {
+		return
+	}
+	for _, b := range blocks {
+		if b.Type == "tool_result" && b.hookDenied() {
+			denied[b.ToolUseID] = true
 		}
-		for _, b := range blocks {
-			if b.Type == "tool_use" && (b.Name == "Agent" || b.Name == "Task") {
-				n++
-			}
+	}
+}
+
+// agentSpawns counts an assistant entry's Agent (or Task) calls that weren't denied.
+func agentSpawns(e mainEntry, denied map[string]bool) int {
+	var blocks []toolUse
+	if json.Unmarshal(e.Message.Content, &blocks) != nil {
+		return 0
+	}
+	n := 0
+	for _, b := range blocks {
+		if b.Type == "tool_use" && (b.Name == "Agent" || b.Name == "Task") && !denied[b.ID] {
+			n++
 		}
 	}
 	return n

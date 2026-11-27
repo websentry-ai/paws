@@ -151,6 +151,7 @@ type turnLine struct {
 	IsMeta    bool      `json:"isMeta"`
 	Sidechain bool      `json:"isSidechain"`
 	Timestamp time.Time `json:"timestamp"`
+	Cwd       string    `json:"cwd"` // where the session ran: a relative SKILL.md path is read from it
 	Message   struct {
 		Content json.RawMessage `json:"content"`
 	} `json:"message"`
@@ -202,7 +203,7 @@ func readTurnLog(path, agent string, since, until time.Time) ([]outcome.Call, ti
 					for _, b := range blocks {
 						if b.Type == "tool_use" && b.Name != "" {
 							byID[b.ID] = len(calls)
-							calls = append(calls, toCall(b, rec.Timestamp, agent))
+							calls = append(calls, toCall(b, rec.Timestamp, agent, rec.Cwd))
 						}
 					}
 				case rec.Type == "user":
@@ -258,13 +259,18 @@ var refusedPrefix = regexp.MustCompile(`^PreToolUse:\S+ hook error: `)
 
 // CallOf is a tool call as expect checks see it, from its name and input (unbound-paws explain tries checks on one).
 func CallOf(tool string, input map[string]any) outcome.Call {
-	return toCall(turnBlock{Name: tool, Input: input}, time.Time{}, "")
+	return toCall(turnBlock{Name: tool, Input: input}, time.Time{}, "", "")
 }
 
-func toCall(b turnBlock, at time.Time, agent string) outcome.Call {
+func toCall(b turnBlock, at time.Time, agent, cwd string) outcome.Call {
 	in := Input{HookEventName: "PreToolUse", ToolName: b.Name, ToolInput: b.Input}
 	c := outcome.Call{ID: b.ID, Tool: b.Name, Target: in.Command(), Input: b.Input, At: at, Agent: agent}
 	c.Text = mainText(b.Name, b.Input, c.Target)
+	if b.Name == "Skill" {
+		c.SkillLoad, _ = b.Input["skill"].(string)
+	} else {
+		c.SkillLoad = gate.PastSkillRead(b.Name, c.Target, cwd)
+	}
 	if server, tool, ok := gate.MCPParts(b.Name); ok {
 		c.MCP = map[string]any{"server": server, "tool": tool, "class": rule.MCPAction(b.Name)}
 	}

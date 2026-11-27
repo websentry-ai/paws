@@ -99,6 +99,7 @@ func LogAction(ev Event) {
 	if ev.AgentID != "" {
 		rec["agent_id"] = ev.AgentID
 	}
+	Stamp(rec, ev)
 	appendAudit(p, rec)
 }
 
@@ -109,10 +110,14 @@ func LogAction(ev Event) {
 //	Read/Write/Edit    "read" or "edit" plus the top-level directory ("edit migrations/**")
 //	                   or, for a file at the repo root, its name ("edit README.md")
 //	mcp__server__tool  "<server> <tool>": "gmail create-draft", "notion create-pages"
+//	a skill load       "skill", as tool Skill: the Skill tool, or a read of the skill's SKILL.md
 //	anything else      the tool name in lower case: "grep", "webfetch"
 func DescribeAction(ev Event) ToolAction {
 	a := ToolAction{Tool: ev.Tool}
 	switch {
+	case ev.SkillLoad != "":
+		// A skill load, however the harness made it (the Skill tool, a read of SKILL.md): never the file's path.
+		a.Tool, a.Action = "Skill", "skill"
 	case ev.Tool == "Bash":
 		a.Action, a.Command = bashAction(ev.Target), RedactCommand(ev.Target)
 	case fileTool(ev.Tool):

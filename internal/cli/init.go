@@ -10,89 +10,346 @@ import (
 	"os/exec"
 	"path/filepath"
 	"runtime"
+	"slices"
 	"strings"
 
 	"github.com/websentry-ai/paws"
 	"github.com/websentry-ai/paws/internal/gate"
+	"github.com/websentry-ai/paws/internal/harness"
+	"github.com/websentry-ai/paws/internal/hook"
 	"github.com/websentry-ai/paws/internal/pack"
 )
 
-// Init registers the paws binary as an agent hook: repo root's .claude/settings.json by default, ~/.claude with --global.
+// Init registers the paws binary as an agent hook: `paws init [--agent claude|codex ...] [--global | --project |
+// --settings <path>]`. On a terminal with no flags it asks which agents and where; without a terminal and flags it
+// does what it always did: Claude Code, the repo root's .claude/settings.json.
 func Init(args []string) int {
-	settingsPath, code := settingsTarget(args)
+	targets, code := initTargets(args)
 	if code >= 0 {
 		return code
 	}
+	var set []string
+	var did initDone
+	for i, t := range targets {
+		if i > 0 {
+			fmt.Println() // a blank line between each agent's lines
+		}
+		d := initOne(t.a, t.path)
+		did.guarded, did.copied, did.offPath = did.guarded || d.guarded, did.copied || d.copied, did.offPath || d.offPath
+		if d.code != 0 {
+			code = d.code
+			continue
+		}
+		set = append(set, fmt.Sprintf("  %-12s %s", t.a.Title(), shortPath(t.path)))
+	}
+	if len(set) > 0 {
+		fmt.Println("\npaws is set up for:")
+		fmt.Println(strings.Join(set, "\n"))
+	}
+	initNotes(targets, did)
+	return max(code, 0)
+}
 
+// initDone is what one harness's init did, for the notes Init prints once at the end.
+type initDone struct {
+	code                     int
+	guarded, copied, offPath bool
+}
+
+// initNotes says once what holds for every hook init wrote: the guard, the binary copy, Codex's trust step.
+func initNotes(targets []initTarget, did initDone) {
+	var notes []string
+	if did.copied {
+		notes = append(notes, "The hook runs a copy of paws in "+tilde(filepath.Join(gate.UserDir(), "bin"))+".")
+	}
+	if did.offPath {
+		notes = append(notes, "unbound-paws isn't on PATH. For the command and upgrades:\n  curl -fsSL https://paws.getunbound.ai/install.sh | bash")
+	}
+	if did.guarded {
+		notes = append(notes, "A repo's hook tells a teammate without paws how to install it, and blocks the call.")
+	}
+	for _, t := range targets {
+		if t.a == defaultAdapter() {
+			continue
+		}
+		if filepath.Clean(t.path) == filepath.Clean(t.a.HookFile(true, "")) {
+			notes = append(notes, t.a.InstallNote())
+		} else {
+			notes = append(notes, t.a.Title()+" asks you to trust a repo's hook in each repo: start it there, run /hooks and\n"+
+				"trust paws. Set it up for every repo (--global) to trust it once.")
+		}
+	}
+	if len(notes) > 0 {
+		fmt.Println("\n" + strings.Join(notes, "\n"))
+	}
+}
+
+// shortPath is p as init prints it: relative to the repo inside it, with ~ for the home folder otherwise.
+func shortPath(p string) string {
+	cwd, _ := os.Getwd()
+	if rel, err := filepath.Rel(projectRoot(cwd), p); err == nil && !strings.HasPrefix(rel, "..") {
+		return rel
+	}
+	return tilde(p)
+}
+
+// initOne registers the hook for one harness in one hook file.
+func initOne(a harness.Adapter, settingsPath string) (did initDone) {
+	did.code = 1
 	self, err := os.Executable()
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "paws: cannot resolve own path: %v\n", err)
-		return 1
+		return did
 	}
 	self, _ = filepath.Abs(self)
-	// The same command in project and user settings, so Claude Code runs the gate once. Run as the
+	// The same command in project and user settings, so the harness runs the gate once. Run as the
 	// unbound-paws on PATH, init names it; so does a project init (from npx, say) next to a user-level
 	// `unbound-paws gate` while unbound-paws is still installed on PATH.
-	user := filepath.Join(userClaudeDir(), "settings.json")
-	command := cliName + " gate"
+	user := a.HookFile(true, "")
+	command := a.HookCommand(cliName + " gate")
 	reuse := filepath.Clean(settingsPath) != filepath.Clean(user) && unguard(pawsCommandIn(user)) == command && cliPath() != ""
 	if !onPath(self) && !reuse {
 		// Not installed on PATH: copy the binary somewhere the npx cache can't clean up.
 		bin, err := installSelf(self, gate.UserDir())
 		if err != nil {
 			fmt.Fprintf(os.Stderr, "paws: install binary: %v\n", err)
-			return 1
+			return did
 		}
-		command = hookCommand(bin)
-		if cliPath() == "" {
-			fmt.Printf("unbound-paws isn't installed, so the hook runs this copy. Install it for the `unbound-paws` command and upgrades:\n  curl -fsSL https://paws.getunbound.ai/install.sh | bash\n")
-		}
+		command = a.HookCommand(hookCommand(bin))
+		did.copied, did.offPath = true, cliPath() == ""
 	}
 
 	doc, err := readSettings(settingsPath)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "paws: %v\n", err)
-		return 1
+		return did
 	}
 	// A committed `unbound-paws gate` runs on teammates' machines too: guard it so a missing binary says how to
-	// install paws. The copied binary under ~/.paws/bin is not guarded, because `npm i -g` would not create it.
-	guard := hookGuard() && command == cliName+" gate"
+	// install paws. The copied binary under ~/.paws/bin is not guarded, because `npm i -g` would not create it. Nor
+	// is a user's own hook file: no teammate runs it, and a plain command stays the same across paws versions, so
+	// Codex, which asks to trust a hook again when its command changes, trusts it once.
+	global := filepath.Clean(settingsPath) == filepath.Clean(user)
+	guard := hookGuard() && !global && command == a.HookCommand(cliName+" gate")
 	written := command
 	if guard {
 		written = guardedCommand(command, "PreToolUse")
 	}
-	changed, err := ensureHooks(doc, command, guard)
+	changed, err := ensureHooksFor(a, doc, command, guard)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "paws: %s: %v\n", settingsPath, err)
-		return 1
+		return did
 	}
+	did.code = 0
+	mirrorInstalled(a, settingsPath, global)
 	if !changed {
-		fmt.Printf("paws already registered in %s\n", settingsPath)
-		return 0
+		fmt.Printf("%s: paws already registered in %s\n", a.Title(), shortPath(settingsPath))
+		return did
 	}
 	if err := writeSettings(settingsPath, doc); err != nil {
 		fmt.Fprintf(os.Stderr, "paws: %v\n", err)
-		return 1
+		did.code = 1
+		return did
 	}
-	fmt.Printf("Registered paws in %s\n  command: %s\n", settingsPath, command)
-	if guard {
-		fmt.Println("  Where paws isn't installed, the hook says how to install it and blocks the tool call.")
-	}
-	// A different paws hook in the other scope makes Claude Code run paws twice: say which init fixes it.
-	other, fix := user, "`"+cliName+" init --global`"
-	if filepath.Clean(settingsPath) == filepath.Clean(user) {
+	did.guarded = guard
+	fmt.Printf("%s: registered paws in %s\n  command: %s\n", a.Title(), shortPath(settingsPath), command)
+	// A different paws hook in the other scope makes the harness run paws twice: say which init fixes it.
+	other, fix := user, "`"+cliName+" init --global"+agentFlag(a)+"`"
+	if global {
 		cwd, _ := os.Getwd()
 		root := projectRoot(cwd)
-		other, fix = filepath.Join(root, ".claude", "settings.json"), "`"+cliName+" init` in "+root
+		other, fix = a.HookFile(false, root), "`"+cliName+" init"+agentFlag(a)+"` in "+root
 	}
-	if c := pawsCommandIn(other); c != "" && c != written {
-		fmt.Printf("%s has a different paws hook. Run %s too, so Claude Code runs paws once.\n", other, fix)
+	if c := pawsCommandIn(other); c != "" && unguard(c) != unguard(written) {
+		fmt.Printf("%s has a different paws hook. Run %s too,\nso %s runs paws once.\n", shortPath(other), fix, a.Title())
 	}
-	return 0
+	return did
+}
+
+// mirrorInstalled copies the skills paws installed for Claude Code, in the hook file's scope, into another
+// harness's skills folder, as a pack install would have had the hook been there: a harness added later sees them.
+// A copy already there stays.
+func mirrorInstalled(a harness.Adapter, settingsPath string, global bool) {
+	to := a.SkillsDirFor(settingsPath)
+	if a == defaultAdapter() || to == "" {
+		return
+	}
+	cwd, _ := os.Getwd()
+	from := pack.ProjectTarget(projectRoot(cwd)).SkillsDir
+	if global {
+		from = pack.UserTarget(gate.UserDir()).SkillsDir
+	}
+	var copied []string
+	for _, s := range pack.PawsSkills(from) {
+		if s.Edited || fileExists(filepath.Join(to, s.Name)) {
+			continue
+		}
+		if ok, err := pack.MirrorSkill(from, to, s.Name); err != nil {
+			fmt.Fprintf(os.Stderr, "paws: copy skill %s to %s: %v\n", s.Name, shortPath(to), err)
+		} else if ok {
+			copied = append(copied, s.Name)
+		}
+	}
+	if len(copied) > 0 {
+		fmt.Printf("  copied %d skill(s) paws installed into %s: %s\n", len(copied), shortPath(to), strings.Join(copied, ", "))
+	}
+}
+
+// initTarget is one hook file init writes: a harness and its hook file.
+type initTarget struct {
+	a    harness.Adapter
+	path string
+}
+
+// initTargets reads init's flags, or asks on a terminal when there are none. code is -1 to go on, else the exit.
+func initTargets(args []string) (targets []initTarget, code int) {
+	var agents []harness.Adapter
+	global, project, explicit, flagged := false, false, "", len(args) > 0
+	for i := 0; i < len(args); i++ {
+		switch args[i] {
+		case "--agent":
+			if i+1 >= len(args) {
+				return nil, usageAgent()
+			}
+			for _, name := range strings.Split(args[i+1], ",") {
+				a := findAgent(strings.TrimSpace(name))
+				if a == nil {
+					return nil, usageAgent()
+				}
+				if !slices.Contains(agents, a) {
+					agents = append(agents, a)
+				}
+			}
+			i++
+		case "--global":
+			global = true
+		case "--project":
+			project = true
+		case "--settings":
+			if i+1 >= len(args) {
+				fmt.Fprintln(os.Stderr, "paws: --settings needs a path")
+				return nil, 2
+			}
+			explicit = args[i+1]
+			i++
+		default:
+			fmt.Fprintf(os.Stderr, "paws: unknown flag %q\n", args[i])
+			return nil, 2
+		}
+	}
+	switch {
+	case global && project:
+		fmt.Fprintln(os.Stderr, "paws: --global and --project: pick one")
+		return nil, 2
+	case explicit != "" && (global || project || len(agents) > 1):
+		fmt.Fprintln(os.Stderr, "paws: --settings names one hook file: use it with at most one --agent, without --global or --project")
+		return nil, 2
+	}
+	if !flagged && interactive() {
+		var err error
+		if agents, global, err = askInit(); err != nil {
+			fmt.Fprintln(os.Stderr, "paws: nothing set up")
+			return nil, 1
+		}
+	}
+	if len(agents) == 0 {
+		agents = []harness.Adapter{defaultAdapter()}
+	}
+	cwd, _ := os.Getwd()
+	if !global && explicit == "" && !inRepo(cwd) {
+		fmt.Println("Not in a git repo: paws is set up for this folder only.")
+	}
+	for _, a := range agents {
+		path := explicit
+		if path == "" {
+			path = a.HookFile(global, projectRoot(cwd))
+		}
+		targets = append(targets, initTarget{a, path})
+	}
+	return targets, -1
+}
+
+// askInit asks which agents paws gates (the ones found on this machine ticked) and where.
+func askInit() (agents []harness.Adapter, global bool, err error) {
+	c := newChooser()
+	all := installOrder()
+	labels, on := make([]string, len(all)), make([]bool, len(all))
+	for i, a := range all {
+		labels[i], on[i] = a.Title(), agentFound(a)
+		if agentFound(a) {
+			labels[i] += " (found)"
+		}
+	}
+	if !anyOn(on) {
+		on[0] = true // nothing found: Claude Code, as without a terminal
+	}
+	picked, err := c.many("Which agents should paws gate?", labels, on)
+	if err != nil {
+		return nil, false, err
+	}
+	for i, p := range picked {
+		if p {
+			agents = append(agents, all[i])
+		}
+	}
+	// Codex asks to trust a repo's hook in each repo; a global hook it trusts once. So with Codex, every repo first.
+	def := 0
+	if slices.ContainsFunc(agents, func(a harness.Adapter) bool { return a != defaultAdapter() }) {
+		def = 1
+	}
+	where, err := c.one("Where?", []string{"This repo only", "Every repo (global)"}, def)
+	return agents, where == 1, err
+}
+
+// installOrder lists the harnesses as init offers them: Claude Code first.
+func installOrder() []harness.Adapter {
+	all := []harness.Adapter{defaultAdapter()}
+	for _, a := range adapters {
+		if a != defaultAdapter() {
+			all = append(all, a)
+		}
+	}
+	return all
+}
+
+// agentFound reports whether a harness is on this machine: its command on PATH, or its config folder.
+func agentFound(a harness.Adapter) bool {
+	bin, dir := "claude", hook.ConfigDir()
+	if a != defaultAdapter() {
+		bin, dir = a.Name(), filepath.Dir(a.HookFile(true, ""))
+	}
+	if _, err := exec.LookPath(bin); err == nil {
+		return true
+	}
+	st, err := os.Stat(dir)
+	return err == nil && st.IsDir()
+}
+
+// findAgent is the harness --agent names: its name, or "claude" for Claude Code.
+func findAgent(name string) harness.Adapter {
+	if name == "claude" {
+		return defaultAdapter()
+	}
+	return harness.Find(adapters, name)
+}
+
+func usageAgent() int {
+	fmt.Fprintf(os.Stderr, "paws: --agent needs one or more of: claude, %s\n", strings.Join(adapterNames(), ", "))
+	return 2
 }
 
 // hookGuard reports whether init may wrap the hook command in the missing-binary guard, which needs sh.
 func hookGuard() bool { return runtime.GOOS != "windows" }
+
+// agentFlag is the --agent flag that names a, "" for the default harness.
+func agentFlag(a harness.Adapter) string {
+	if a == defaultAdapter() {
+		return ""
+	}
+	return " --agent " + a.Name()
+}
+
+// defaultAdapter is the harness init and friends use without --agent: Claude Code, the fallback.
+func defaultAdapter() harness.Adapter { return adapters[len(adapters)-1] }
 
 // pawsCommandIn is the paws hook command a settings file registers for PreToolUse, or "".
 func pawsCommandIn(path string) string {
@@ -168,7 +425,7 @@ func hookCommand(bin string) string {
 
 // uninstallHookOnly removes every paws hook entry from the target settings.json, and the paws skill beside it.
 func uninstallHookOnly(args []string) int {
-	settingsPath, code := settingsTarget(args)
+	a, settingsPath, code := installTarget(args)
 	if code >= 0 {
 		return code
 	}
@@ -192,57 +449,68 @@ func uninstallHookOnly(args []string) int {
 		fmt.Printf("paws is not registered in %s\n", settingsPath)
 	}
 	// The skill goes too, even when `paws skill` ran without init.
-	removePawsSkill(settingsPath)
+	removePawsSkill(a, settingsPath)
 	if changed && len(doc) == 0 {
 		os.Remove(settingsPath) // nothing but paws was in it
 	}
 	// Don't leave empty folders behind; os.Remove keeps a folder that still has anything in it.
-	if skillsDir := pawsSkillDir(settingsPath); skillsDir != "" {
+	if skillsDir := a.SkillsDirFor(settingsPath); skillsDir != "" {
 		os.Remove(skillsDir)
 	}
-	if filepath.Base(filepath.Dir(settingsPath)) == ".claude" {
-		os.Remove(filepath.Dir(settingsPath))
+	if dir := filepath.Dir(settingsPath); filepath.Dir(a.HookFile(false, filepath.Dir(dir))) == dir {
+		os.Remove(dir) // the project's config folder (.claude), as init made it
 	}
 	return 0
 }
 
 // settingsTarget resolves the settings.json path from flags; code is -1 to proceed, else the exit code.
 func settingsTarget(args []string) (path string, code int) {
+	_, path, code = installTarget(args)
+	return path, code
+}
+
+// installTarget resolves the harness (--agent, default Claude Code) and its hook file from flags: the project's,
+// the user's with --global, or --settings <path>. code is -1 to proceed, else the exit code.
+func installTarget(args []string) (a harness.Adapter, path string, code int) {
+	a = defaultAdapter()
 	global := false
 	explicit := ""
 	for i := 0; i < len(args); i++ {
 		switch args[i] {
+		case "--agent":
+			if i+1 >= len(args) || findAgent(args[i+1]) == nil {
+				fmt.Fprintf(os.Stderr, "paws: --agent needs one of: claude, %s\n", strings.Join(adapterNames(), ", "))
+				return nil, "", 2
+			}
+			a = findAgent(args[i+1])
+			i++
 		case "--global":
 			global = true
 		case "--settings":
 			if i+1 >= len(args) {
 				fmt.Fprintln(os.Stderr, "paws: --settings needs a path")
-				return "", 2
+				return nil, "", 2
 			}
 			explicit = args[i+1]
 			i++
 		default:
 			fmt.Fprintf(os.Stderr, "paws: unknown flag %q\n", args[i])
-			return "", 2
+			return nil, "", 2
 		}
 	}
 	if explicit != "" {
-		return explicit, -1
-	}
-	if global {
-		return filepath.Join(userClaudeDir(), "settings.json"), -1
+		return a, explicit, -1
 	}
 	root, _ := os.Getwd()
-	return filepath.Join(projectRoot(root), ".claude", "settings.json"), -1
+	return a, a.HookFile(global, projectRoot(root)), -1
 }
 
-// userClaudeDir is Claude Code's user config dir: $CLAUDE_CONFIG_DIR when set, else ~/.claude.
-func userClaudeDir() string {
-	if dir := os.Getenv("CLAUDE_CONFIG_DIR"); dir != "" {
-		return dir
+func adapterNames() []string {
+	var names []string
+	for _, a := range adapters {
+		names = append(names, a.Name())
 	}
-	home, _ := os.UserHomeDir()
-	return filepath.Join(home, ".claude")
+	return names
 }
 
 // projectRoot walks up to the git repo root so init from a subdirectory writes the file Claude Code actually reads.
@@ -258,6 +526,12 @@ func projectRoot(cwd string) string {
 		}
 		cur = parent
 	}
+}
+
+// inRepo reports whether cwd is inside a git repo (projectRoot found its .git).
+func inRepo(cwd string) bool {
+	_, err := os.Stat(filepath.Join(projectRoot(cwd), ".git"))
+	return err == nil
 }
 
 // shellQuote wraps p in POSIX single quotes so $, backticks and spaces survive.
@@ -315,9 +589,6 @@ func installSelf(self, userDir string) (string, error) {
 		os.Remove(tmp.Name())
 		return "", err
 	}
-	if self != dest {
-		fmt.Printf("Installed paws binary to %s\n", dest)
-	}
 	return dest, nil
 }
 
@@ -351,25 +622,19 @@ func sameFile(a, b string) (bool, error) {
 // pawsSkillDir is the skills directory Claude Code reads beside settingsPath, or "" when the
 // settings file isn't in a .claude directory or $CLAUDE_CONFIG_DIR (a --settings path elsewhere,
 // managed settings).
-func pawsSkillDir(settingsPath string) string {
-	dir := filepath.Dir(settingsPath)
-	if filepath.Base(dir) != ".claude" && dir != userClaudeDir() {
-		return ""
-	}
-	return filepath.Join(dir, "skills")
-}
+func pawsSkillDir(settingsPath string) string { return hook.Claude{}.SkillsDirFor(settingsPath) }
 
-// Skill installs the paws skill (how Claude Code writes and checks rules) beside the target
-// settings.json: `paws skill [--global | --settings <path>]`. Re-running it replaces an older or
+// Skill installs the paws skill (how the agent writes and checks rules) beside the target
+// hook file: `paws skill [--agent A] [--global | --settings <path>]`. Re-running it replaces an older or
 // edited paws copy with this version's; a skills/paws directory paws didn't install is left alone.
 func Skill(args []string) int {
-	settingsPath, code := settingsTarget(args)
+	a, settingsPath, code := installTarget(args)
 	if code >= 0 {
 		return code
 	}
-	skillsDir := pawsSkillDir(settingsPath)
+	skillsDir := a.SkillsDirFor(settingsPath)
 	if skillsDir == "" {
-		fmt.Fprintf(os.Stderr, "paws: %s is not in a .claude directory; no skills folder to install into\n", settingsPath)
+		fmt.Fprintf(os.Stderr, "paws: %s has no %s skills folder beside it to install into\n", settingsPath, a.Title())
 		return 1
 	}
 	src, err := fs.Sub(paws.Skill, "skills/paws")
@@ -378,6 +643,21 @@ func Skill(args []string) int {
 		return 1
 	}
 	dest := filepath.Join(skillsDir, "paws")
+	mirrorFailed := false
+	if !slices.Contains(args, "--agent") && !slices.Contains(args, "--settings") {
+		// No harness named: every other harness that runs paws here gets the skill too, in its own folder.
+		cwd, _ := os.Getwd()
+		for _, m := range skillMirrors(slices.Contains(args, "--global"), projectRoot(cwd)) {
+			st, err := pack.ReinstallBundledSkill(src, m, "paws", "paws "+Version)
+			switch {
+			case err != nil:
+				fmt.Fprintf(os.Stderr, "paws: install the paws skill in %s: %v\n", m, err)
+				mirrorFailed = true
+			case st != pack.BundledKept:
+				fmt.Printf("Installed the paws skill (paws %s) in %s\n", Version, filepath.Join(m, "paws"))
+			}
+		}
+	}
 	status, err := pack.ReinstallBundledSkill(src, skillsDir, "paws", "paws "+Version)
 	switch {
 	case err != nil:
@@ -388,12 +668,15 @@ func Skill(args []string) int {
 		return 1
 	}
 	fmt.Printf("Installed the paws skill (paws %s) in %s\n", Version, dest)
+	if mirrorFailed {
+		return 1 // another harness's copy is missing or stale
+	}
 	return 0
 }
 
 // removePawsSkill undoes `paws skill` on uninstall, keeping a skill the user edited.
-func removePawsSkill(settingsPath string) {
-	if skillsDir := pawsSkillDir(settingsPath); skillsDir != "" {
+func removePawsSkill(a harness.Adapter, settingsPath string) {
+	if skillsDir := a.SkillsDirFor(settingsPath); skillsDir != "" {
 		if removed, _ := pack.RemoveBundledSkill(skillsDir, "paws"); removed {
 			fmt.Printf("Removed the paws skill from %s\n", filepath.Join(skillsDir, "paws"))
 		}

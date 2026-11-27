@@ -250,7 +250,7 @@ func portalDrifted(st *portalState, cwd string) bool {
 		if _, err := os.Stat(filepath.Join(dir, "digests", name+".md")); err == nil {
 			continue // load=rule: nothing to install
 		}
-		if !hasSkill(name, skillsDir, projectSkills) {
+		if !hasSkill(name, append([]string{skillsDir, projectSkills}, harnessSkillDirs(cwd)...)...) {
 			return true
 		}
 	}
@@ -295,7 +295,7 @@ func applyConfig(cfg portalConfig, cwd string) (applyResult, error) {
 		if err != nil {
 			errs = append(errs, fmt.Errorf("skill %s: %w", s.Name, err))
 		}
-		if len(files) > 0 && s.Load != "rule" && !hasSkill(s.Name, skillsDir, projectSkills) {
+		if len(files) > 0 && s.Load != "rule" && !hasSkill(s.Name, append([]string{skillsDir, projectSkills}, harnessSkillDirs(cwd)...)...) {
 			files, skip = nil, "skill not installed"
 			res.Pending = true
 		}
@@ -354,6 +354,16 @@ func skillFiles(s portalSkill, skillsDir, dir string) (map[string][]byte, string
 }
 
 // hasSkill reports whether a skill's SKILL.md is in one of the skills directories.
+// harnessSkillDirs are the folders every harness loads skills from for cwd: a custom skill the user put in Codex's
+// folders only is there too.
+func harnessSkillDirs(cwd string) []string {
+	var dirs []string
+	for _, a := range adapters {
+		dirs = append(dirs, a.SkillDirs(cwd)...)
+	}
+	return dirs
+}
+
 func hasSkill(name string, skillsDirs ...string) bool {
 	for _, d := range skillsDirs {
 		if st, err := os.Stat(filepath.Join(d, name, "SKILL.md")); err == nil && st.Mode().IsRegular() {
@@ -378,6 +388,12 @@ func prepareSkill(s portalSkill, skillsDir string) (string, error) {
 	case outcome == badPin:
 		return "its pin is not a github.com repo at a commit with a content hash; not installed", nil
 	case err == nil:
+		// The other harnesses that run paws read their own folders: each gets a copy.
+		for _, m := range skillMirrors(true, "") {
+			if _, err := pack.MirrorSkill(skillsDir, m, s.Name); err != nil {
+				return "", fmt.Errorf("copy to %s: %w", m, err)
+			}
+		}
 		return "", nil
 	case serr != nil:
 		return "not installed: " + err.Error(), err

@@ -1,0 +1,764 @@
+// Package codex is the Codex CLI adapter (harness.Adapter): hooks.json, the hook stdin Codex sends, ~/.agents/skills,
+// and a ledger paws keeps of each session in place of Codex's rollout files.
+package codex
+
+import (
+	"cmp"
+	"encoding/json"
+	"fmt"
+	"io"
+	"os"
+	"path/filepath"
+	"regexp"
+	"slices"
+	"sort"
+	"strings"
+	"time"
+
+	"github.com/websentry-ai/paws/internal/gate"
+	"github.com/websentry-ai/paws/internal/harness"
+	"github.com/websentry-ai/paws/internal/history"
+	"github.com/websentry-ai/paws/internal/rule"
+)
+
+// Name is the harness id on every record.
+const Name = "codex"
+
+// Adapter is the Codex adapter.
+type Adapter struct{}
+
+var _ harness.Adapter = Adapter{}
+
+func (Adapter) Name() string  { return Name }
+func (Adapter) Title() string { return "Codex" }
+
+// SkillTrees is nil: Codex's skills sit directly in its SkillDirs.
+func (Adapter) SkillTrees() []string { return nil }
+
+// History is nil: Codex's rollout format isn't stable, so scan doesn't read it.
+func (Adapter) History() (history.Source, string) { return nil, "" }
+
+// Input is the JSON Codex pipes to a hook: Claude Code's fields plus turn_id and model on every event.
+type Input struct {
+	SessionID      string          `json:"session_id"`
+	TurnID         string          `json:"turn_id"`
+	TranscriptPath string          `json:"transcript_path"`
+	CWD            string          `json:"cwd"`
+	HookEventName  string          `json:"hook_event_name"`
+	Model          string          `json:"model"`
+	ToolName       string          `json:"tool_name"`
+	ToolInput      map[string]any  `json:"tool_input"`
+	ToolUseID      string          `json:"tool_use_id"`
+	ToolResponse   json.RawMessage `json:"tool_response"`
+	Source         string          `json:"source"` // SessionStart: startup|resume|clear|compact|fork
+	AgentID        string          `json:"agent_id"`
+	AgentType      string          `json:"agent_type"`
+}
+
+// parsed is the adapter's reading of one hook call, kept in harness.Hook.Native.
+type parsed struct {
+	in    Input
+	at    time.Time // when the hook started: a call is logged before paws decides on it, as Claude Code logs it
+	calls []call
+}
+
+// call is one canonical call and the input expect checks see for it.
+type call struct {
+	tool, target, text string
+	input              map[string]any
+	anyFile            bool // the files are unknown: a patch from a file paws couldn't read
+}
+
+// Claims a hook call that names a turn and a model (Claude Code sends neither on a tool call), or whose transcript
+// is a Codex rollout: Codex can run hooks it imported from Claude Code's settings, without --agent.
+func (Adapter) Claims(stdin []byte) bool {
+	var in Input
+	if json.Unmarshal(stdin, &in) != nil {
+		return false
+	}
+	sessions := filepath.Join(Home(), "sessions") + string(filepath.Separator)
+	return in.TurnID != "" && in.Model != "" || in.TranscriptPath != "" && strings.HasPrefix(in.TranscriptPath, sessions)
+}
+
+func (a Adapter) Parse(stdin []byte) (*harness.Hook, error) {
+	p := &parsed{at: time.Now()}
+	if err := json.Unmarshal(stdin, &p.in); err != nil {
+		return nil, err
+	}
+	in := &p.in
+	if in.CWD == "" {
+		in.CWD, _ = os.Getwd()
+	}
+	p.calls = canonical(in)
+	base := gate.Event{Agent: Name, Session: in.SessionID, Cwd: in.CWD, AgentID: in.AgentID, AgentType: in.AgentType,
+		Log:     session{own: ledgerPath(in.SessionID, in.AgentID), main: ledgerPath(in.SessionID, ""), turn: in.TurnID, model: in.Model, cwd: in.CWD},
+		Harness: a}
+	h := &harness.Hook{Event: in.HookEventName, Cwd: in.CWD, Source: in.Source, Native: p}
+	for _, c := range p.calls {
+		ev := base
+		ev.Tool, ev.Target, ev.AnyFile = c.tool, c.target, c.anyFile
+		if s, ok := ev.Log.(session); ok && c.tool == "Agent" {
+			s.spawning = true // this call is a spawn the ledger doesn't hold yet
+			if in.HookEventName == "PreToolUse" && in.AgentID == "" && in.TurnID != "" && in.ToolUseID != "" {
+				s.spawnID = in.ToolUseID // recorded before it is decided: a spawn gated at the same time sees it
+				appendRecords(s.main, []record{{Kind: "spawn", At: time.Now(), Turn: in.TurnID, ID: in.ToolUseID}})
+			}
+			ev.Log = s
+		}
+		switch in.HookEventName {
+		case "PreToolUse":
+			ev.Kind = rule.KindTool
+			ev.SkillLoad, ev.SkillWhole, ev.SkillLoads = skillRead(c, in.CWD)
+		case "PostToolUse":
+			ev.SkillLoad, ev.SkillWhole, ev.SkillLoads = skillRead(c, in.CWD)
+		case "SessionStart":
+			ev.Kind, ev.Target = rule.KindSession, in.Source
+		}
+		h.Calls = append(h.Calls, ev)
+	}
+	if in.HookEventName == "PostToolUse" {
+		h.Ran = postRan(in, p.calls)
+	}
+	return h, nil
+}
+
+// postResult is what a PostToolUse says ran: ok for the call, and for a patch the files apply_patch lists as
+// changed (through the shell there is no exit code for the patch, so that list is the only sign it applied).
+func postResult(in *Input, calls int) (ok bool, files []string) {
+	ok = resultOK(in.ToolResponse)
+	if in.ToolName == "apply_patch" || in.ToolName == "Bash" && calls > 1 {
+		runs := shellPatches(cmdOf(in), in.CWD)
+		if in.ToolName == "apply_patch" {
+			str := func(k string) string { s, _ := in.ToolInput[k].(string); return s }
+			runs = []shellPatch{{text: cmp.Or(str("command"), str("input"), str("patch")), dir: in.CWD, dirs: []string{in.CWD}}} // the tool runs in the hook's cwd
+		}
+		files = patchedFiles(in.ToolResponse, runs)
+		if in.ToolName == "Bash" {
+			ok = len(files) > 0
+		}
+	}
+	return ok, files
+}
+
+// postRan says which of a PostToolUse's calls ran: Codex sends one for a command that failed too, and for a
+// patch that didn't apply. A file of a patch ran when apply_patch lists it; the shell command when it exited 0.
+func postRan(in *Input, calls []call) []bool {
+	_, files := postResult(in, len(calls))
+	ran := make([]bool, len(calls))
+	for i, c := range calls {
+		if c.tool == "Edit" || c.tool == "Write" {
+			ran[i] = slices.Contains(files, filepath.Clean(c.target))
+		} else {
+			ran[i] = resultOK(in.ToolResponse)
+		}
+	}
+	return ran
+}
+
+// skillRead names the skills whose SKILL.md a call reads, the first, and whether the read alone prints them whole.
+func skillRead(c call, cwd string) (first string, whole bool, all []string) {
+	all, whole = gate.SkillLoadOf(c.tool, c.target, c.input, cwd)
+	if len(all) == 0 {
+		return "", false, nil
+	}
+	return all[0], whole, all
+}
+
+// canonical maps a Codex tool call to canonical calls: Bash as is, apply_patch to a Write (new file) or Edit per
+// file, spawn_agent to Agent, MCP tools as is. A hook call without a tool (a prompt, a stop) is one call with none.
+func canonical(in *Input) []call {
+	ti := in.ToolInput
+	str := func(k string) string { s, _ := ti[k].(string); return s }
+	switch {
+	case in.ToolName == "":
+		return []call{{}}
+	case in.ToolName == "Bash":
+		// The command is always gated as Bash. A patch inside it (apply_patch <<'EOF' ... EOF through the shell)
+		// also edits files: those are gated too, as Codex's apply_patch tool is.
+		cmd := str("command")
+		calls := []call{{tool: "Bash", target: cmd, text: cmd, input: map[string]any{"command": cmd}}}
+		for _, sp := range shellPatches(cmd, in.CWD) {
+			// Every folder the patch may run in: a cd behind && or || may not have run, so each file is gated as
+			// it would land from each. A rule that matches any of them asks for its skill.
+			seen := map[string]bool{}
+			for _, d := range sp.dirs {
+				for _, c := range patchCalls(sp.text, d) {
+					if !seen[c.tool+"\x00"+c.target] {
+						seen[c.tool+"\x00"+c.target] = true
+						calls = append(calls, c)
+					}
+				}
+			}
+			if sp.unread != "" { // files paws can't name: an edit every file rule gates
+				calls = append(calls, call{tool: "Edit", target: sp.unread, text: "", anyFile: true, input: map[string]any{"file_path": sp.unread}})
+			}
+		}
+		return calls
+	case in.ToolName == "apply_patch":
+		patch := cmp.Or(str("command"), str("input"), str("patch"))
+		if calls := patchCalls(patch, in.CWD); len(calls) > 0 {
+			return calls
+		}
+		return []call{{tool: "apply_patch", target: patch, text: patch, input: ti}}
+	case in.ToolName == "spawn_agent":
+		prompt := ""
+		for _, k := range []string{"prompt", "message", "task", "instructions"} {
+			if prompt = str(k); prompt != "" {
+				break
+			}
+		}
+		if prompt == "" {
+			b, _ := json.Marshal(ti)
+			prompt = string(b)
+		}
+		return []call{{tool: "Agent", target: prompt, text: prompt, input: map[string]any{"prompt": prompt}}}
+	case strings.HasPrefix(in.ToolName, "mcp__"):
+		b, _ := json.Marshal(ti)
+		return []call{{tool: in.ToolName, target: string(b), text: strings.Join(stringsIn(ti), "\n"), input: ti}}
+	}
+	return []call{{tool: in.ToolName, target: in.ToolName, text: in.ToolName, input: ti}}
+}
+
+// cdStep is one `cd <dir>` command of a chain.
+var cdStep = regexp.MustCompile(`^(?:(?:builtin|command)\s+)?(?:cd|pushd)(?:\s+--)?(?:\s+(?:'([^']*)'|"([^"]*)"|(\S+)))?$`)
+
+// redirect is a redirection in a command: >/dev/null, 2>&1, &>log, < in.
+var redirect = regexp.MustCompile(`\s*(?:\d*>>?|&>>?|\d*<)&?\s*(?:'[^']*'|"[^"]*"|[^\s'"]+)`)
+
+// shellWrap opens a command string another shell runs: bash -c ", sh -lc ', eval ".
+var shellWrap = regexp.MustCompile(`^(?:(?:ba|z|da|k)?sh(?:\s+-\w+)*\s+-\w*c\w*|eval)\s+['"]?`)
+
+// chainSep splits a command line into its commands.
+var chainSep = regexp.MustCompile(`&&|\|\||[;\n]`)
+
+// shellPatch is one apply_patch run in a shell command: its patch text and the folder it runs in.
+type shellPatch struct {
+	text string
+	dir  string   // where it runs if every cd before it ran
+	dirs []string // every folder it may run in: dir, and each folder the commands before it pass through
+	// unread is the patch file paws couldn't read (a link, too big, not there, not a file): its files are unknown.
+	unread string
+}
+
+// applyPatchCmd finds apply_patch (or its applypatch alias) as a word anywhere in the command, by path too
+// (/usr/local/bin/apply_patch, ./apply_patch), not part of a longer name (apply_patch.py, my-apply_patch). Every
+// place a shell can run it (after a wrapper, in bash -c or eval, behind xargs) counts: a mention that runs nothing
+// gates only the patch text after it.
+var applyPatchCmd = regexp.MustCompile(`(?:^|[^\w.-])(apply_?patch)(?:[^\w./-]|$)`)
+
+// shellPatches are the apply_patch runs of a shell command, each with the folder the commands before it moved to.
+func shellPatches(cmd, cwd string) []shellPatch {
+	var out []shellPatch
+	var starts []int // where each apply_patch command begins: not "apply_patch" inside a file name
+	blocks := patchBlock.FindAllStringIndex(cmd, -1)
+	for _, m := range applyPatchCmd.FindAllStringSubmatchIndex(cmd, -1) {
+		if !slices.ContainsFunc(blocks, func(b []int) bool { return b[0] < m[2] && m[2] < b[1] }) { // not patch text
+			starts = append(starts, m[2])
+		}
+	}
+	for k, at := range starts {
+		end := len(cmd)
+		if k+1 < len(starts) {
+			end = starts[k+1]
+		}
+		dir, dirs := patchDir(cmd[:at], cwd)
+		run := shellPatch{text: cmd[at:end], dir: dir, dirs: dirs}
+		// A patch from a file (apply_patch < fix.patch, cat fix.patch | apply_patch) is that file as it is now, or as
+		// an earlier command in this call writes it: any patch text before the run.
+		file := ""
+		if m := patchFromFile.FindStringSubmatch(run.text); m != nil {
+			file = m[1]
+		} else if m := pipedFrom.FindStringSubmatch(cmd[:at]); m != nil && !strings.Contains(run.text, "*** Begin Patch") {
+			file = m[1]
+		}
+		if file == "" && !strings.Contains(run.text, "*** Begin Patch") {
+			// No patch of its own: it may get one piped in (echo ... | xargs apply_patch). Any patch text before it.
+			run.text = strings.Join(append(patchBlock.FindAllString(cmd[:at], -1), run.text), "\n")
+		}
+		if file != "" {
+			if !strings.HasPrefix(file, "'") { // "$F" and $F expand; '$F' is literal
+				file = expandWith(shellVars(cmd[:at]), file)
+			}
+			texts := patchBlock.FindAllString(cmd[:at], -1)
+			read, refused := false, false
+			for _, d := range run.dirs { // the file from each folder the patch may run in
+				text, there, ok := readPatchFile(file, d)
+				texts = append(texts, text)
+				read, refused = read || ok, refused || there && !ok
+			}
+			// Not read and not written earlier in the command, or refused somewhere: its files are unknown.
+			if refused || !read && !patchBlock.MatchString(cmd[:at]) {
+				run.unread = strings.Trim(file, `'"`)
+			}
+			run.text = strings.Join(texts, "\n")
+		}
+		out = append(out, run)
+	}
+	return out
+}
+
+// patchBlock is a whole patch in a command's text: a here-document body that writes a patch file, say.
+var patchBlock = regexp.MustCompile(`(?s)\*\*\* Begin Patch.*?\*\*\* End Patch`)
+
+// pipedFrom is a `cat <file> |` right before an apply_patch: the patch it pipes in is that file.
+var pipedFrom = regexp.MustCompile(`(?:^|[;&(\n])[ \t]*cat[ \t]+('[^']*'|"[^"]*"|[^\s|;&'"]+)[ \t]*\|[ \t]*(?:(?:command|builtin|exec|env|nohup|time|sudo|[A-Za-z_][A-Za-z0-9_]*=\S*)[ \t]+)*$`)
+
+// patchFromFile is an apply_patch that reads its patch from a file on stdin: apply_patch < fix.patch or 0< (not <<).
+var patchFromFile = regexp.MustCompile(`^apply_?patch[ \t]*0?<[ \t]*('[^']*'|"[^"]*"|[^<\s'"]\S*)`)
+
+// maxPatchFile bounds the patch file paws reads: past any patch an agent writes, small enough for every hook.
+const maxPatchFile = 4 << 20
+
+// readPatchFile is the patch in the file at p (relative to dir). there is whether something is at p; ok is whether
+// paws read it: a regular file (not a link) of at most maxPatchFile bytes.
+func readPatchFile(p, dir string) (text string, there, ok bool) {
+	p = strings.Trim(p, `'"`)
+	if !filepath.IsAbs(p) {
+		p = filepath.Join(dir, p)
+	}
+	st, err := os.Lstat(p)
+	if err != nil {
+		return "", false, false
+	}
+	if !st.Mode().IsRegular() || st.Size() > maxPatchFile {
+		return "", true, false
+	}
+	f, err := os.Open(p)
+	if err != nil {
+		return "", true, false
+	}
+	defer f.Close()
+	data, err := io.ReadAll(io.LimitReader(f, maxPatchFile+1))
+	if err != nil || len(data) > maxPatchFile {
+		return "", true, false
+	}
+	return string(data), true, true
+}
+
+// patchDir is where a shell patch runs, given the command before it: the hook's cwd, moved by each `cd`, so a
+// relative path in `ls && cd migrations && apply_patch ...` is a file in migrations/. A cd inside a subshell that
+// closes before apply_patch moves nothing.
+func patchDir(before, cwd string) (string, []string) {
+	// here is every folder the patch may be in by now: any cd may have been skipped (behind && or ||), so a cd adds
+	// where it leads from each folder so far and keeps them all. cwd follows the path where every cd ran.
+	here := []string{cwd}
+	type frame struct {
+		cwd  string
+		here []string
+	}
+	var outer []frame // where each open subshell began
+	vars := map[string]string{}
+	for _, part := range chainSep.Split(withoutHeredocs(before), -1) {
+		part = strings.TrimSpace(part)
+		if m := assignStep.FindStringSubmatch(part); m != nil {
+			vars[m[1]] = expandWith(vars, m[2]+m[4]) + m[3] // D=sub, D="$X/sub", D='lit'
+			continue
+		}
+		for strings.HasPrefix(part, "(") {
+			outer, part = append(outer, frame{cwd, slices.Clone(here)}), strings.TrimSpace(part[1:])
+		}
+		inner := strings.TrimRight(part, ") ")
+		// cd src >/dev/null is cd src; in bash -c "cd src && ..." or eval 'cd src; ...' the cd runs too.
+		step := strings.TrimSpace(redirect.ReplaceAllString(shellWrap.ReplaceAllString(inner, ""), ""))
+		for _, q := range []string{"'", `"`} { // the wrapper's closing quote: eval 'cd src'
+			if strings.Count(step, q)%2 == 1 {
+				step = strings.TrimSuffix(step, q)
+			}
+		}
+		if m := cdStep.FindStringSubmatch(step); m != nil {
+			dir := m[1] + expandWith(vars, m[2]+m[3]) // "$DIR" and $DIR from the command, then the environment; '$DIR' is literal
+			if m[1]+m[2]+m[3] == "" && !strings.ContainsAny(m[0], `'"`) {
+				dir, _ = os.UserHomeDir() // a bare cd goes home
+			}
+			cwd = cdTo(dir, cwd)
+			for _, from := range slices.Clone(here) {
+				if to := cdTo(dir, from); !slices.Contains(here, to) && len(here) < maxPatchDirs {
+					here = append(here, to)
+				}
+			}
+		}
+		for closes := strings.Count(part[len(inner):], ")"); closes > 0 && len(outer) > 0; closes-- {
+			f := outer[len(outer)-1] // the subshell ended: back where it began
+			cwd, here, outer = f.cwd, f.here, outer[:len(outer)-1]
+		}
+	}
+	return cwd, here
+}
+
+// maxPatchDirs bounds the folders a shell patch is gated from; a command that cds this many ways is unheard of.
+const maxPatchDirs = 64
+
+// assignStep is a `VAR=value` command of its own: the value bare, single-quoted (literal) or double-quoted.
+var assignStep = regexp.MustCompile(`^([A-Za-z_][A-Za-z0-9_]*)=(?:"([^"]*)"|'([^']*)'|([^\s'"]*))$`)
+
+// expandWith expands $VAR and ${VAR} from vars, the command's own assignments, else the hook's environment.
+func expandWith(vars map[string]string, s string) string {
+	return os.Expand(s, func(k string) string {
+		if v, ok := vars[k]; ok {
+			return v
+		}
+		return os.Getenv(k)
+	})
+}
+
+// shellVars are the VAR=value assignments of the commands in before, as patchDir reads them.
+func shellVars(before string) map[string]string {
+	vars := map[string]string{}
+	for _, part := range chainSep.Split(withoutHeredocs(before), -1) {
+		if m := assignStep.FindStringSubmatch(strings.TrimSpace(part)); m != nil {
+			vars[m[1]] = expandWith(vars, m[2]+m[4]) + m[3]
+		}
+	}
+	return vars
+}
+
+// cdTo is the folder `cd dir` moves to from cwd.
+func cdTo(dir, cwd string) string {
+	if rest, ok := strings.CutPrefix(dir, "~/"); ok {
+		home, _ := os.UserHomeDir()
+		dir = filepath.Join(home, rest)
+	}
+	if !filepath.IsAbs(dir) {
+		dir = filepath.Join(cwd, dir)
+	}
+	return filepath.Clean(dir)
+}
+
+// heredocStart opens a here-document: <<EOF, <<'EOF', <<"EOF", <<-EOF; not a here-string (<<< word).
+var heredocStart = regexp.MustCompile(`(?:^|[^<])<<-?[ \t]*['"]?([A-Za-z_][A-Za-z0-9_]*)['"]?`)
+
+// withoutHeredocs is a command line with its here-document bodies taken out: their lines are data, not commands, so
+// a `cd x` line inside one moves nothing.
+func withoutHeredocs(s string) string {
+	var out []string
+	end := "" // the delimiter that closes the body being skipped
+	for _, line := range strings.Split(s, "\n") {
+		switch {
+		case end != "":
+			if strings.TrimSpace(line) == end {
+				end = ""
+			}
+		default:
+			out = append(out, line)
+			if m := heredocStart.FindStringSubmatch(line); m != nil {
+				end = m[1]
+			}
+		}
+	}
+	return strings.Join(out, "\n")
+}
+
+// patchCalls are a patch's files as canonical calls: a Write for a new file, an Edit for any other, relative paths
+// taken from cwd.
+func patchCalls(patch, cwd string) []call {
+	var calls []call
+	for _, f := range parsePatch(patch) {
+		path := f.Path
+		if !filepath.IsAbs(path) {
+			path = filepath.Join(cwd, path)
+		}
+		c := call{tool: "Edit", target: path, text: f.Added, input: map[string]any{"file_path": path, "new_string": f.Added}}
+		if f.New {
+			c.tool, c.input = "Write", map[string]any{"file_path": path, "content": f.Added}
+		}
+		calls = append(calls, c)
+	}
+	return calls
+}
+
+// stringsIn is every string value in v, keys in order, depth first: an MCP call's text, as expect checks see it.
+func stringsIn(v any) []string {
+	switch x := v.(type) {
+	case string:
+		return []string{x}
+	case map[string]any:
+		keys := make([]string, 0, len(x))
+		for k := range x {
+			keys = append(keys, k)
+		}
+		sort.Strings(keys)
+		var out []string
+		for _, k := range keys {
+			out = append(out, stringsIn(x[k])...)
+		}
+		return out
+	case []any:
+		var out []string
+		for _, e := range x {
+			out = append(out, stringsIn(e)...)
+		}
+		return out
+	}
+	return nil
+}
+
+type output struct {
+	SystemMessage  string          `json:"systemMessage,omitempty"`
+	SpecificOutput *specificOutput `json:"hookSpecificOutput,omitempty"`
+}
+
+type specificOutput struct {
+	HookEventName            string `json:"hookEventName"`
+	PermissionDecision       string `json:"permissionDecision,omitempty"`
+	PermissionDecisionReason string `json:"permissionDecisionReason,omitempty"`
+	AdditionalContext        string `json:"additionalContext,omitempty"`
+}
+
+// Render is Claude Code's reply shape, which Codex reads too. Codex shows a deny as "Command blocked by PreToolUse
+// hook: <reason>. Command: <command>", dropping the reason's trailing period itself; paws's own Codex wording ends
+// without one, and a rule's deny_message goes as written.
+func (Adapter) Render(h *harness.Hook, d gate.Decision, notice string) []byte {
+	out := output{SystemMessage: notice}
+	switch {
+	case h.Event != "PreToolUse" && h.Event != "SessionStart":
+	case d.Verdict == gate.Deny:
+		out.SpecificOutput = &specificOutput{HookEventName: h.Event, PermissionDecision: "deny",
+			PermissionDecisionReason: d.Reason, AdditionalContext: d.Context}
+	case d.Context != "":
+		out.SpecificOutput = &specificOutput{HookEventName: h.Event, AdditionalContext: d.Context}
+	}
+	b, err := json.Marshal(out)
+	if err != nil {
+		return []byte("{}")
+	}
+	return b
+}
+
+// Observe writes the ledger: each call with paws's verdict, each result, each turn and compaction.
+func (Adapter) Observe(h *harness.Hook, d gate.Decision) {
+	p, _ := h.Native.(*parsed)
+	if p == nil {
+		return
+	}
+	in := &p.in
+	own := ledgerPath(in.SessionID, in.AgentID)
+	switch {
+	case in.HookEventName == "PreToolUse":
+		verdict, heads := "allow", []string(nil)
+		if d.Verdict == gate.Deny {
+			verdict, heads = "deny", denyHeads(d.Reason)
+		}
+		var recs []record
+		for i, c := range p.calls {
+			rec := record{Kind: "call", At: p.at, Turn: in.TurnID, ID: in.ToolUseID, Part: i, Tool: c.tool,
+				Target: c.target, Text: c.text, Input: c.input, Verdict: verdict, SkillLoad: h.Calls[i].SkillLoad,
+				Denied: heads, Agent: in.AgentID}
+			if reads := gate.ReadsOf(c.tool, c.target, c.input, in.CWD, true); len(reads) > 0 {
+				r := reads[0]
+				rec.ReadFile, rec.ReadFrom, rec.ReadTo = r.File, r.Lines.From, r.Lines.To
+				for _, m := range reads[1:] {
+					rec.MoreReads = append(rec.MoreReads, moreRead{Skill: m.Skill, File: m.File, From: m.Lines.From, To: m.Lines.To})
+				}
+			}
+			recs = append(recs, rec)
+		}
+		appendRecords(own, recs)
+	case in.HookEventName == "PostToolUse":
+		ok, files := postResult(in, len(p.calls))
+		var out string
+		if json.Unmarshal(in.ToolResponse, &out) != nil {
+			out = string(in.ToolResponse)
+		}
+		if strings.HasPrefix(out, "Exit code: ") { // Codex's header (exit code, wall time) is no line of the file
+			if _, body, found := strings.Cut(out, "\nOutput:\n"); found {
+				out = body
+			}
+		}
+		c, shown := gate.ShownLines(out) // what the model got of a read
+		appendRecords(own, []record{{Kind: "result", At: p.at, Turn: in.TurnID, ID: in.ToolUseID, OK: &ok, Files: files,
+			Cut: c, Shown: shown, Agent: in.AgentID}})
+	case in.HookEventName == "UserPromptSubmit":
+		appendRecords(own, []record{{Kind: "turn", At: p.at, Turn: in.TurnID}})
+	case in.HookEventName == "PostCompact", in.HookEventName == "SessionStart" && in.Source == "compact":
+		appendRecords(own, []record{{Kind: "compact", At: p.at, Turn: in.TurnID}})
+	case in.HookEventName == "SessionStart":
+		pruneLedgers(own)
+	}
+}
+
+// cmdOf is a Bash call's command, "" for any other tool.
+func cmdOf(in *Input) string {
+	if in.ToolName != "Bash" {
+		return ""
+	}
+	s, _ := in.ToolInput["command"].(string)
+	return s
+}
+
+// patchedFiles are the files apply_patch says it changed: the "A path", "M path" and "D path" lines after its
+// "Success. Updated the following files:" line, absolute.
+func patchedFiles(raw json.RawMessage, runs []shellPatch) []string {
+	var s string
+	if json.Unmarshal(raw, &s) != nil {
+		s = string(raw)
+	}
+	// A listed path is relative to the folder its own run ran in: the run whose patch names that file. Pairing by
+	// name, not by position, keeps a failed run (it lists nothing) from shifting the rest.
+	var files []string
+	for _, list := range strings.Split(s, "Success. Updated the following files:")[1:] {
+		for _, line := range strings.Split(list, "\n") {
+			op, path, ok := strings.Cut(strings.TrimSpace(line), " ")
+			if !ok || len(op) != 1 || !strings.Contains("AMD", op) {
+				continue
+			}
+			if filepath.IsAbs(path) {
+				files = append(files, filepath.Clean(path))
+				continue
+			}
+			// When runs in different folders each name this path, the list can't say which one changed it: credit
+			// none, so a no-edit-matching rule still applies rather than passing on an edit that may not have happened.
+			// A run may be in any of its possible folders; an added or changed file is where it now exists.
+			var owners []string
+			for _, run := range runs {
+				named := false
+				for _, f := range parsePatch(run.text) {
+					named = named || filepath.Clean(f.Path) == filepath.Clean(path)
+				}
+				for _, d := range run.dirs {
+					at := filepath.Join(d, path)
+					if _, err := os.Stat(at); named && (op == "D" || err == nil) && !slices.Contains(owners, at) {
+						owners = append(owners, at)
+					}
+				}
+			}
+			if len(owners) == 1 {
+				files = append(files, owners[0])
+			}
+		}
+	}
+	return files
+}
+
+// resultOK reads a PostToolUse tool_response: apply_patch's starts "Exit code: N"; a Bash result is the output alone,
+// so a read that failed shows as the reader's error on the first line ("sed: <path>: No such file or directory"). The
+// rest of the output is the file, which may mention any error.
+func resultOK(raw json.RawMessage) bool {
+	var s string
+	if json.Unmarshal(raw, &s) != nil {
+		b, _ := json.Marshal(raw)
+		s = string(b)
+	}
+	if rest, ok := strings.CutPrefix(s, "Exit code: "); ok {
+		return strings.HasPrefix(rest, "0\n") || rest == "0"
+	}
+	first, _, _ := strings.Cut(s, "\n")
+	return !readError.MatchString(first)
+}
+
+// readError is a reader's or the shell's error line: it opens with the program's name (sed: <path>: No such file
+// or directory, bash: sed: command not found, sh: 1: sed: not found, zsh: command not found: sed). The name keeps a
+// SKILL.md line such as "Returns 404 when the page is not found" from reading as a failed read.
+var readError = regexp.MustCompile(`^(?:(?:` + errorSource + `): )+(?:.*: )?(?:No such file or directory|Permission denied|Is a directory|(?:command )?not found)$` +
+	`|^(?:(?:ba|z|da|k)?sh: )(?:line \d+: )?command not found: \S+$` +
+	`|^(?:No such file or directory|Permission denied|Is a directory)$`) // the bare error, no name: no skill line
+
+// errorSource is a program that names itself on an error line: a shell (with its line number), or a reader.
+const errorSource = `(?:ba|z|da|k)?sh|line \d+|\d+|(?:\S*/)?(?:g?sed|cat|head|tail|nl|less|more|bat|batcat|g?awk|mawk)`
+
+// Turns is the ledger of the session, from the Stop's turn id.
+func (Adapter) Turns(h *harness.Hook) harness.TurnLog {
+	p, _ := h.Native.(*parsed)
+	if p == nil || p.in.SessionID == "" || p.in.TurnID == "" {
+		return nil
+	}
+	return turns{session: p.in.SessionID, turn: p.in.TurnID}
+}
+
+// SkillDirs are where Codex finds skills: ~/.agents/skills, the repo's .agents/skills and $CODEX_HOME/skills; then
+// Claude Code's folders, whose skills the agent can read just the same when paws names the file.
+//
+// The user's folder comes before the project's on purpose: Claude Code ranks personal skills above project skills,
+// and gate.SkillTool lists them in that order. A deny that needs skill X then names the same X on both harnesses.
+func (Adapter) SkillDirs(cwd string) []string {
+	return append([]string{userSkills(), filepath.Join(gate.RepoRoot(cwd), ".agents", "skills"), filepath.Join(Home(), "skills")},
+		gate.SkillTool.SkillDirs(cwd)...)
+}
+
+// LoadSkills tells Codex to read each SKILL.md in full and follow it, then make the call again, changed if the skill
+// says so. Codex has no Skill tool, and told to retry "this exact command" it re-runs the blocked call unchanged.
+func (Adapter) LoadSkills(skills []gate.Skill, noun string) string {
+	return fmt.Sprintf("Read %s, %s", readList(skills), gate.FollowAndRetry(skills, noun))
+}
+
+func (Adapter) LoadAtStart(s gate.Skill) string {
+	return fmt.Sprintf("Read %s in full on its own and follow it before you start work.", readList([]gate.Skill{s}))
+}
+
+func readList(skills []gate.Skill) string {
+	files := make([]string, len(skills))
+	for i, s := range skills {
+		files[i] = s.File
+		if s.File == "" {
+			files[i] = fmt.Sprintf("the %s skill's SKILL.md (in .agents/skills)", s.Name)
+		}
+	}
+	if len(files) == 1 {
+		return files[0]
+	}
+	return strings.Join(files[:len(files)-1], ", ") + " and " + files[len(files)-1]
+}
+
+// Home is Codex's config dir: $CODEX_HOME, else ~/.codex.
+func Home() string {
+	if dir := os.Getenv("CODEX_HOME"); dir != "" {
+		return dir
+	}
+	home, _ := os.UserHomeDir()
+	return filepath.Join(home, ".codex")
+}
+
+func userSkills() string {
+	home, _ := os.UserHomeDir()
+	return filepath.Join(home, ".agents", "skills")
+}
+
+func (Adapter) HookFile(global bool, root string) string {
+	if global {
+		return filepath.Join(Home(), "hooks.json")
+	}
+	return filepath.Join(root, ".codex", "hooks.json")
+}
+
+func (a Adapter) HookFiles(root string) []string {
+	return []string{a.HookFile(false, root), a.HookFile(true, "")}
+}
+
+func (Adapter) HookCommand(gate string) string { return gate + " --agent " + Name }
+
+// Events are the hooks paws registers in Codex: Claude Code's five, plus PostCompact for the ledger.
+func (Adapter) Events() []string {
+	return []string{"PreToolUse", "SessionStart", "UserPromptSubmit", "PostToolUse", "Stop", "PostCompact"}
+}
+
+// Entry is a hooks.json entry: an explicit 15 s timeout (Codex's default is 600 s), async where nothing waits on the
+// answer, and matcher * on tool events. PostToolUse and PostCompact are not async: the ledger must hold a call's
+// result, or a compaction, before the next call is gated.
+func (Adapter) Entry(event, command string) map[string]any {
+	h := map[string]any{"type": "command", "command": command, "timeout": 15}
+	switch event {
+	case "UserPromptSubmit", "Stop":
+		h["async"] = true
+	}
+	if event == "PreToolUse" || event == "PostToolUse" {
+		return map[string]any{"matcher": "*", "hooks": []any{h}}
+	}
+	return map[string]any{"hooks": []any{h}}
+}
+
+// SkillsDirFor: Codex reads ~/.agents/skills for the user's hooks.json, and <repo>/.agents/skills for a project's
+// .codex/hooks.json.
+func (Adapter) SkillsDirFor(hookFile string) string {
+	dir := filepath.Dir(hookFile)
+	switch {
+	case filepath.Clean(dir) == filepath.Clean(Home()):
+		return userSkills()
+	case filepath.Base(dir) == ".codex":
+		return filepath.Join(filepath.Dir(dir), ".agents", "skills")
+	}
+	return ""
+}
+
+// InstallNote: Codex runs a hook only once the user trusts it.
+func (Adapter) InstallNote() string {
+	return "Codex runs a new or changed hook only after you trust it: start Codex, run /hooks and trust the paws hook."
+}

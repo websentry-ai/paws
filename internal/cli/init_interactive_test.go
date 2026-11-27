@@ -1,0 +1,251 @@
+package cli
+
+import (
+	"errors"
+	"os"
+	"path/filepath"
+	"strings"
+	"testing"
+)
+
+// askEnv is a sandboxed home with a repo, Claude Code found (~/.claude exists) and Codex not, on a terminal that
+// reads input. raw says whether the terminal takes raw mode (arrow-key menus) or not (numbered questions).
+func askEnv(t *testing.T, input string, raw bool) (home, repo string) {
+	t.Helper()
+	home = t.TempDir()
+	t.Setenv("HOME", home)
+	t.Setenv("PAWS_HOME", filepath.Join(home, ".paws"))
+	t.Setenv("CLAUDE_CONFIG_DIR", filepath.Join(home, ".claude"))
+	t.Setenv("CODEX_HOME", filepath.Join(home, ".codex"))
+	t.Setenv("PATH", t.TempDir()) // neither claude nor codex on PATH
+	os.MkdirAll(filepath.Join(home, ".claude"), 0o755)
+	repo = filepath.Join(home, "repo")
+	os.MkdirAll(filepath.Join(repo, ".git"), 0o755)
+	t.Chdir(repo)
+
+	oldInteractive, oldRaw := interactive, makeRaw
+	interactive = func() bool { return true }
+	makeRaw = func() (func(), error) {
+		if raw {
+			return func() {}, nil
+		}
+		return nil, errors.New("not a raw terminal")
+	}
+	r, w, _ := os.Pipe()
+	w.WriteString(input)
+	w.Close()
+	oldStdin := os.Stdin
+	os.Stdin = r
+	t.Cleanup(func() { interactive, makeRaw, os.Stdin = oldInteractive, oldRaw, oldStdin; r.Close() })
+	return home, repo
+}
+
+// Arrow keys: Claude Code comes ticked (found), down and space tick Codex, enter confirms; up picks "this repo".
+func TestInitAsksWithArrowKeys(t *testing.T) {
+	_, repo := askEnv(t, "\x1b[B \r\x1b[A\r", true)
+	code, out := captureStdout(t, func() int { return Init(nil) })
+	if code != 0 {
+		t.Fatalf("init exit %d: %s", code, out)
+	}
+	if !hasPawsHook(filepath.Join(repo, ".claude", "settings.json")) || !hasPawsHook(filepath.Join(repo, ".codex", "hooks.json")) {
+		t.Errorf("both agents in this repo:\n%s", out)
+	}
+	if !strings.Contains(out, "Claude Code (found)") || !strings.Contains(out, "paws is set up for:") || !strings.Contains(out, "Codex") {
+		t.Errorf("the menu marks what it found and the end says what was set up where:\n%s", out)
+	}
+	if strings.Count(out, "asks you to trust a repo's hook in each repo") != 1 {
+		t.Errorf("Codex in this repo only: say once that it asks to trust the hook in each repo:\n%s", out)
+	}
+	for _, l := range strings.Split(out, "\n") {
+		if len(l) > 100 && !strings.Contains(l, "\x1b") {
+			t.Errorf("a line wraps at 100 columns: %q", l)
+		}
+	}
+}
+
+// With Codex picked, enter on the scope question means every repo: Codex trusts a global hook once.
+func TestInitWithCodexDefaultsToEveryRepo(t *testing.T) {
+	home, repo := askEnv(t, "\x1b[B \r\r", true)
+	code, out := captureStdout(t, func() int { return Init(nil) })
+	if code != 0 || !hasPawsHook(filepath.Join(home, ".codex", "hooks.json")) || !hasPawsHook(filepath.Join(home, ".claude", "settings.json")) {
+		t.Fatalf("both agents, every repo: exit %d\n%s", code, out)
+	}
+	if hasPawsHook(filepath.Join(repo, ".codex", "hooks.json")) || strings.Contains(out, "in each repo") {
+		t.Errorf("nothing in the repo, and no per-repo trust note:\n%s", out)
+	}
+	data, _ := os.ReadFile(filepath.Join(home, ".codex", "hooks.json"))
+	if strings.Contains(string(data), "command -v") {
+		t.Errorf("a global hook has no install guard, so its command stays the same across versions: %s", data)
+	}
+}
+
+// Enter with no agent ticked stays on the list and says why; space ticks one again.
+func TestInitNeedsAnAgent(t *testing.T) {
+	_, repo := askEnv(t, " \r \r\r", true)
+	code, out := captureStdout(t, func() int { return Init(nil) })
+	if code != 0 || !strings.Contains(out, "pick at least one agent") || !hasPawsHook(filepath.Join(repo, ".claude", "settings.json")) {
+		t.Errorf("init exit %d:\n%s", code, out)
+	}
+}
+
+// Without raw mode the same questions are numbered: both agents, every repo.
+func TestInitAsksWithNumbers(t *testing.T) {
+	home, repo := askEnv(t, "1,2\n2\n", false)
+	if code, out := captureStdout(t, func() int { return Init(nil) }); code != 0 {
+		t.Fatalf("init exit %d: %s", code, out)
+	}
+	if !hasPawsHook(filepath.Join(home, ".claude", "settings.json")) || !hasPawsHook(filepath.Join(home, ".codex", "hooks.json")) {
+		t.Error("both agents, global")
+	}
+	if hasPawsHook(filepath.Join(repo, ".claude", "settings.json")) {
+		t.Error("global writes nothing in the repo")
+	}
+}
+
+// A bad answer asks again; Ctrl-C in the menu sets up nothing.
+func TestInitAskAgainAndCancel(t *testing.T) {
+	_, repo := askEnv(t, "7\n\n\n", false)
+	if code, out := captureStdout(t, func() int { return Init(nil) }); code != 0 || !strings.Contains(out, "Pick numbers from 1 to 2") {
+		t.Fatalf("a bad answer asks again: exit %d\n%s", code, out)
+	}
+	if !hasPawsHook(filepath.Join(repo, ".claude", "settings.json")) || hasPawsHook(filepath.Join(repo, ".codex", "hooks.json")) {
+		t.Error("enter takes the defaults: Claude Code, this repo")
+	}
+	_, repo = askEnv(t, "\x03", true)
+	if code, _ := captureStdout(t, func() int { return Init(nil) }); code != 1 || hasPawsHook(filepath.Join(repo, ".claude", "settings.json")) {
+		t.Errorf("Ctrl-C sets up nothing: exit %d", code)
+	}
+}
+
+// Flags skip the questions: a comma list or repeated --agent, --project; conflicting flags fail.
+func TestInitFlagsSkipTheQuestions(t *testing.T) {
+	_, repo := askEnv(t, "", true) // a terminal, but nothing to read: a question would cancel
+	if code, out := captureStdout(t, func() int { return Init([]string{"--agent", "claude,codex", "--project"}) }); code != 0 {
+		t.Fatalf("init exit %d: %s", code, out)
+	}
+	if !hasPawsHook(filepath.Join(repo, ".claude", "settings.json")) || !hasPawsHook(filepath.Join(repo, ".codex", "hooks.json")) {
+		t.Error("--agent claude,codex --project")
+	}
+	for _, args := range [][]string{{"--global", "--project"}, {"--agent", "claude", "--agent", "codex", "--settings", "x.json"}, {"--agent", "cursor"}} {
+		if code, _ := captureStdout(t, func() int { return Init(args) }); code != 2 {
+			t.Errorf("%v: want exit 2, got %d", args, code)
+		}
+	}
+}
+
+// No terminal and no flags: Claude Code in this repo, as before, without a question.
+func TestInitWithoutATerminalKeepsTheDefault(t *testing.T) {
+	_, repo := askEnv(t, "", true)
+	interactive = func() bool { return false }
+	if code, out := captureStdout(t, func() int { return Init(nil) }); code != 0 {
+		t.Fatalf("init exit %d: %s", code, out)
+	}
+	if !hasPawsHook(filepath.Join(repo, ".claude", "settings.json")) || hasPawsHook(filepath.Join(repo, ".codex", "hooks.json")) {
+		t.Error("Claude Code in this repo only")
+	}
+}
+
+// Uninstall asks the same way: here Codex only, this repo only, then the usual confirm.
+func TestUninstallAsksWhichAgents(t *testing.T) {
+	_, repo := askEnv(t, "2\n2\ny\n", false)
+	interactive = func() bool { return false }
+	captureStdout(t, func() int { return Init([]string{"--agent", "claude,codex"}) })
+	interactive = func() bool { return true }
+	code, out := captureStdout(t, func() int { return Uninstall(nil) })
+	if code != 0 {
+		t.Fatalf("uninstall exit %d: %s", code, out)
+	}
+	if hasPawsHook(filepath.Join(repo, ".codex", "hooks.json")) {
+		t.Errorf("the Codex hook goes:\n%s", out)
+	}
+	if !hasPawsHook(filepath.Join(repo, ".claude", "settings.json")) {
+		t.Errorf("Claude Code wasn't picked: its hook stays:\n%s", out)
+	}
+}
+
+// Removing paws from Claude Code only, while Codex still runs it, takes Claude Code's hook and keeps the rules.
+func TestUninstallClaudeOnlyKeepsWhatCodexShares(t *testing.T) {
+	_, repo := askEnv(t, "1\n2\ny\n", false)
+	interactive = func() bool { return false }
+	captureStdout(t, func() int { return Init([]string{"--agent", "claude,codex"}) })
+	rule := filepath.Join(repo, ".paws", "packs", "writing", "writing", "r.md")
+	writeFile(t, rule, "---\nname: r\nevent: pre-tool\naction:\n  type: require-skill\n  skill: s\n---\n")
+	interactive = func() bool { return true }
+	code, out := captureStdout(t, func() int { return Uninstall(nil) })
+	if code != 0 {
+		t.Fatalf("uninstall exit %d: %s", code, out)
+	}
+	if hasPawsHook(filepath.Join(repo, ".claude", "settings.json")) || !hasPawsHook(filepath.Join(repo, ".codex", "hooks.json")) {
+		t.Errorf("Claude Code's hook goes, Codex's stays:\n%s", out)
+	}
+	if _, err := os.Stat(rule); err != nil || !strings.Contains(out, "Codex still runs paws") {
+		t.Errorf("the pack rules Codex still uses stay: %v\n%s", err, out)
+	}
+}
+
+// A lone Esc in the menu is no key: the menu goes on and enter still confirms.
+func TestInitMenuIgnoresALoneEsc(t *testing.T) {
+	_, repo := askEnv(t, "\x1bx\r\r", true)
+	if code, out := captureStdout(t, func() int { return Init(nil) }); code != 0 {
+		t.Fatalf("init exit %d: %s", code, out)
+	}
+	if !hasPawsHook(filepath.Join(repo, ".claude", "settings.json")) {
+		t.Error("Esc then enter keeps the ticked default")
+	}
+}
+
+// Uninstall's agent list needs one ticked too.
+func TestUninstallNeedsAnAgent(t *testing.T) {
+	_, repo := askEnv(t, " \x1b[B \r \r\x1b[B\ry\n", true)
+	interactive = func() bool { return false }
+	captureStdout(t, func() int { return Init([]string{"--agent", "claude,codex"}) })
+	interactive = func() bool { return true }
+	code, out := captureStdout(t, func() int { return Uninstall(nil) })
+	if code != 0 || !strings.Contains(out, "pick at least one agent") {
+		t.Fatalf("uninstall exit %d:\n%s", code, out)
+	}
+	if hasPawsHook(filepath.Join(repo, ".codex", "hooks.json")) || !hasPawsHook(filepath.Join(repo, ".claude", "settings.json")) {
+		t.Errorf("Codex, this repo only, after the reminder:\n%s", out)
+	}
+}
+
+// A Codex-only setup, uninstalled from Codex: what all agents share goes too, as no agent still runs paws.
+func TestUninstallCodexOnlyRemovesWhatItShared(t *testing.T) {
+	_, repo := askEnv(t, "\r\ry\n", true)
+	interactive = func() bool { return false }
+	captureStdout(t, func() int { return Init([]string{"--agent", "codex", "--project"}) })
+	captureStdout(t, func() int { return Skill([]string{"--settings", filepath.Join(repo, ".claude", "settings.json")}) })
+	skill := filepath.Join(repo, ".claude", "skills", "paws")
+	if _, err := os.Stat(skill); err != nil {
+		t.Fatalf("paws skill not installed: %v", err)
+	}
+	interactive = func() bool { return true }
+	code, out := captureStdout(t, func() int { return Uninstall(nil) })
+	if code != 0 || hasPawsHook(filepath.Join(repo, ".codex", "hooks.json")) {
+		t.Fatalf("uninstall exit %d:\n%s", code, out)
+	}
+	if _, err := os.Stat(skill); err == nil {
+		t.Errorf("no agent runs paws any more: the skills paws installed go too\n%s", out)
+	}
+}
+
+// Skill copies paws made for Codex tick Codex in uninstall's list even after its hook is gone, so they go too.
+func TestUninstallTicksCodexForItsSkillCopies(t *testing.T) {
+	_, repo := askEnv(t, "\r\ry\n", true)
+	interactive = func() bool { return false }
+	captureStdout(t, func() int { return Init([]string{"--agent", "codex", "--project"}) })
+	captureStdout(t, func() int { return Uninstall([]string{"--hook-only", "--agent", "codex"}) })
+	captureStdout(t, func() int { return Skill([]string{"--agent", "codex"}) })
+	copy := filepath.Join(repo, ".agents", "skills", "paws")
+	if _, err := os.Stat(copy); err != nil || hasPawsHook(filepath.Join(repo, ".codex", "hooks.json")) {
+		t.Fatalf("set-up: a Codex skill copy without its hook: %v", err)
+	}
+	interactive = func() bool { return true }
+	code, out := captureStdout(t, func() int { return Uninstall(nil) })
+	if code != 0 || !strings.Contains(out, "Codex (paws set up)") {
+		t.Fatalf("uninstall exit %d:\n%s", code, out)
+	}
+	if _, err := os.Stat(copy); err == nil {
+		t.Errorf("the Codex skill copy goes:\n%s", out)
+	}
+}

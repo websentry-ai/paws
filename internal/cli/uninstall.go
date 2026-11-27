@@ -1,7 +1,6 @@
 package cli
 
 import (
-	"bufio"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -12,6 +11,8 @@ import (
 	"strings"
 
 	"github.com/websentry-ai/paws/internal/gate"
+	"github.com/websentry-ai/paws/internal/harness"
+	"github.com/websentry-ai/paws/internal/hook"
 	"github.com/websentry-ai/paws/internal/pack"
 )
 
@@ -44,6 +45,10 @@ func parseUninstallFlags(args []string) (uninstallFlags, error) {
 			f.yes = true
 		case "--hook-only":
 			f.hookOnly = true
+		case "--agent":
+			// The full uninstall covers Claude Code; another harness's hook goes through the hook-only path.
+			f.hookOnly = true
+			f.rest = append(f.rest, a)
 		default:
 			f.rest = append(f.rest, a)
 		}
@@ -60,7 +65,7 @@ func parseUninstallFlags(args []string) (uninstallFlags, error) {
 func Uninstall(args []string) int {
 	f, err := parseUninstallFlags(args)
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "paws: %v\nusage: unbound-paws uninstall [--project] [--global] [--keep-skills] [--yes]\n       unbound-paws uninstall --hook-only [--global | --settings <path>]\n", err)
+		fmt.Fprintf(os.Stderr, "paws: %v\nusage: unbound-paws uninstall [--project] [--global] [--keep-skills] [--yes]\n       unbound-paws uninstall --hook-only [--agent codex] [--global | --settings <path>]\n", err)
 		return 2
 	}
 	if f.hookOnly {
@@ -73,15 +78,33 @@ func Uninstall(args []string) int {
 		}
 		return uninstallHookOnly(f.rest)
 	}
+	c := newChooser()
+	agents := map[harness.Adapter]bool{} // the harnesses to remove paws from; empty is all of them
+	if !f.project && !f.global && !f.yes && interactive() {
+		var err error
+		if agents, f.project, f.global, err = askUninstall(c); err != nil {
+			fmt.Fprintln(os.Stderr, "paws: nothing removed")
+			return 1
+		}
+	}
+	all := len(agents) == 0
+	claude := all || agents[defaultAdapter()]
 	if !f.project && !f.global {
 		f.project, f.global = true, true
+	}
+	cwd, _ := os.Getwd()
+	root := projectRoot(cwd)
+	// An agent left unticked that still runs paws keeps what every agent shares: then Claude Code loses only its hook.
+	staying := ""
+	for _, a := range adapters {
+		if a != defaultAdapter() && !all && !agents[a] && (hasPawsHook(a.HookFile(false, root)) || hasPawsHook(a.HookFile(true, ""))) {
+			staying = a.Title()
+		}
 	}
 
 	var plan []removal
 	var keep []string
 	requiredCache = nil
-	cwd, _ := os.Getwd()
-	root := projectRoot(cwd)
 	user := pack.UserTarget(gate.UserDir())
 	// Outside a repo, in the home folder, some or all of the project's files are the global ones. Each part that
 	// is shared stays with the global scope.
@@ -90,17 +113,30 @@ func Uninstall(args []string) int {
 		fmt.Fprintln(os.Stderr, "paws: this folder is not in a repo, so its project files are your global ones. Run --project from a repo, or use --global.")
 		return 2
 	}
-	if f.global {
+	// What every agent shares (the login, portal and pack rules, pack state, the skills paws installed) goes with
+	// Claude Code's part, unless an agent that stays still runs paws: then Claude Code loses only its hook. A
+	// Codex-only setup has no Claude Code hook to keep it, so it goes with Codex's.
+	claudeHooked := hasPawsHook(filepath.Join(root, ".claude", "settings.json")) ||
+		hasPawsHook(filepath.Join(root, ".claude", "settings.local.json")) || hasPawsHook(filepath.Join(hook.ConfigDir(), "settings.json"))
+	if !claude && claudeHooked {
+		staying = defaultAdapter().Title()
+	}
+	if claude && staying != "" {
+		plan, keep = planClaudeHooks(plan, keep, root, f.project, f.global, staying)
+	}
+	claude = staying == ""
+	if claude && f.global {
 		plan = planPortal(plan) // first: tier 2 steps run in plan order, and the skills below need the login gone first
 	}
-	if f.project {
+	if claude && f.project {
 		hooks := []string{filepath.Join(root, ".claude", "settings.json"), filepath.Join(root, ".claude", "settings.local.json")}
 		plan, keep = planScope(plan, keep, "project", hooks, pack.ProjectTarget(root), f.keepSkills, shared)
 	}
-	if f.global {
-		plan, keep = planScope(plan, keep, "global", []string{filepath.Join(userClaudeDir(), "settings.json")}, user, f.keepSkills, overlap{})
+	if claude && f.global {
+		plan, keep = planScope(plan, keep, "global", []string{filepath.Join(hook.ConfigDir(), "settings.json")}, user, f.keepSkills, overlap{})
 		keep = planUserFiles(keep)
 	}
+	plan, keep = planOtherHarnesses(plan, keep, root, f.project, f.global, f.keepSkills, func(a harness.Adapter) bool { return all || agents[a] })
 
 	if len(plan) == 0 {
 		fmt.Println("Nothing to remove: paws has not added anything here.")
@@ -111,14 +147,14 @@ func Uninstall(args []string) int {
 		}
 	}
 	if len(keep) > 0 {
-		fmt.Println("paws will keep:")
+		fmt.Println("\npaws will keep:")
 		for _, k := range keep {
 			fmt.Println("  " + k)
 		}
 	}
 	if len(plan) > 0 && !f.yes {
-		fmt.Print("Remove these? [y/N] ")
-		line, err := bufio.NewReader(os.Stdin).ReadString('\n')
+		fmt.Print("\nRemove these? [y/N] ")
+		line, err := c.in.ReadString('\n')
 		if err != nil && line == "" {
 			fmt.Println()
 			fmt.Fprintln(os.Stderr, "paws: no answer; nothing removed. Pass --yes to skip the question.")
@@ -164,9 +200,126 @@ To remove the binary itself, use the way you installed it:
   brew uninstall --cask unbound-paws
   rm ~/.local/bin/unbound-paws     # the install script
 
-A repo that committed the paws hook keeps it until you remove it there (unbound-paws uninstall, run in that repo).
+A repo that committed the paws hook keeps it until you remove it there:
+run unbound-paws uninstall in that repo.
 `)
 	return code
+}
+
+// planClaudeHooks removes only Claude Code's paws hooks, for the scopes being removed: another agent still runs
+// paws, so the rules, packs, skills and login it shares stay.
+func planClaudeHooks(plan []removal, keep []string, root string, project, global bool, staying string) ([]removal, []string) {
+	var files []string
+	if project {
+		files = append(files, filepath.Join(root, ".claude", "settings.json"), filepath.Join(root, ".claude", "settings.local.json"))
+	}
+	if global {
+		files = append(files, filepath.Join(hook.ConfigDir(), "settings.json"))
+	}
+	for _, path := range files {
+		if hasPawsHook(path) {
+			plan = append(plan, removal{what: "hook      " + tilde(path), run: func() error { return unregisterHook(path) }})
+		}
+	}
+	return plan, append(keep, fmt.Sprintf("rules, packs, skills and login (%s still runs paws)", staying))
+}
+
+// askUninstall asks which agents to remove paws from (the ones it is set up for ticked) and from where.
+func askUninstall(c *chooser) (agents map[harness.Adapter]bool, project, global bool, err error) {
+	cwd, _ := os.Getwd()
+	root := projectRoot(cwd)
+	all := installOrder()
+	labels, on := make([]string, len(all)), make([]bool, len(all))
+	for i, a := range all {
+		labels[i] = a.Title()
+		if pawsIn(a, root) {
+			labels[i], on[i] = labels[i]+" (paws set up)", true
+		}
+	}
+	if !anyOn(on) {
+		for i := range on {
+			on[i] = true
+		}
+	}
+	picked, err := c.many("Remove paws from which agents?", labels, on)
+	if err != nil {
+		return nil, false, false, err
+	}
+	agents = map[harness.Adapter]bool{}
+	for i, p := range picked {
+		agents[all[i]] = p
+	}
+	where, err := c.one("From where?", []string{"This repo and every repo (everything)", "This repo only", "Every repo (global) only"}, 0)
+	return agents, where != 2, where != 1, err
+}
+
+// pawsIn reports whether paws left anything for a harness: its hook, or skill copies it made (they stay when the
+// hook went some other way).
+func pawsIn(a harness.Adapter, root string) bool {
+	for _, hookFile := range []string{a.HookFile(false, root), a.HookFile(true, "")} {
+		if hasPawsHook(hookFile) {
+			return true
+		}
+		if dir := a.SkillsDirFor(hookFile); dir != "" && len(pack.PawsSkills(dir)) > 0 {
+			return true
+		}
+	}
+	return false
+}
+
+// planOtherHarnesses adds each other harness's paws hook and the skill copies paws made for it (Codex's
+// .codex/hooks.json and .agents/skills), for the scopes being removed. A copy goes even when its hook is gone.
+func planOtherHarnesses(plan []removal, keep []string, root string, project, global, keepSkills bool, chosen func(harness.Adapter) bool) ([]removal, []string) {
+	seen := map[string]bool{} // outside a repo, the project's files can be the global ones
+	for _, a := range adapters {
+		if a == defaultAdapter() || !chosen(a) {
+			continue
+		}
+		for _, g := range []bool{false, true} {
+			if g && !global || !g && !project {
+				continue
+			}
+			path := a.HookFile(g, root)
+			if seen[path] {
+				continue
+			}
+			seen[path] = true
+			if hasPawsHook(path) {
+				plan = append(plan, removal{what: "hook      " + tilde(path), run: func() error {
+					err := unregisterHook(path)
+					if !g {
+						pruneEmpty(filepath.Dir(path))
+					}
+					return err
+				}})
+			}
+			dir := a.SkillsDirFor(path)
+			if dir == "" || seen[dir] || isLink(dir) {
+				continue
+			}
+			seen[dir] = true
+			for _, s := range pack.PawsSkills(dir) {
+				s, at := s, filepath.Join(dir, s.Name)
+				switch {
+				case keepSkills:
+					keep = append(keep, fmt.Sprintf("skill     %s (--keep-skills)", tilde(at)))
+				case s.Edited:
+					keep = append(keep, fmt.Sprintf("skill     %s (paws installed it, but it was edited since)", tilde(at)))
+				default:
+					plan = append(plan, removal{what: "skill     " + tilde(at), tier: 2, run: func() error {
+						if requiredSkills()[s.Name] && !hasOtherCopy(s.Name, at) {
+							fmt.Printf("Kept %s: a rule that stays requires it\n", tilde(at))
+							return nil
+						}
+						_, err := pack.RemoveBundledSkill(dir, s.Name)
+						pruneEmpty(dir)
+						return err
+					}})
+				}
+			}
+		}
+	}
+	return plan, keep
 }
 
 // overlap says which of a project's files are also the user's: all of them when the project root is the home folder.
@@ -174,7 +327,7 @@ type overlap struct{ hooks, skills, packs bool }
 
 func overlaps(root string, project, user pack.Target) overlap {
 	return overlap{
-		hooks:  filepath.Clean(filepath.Join(root, ".claude")) == filepath.Clean(userClaudeDir()),
+		hooks:  filepath.Clean(filepath.Join(root, ".claude")) == filepath.Clean(hook.ConfigDir()),
 		skills: filepath.Clean(project.SkillsDir) == filepath.Clean(user.SkillsDir),
 		packs:  filepath.Clean(project.StateFile) == filepath.Clean(user.StateFile),
 	}
@@ -210,7 +363,7 @@ func planScope(plan []removal, keep []string, scope string, settings []string, t
 	if !claudeLinked {
 		for _, path := range settings {
 			path := path
-			if shared.hooks && path == filepath.Join(userClaudeDir(), "settings.json") {
+			if shared.hooks && path == filepath.Join(hook.ConfigDir(), "settings.json") {
 				continue // the global scope has this file
 			}
 			if project && isLink(path) {

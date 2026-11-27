@@ -288,7 +288,7 @@ func Login(args []string) int {
 		return 0
 	}
 	printSyncReport(rep)
-	if !hasPawsHook(filepath.Join(userClaudeDir(), "settings.json")) {
+	if !globallyHooked() {
 		fmt.Printf("Skills you turn on in the portal apply only where paws is registered. To use them in every project: %s init --global\n", cliName)
 	}
 	if scan && runScan(&c, days, false) != 0 {
@@ -539,4 +539,14 @@ func accountSyncFrom(api, account string) syncCursor {
 	first[key] = cur
 	_ = writePrivate(path, first)
 	return cur
+}
+
+// globallyHooked reports whether any harness runs paws in every project: its user hook file registers paws.
+func globallyHooked() bool {
+	for _, a := range adapters {
+		if hasPawsHook(a.HookFile(true, "")) {
+			return true
+		}
+	}
+	return false
 }

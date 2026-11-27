@@ -96,6 +96,7 @@ type applyResult struct {
 	Hash    string
 	Applied []string // skills whose rule files are in place
 	Skipped []string // "<skill>: <reason>"
+	Kept    []string // a catalog skill's folders that were already there and paws may not replace; left as they are
 	Pending bool     // a skill was left out; keep checking instead of recording the hash
 }
 
@@ -283,7 +284,8 @@ func applyConfig(cfg portalConfig, cwd string) (applyResult, error) {
 	if dir == "" {
 		return res, errors.New("no home directory for portal rules; set PAWS_HOME")
 	}
-	skillsDir := pack.UserTarget(gate.UserDir()).SkillsDir
+	stores := skillStores(true, "")
+	skillsDir := stores[0]
 	projectSkills := pack.ProjectTarget(projectRoot(cwd)).SkillsDir
 	want := map[string][]byte{} // path under dir -> content
 	var errs []error
@@ -291,7 +293,7 @@ func applyConfig(cfg portalConfig, cwd string) (applyResult, error) {
 		if s.Status == "off" {
 			continue
 		}
-		files, skip, err := skillFiles(s, skillsDir, dir)
+		files, skip, err := skillFiles(s, stores, dir, &res.Kept)
 		if err != nil {
 			errs = append(errs, fmt.Errorf("skill %s: %w", s.Name, err))
 		}
@@ -320,8 +322,9 @@ func applyConfig(cfg portalConfig, cwd string) (applyResult, error) {
 }
 
 // skillFiles installs a skill when it comes from the catalog and returns its rule files.
-// skip says why some or all of it was left out; err is a failure worth retrying.
-func skillFiles(s portalSkill, skillsDir, dir string) (map[string][]byte, string, error) {
+// skip says why some or all of it was left out; err is a failure worth retrying. kept gets the skill's folders paws
+// left as they are.
+func skillFiles(s portalSkill, stores []string, dir string, kept *[]string) (map[string][]byte, string, error) {
 	if !catalog.ValidSkillName(s.Name) {
 		return nil, "invalid skill name", nil
 	}
@@ -338,7 +341,7 @@ func skillFiles(s portalSkill, skillsDir, dir string) (map[string][]byte, string
 		}
 		digest = "digests/" + s.Name + ".md"
 		files[digest] = []byte(text)
-	} else if skip, err := prepareSkill(s, skillsDir); skip != "" {
+	} else if skip, err := prepareSkill(s, stores, kept); skip != "" {
 		return nil, skip, err
 	} else {
 		installErr = err
@@ -373,9 +376,11 @@ func hasSkill(name string, skillsDirs ...string) bool {
 	return false
 }
 
-// prepareSkill installs a full skill before its rules go live. A non-empty skip means its
-// rules must not be written; an error with no skip means an older copy serves meanwhile.
-func prepareSkill(s portalSkill, skillsDir string) (string, error) {
+// prepareSkill installs a full skill into the first of stores, and copies it into the rest, before its rules go
+// live. A non-empty skip means its rules must not be written; an error with no skip means an older copy serves
+// meanwhile. A catalog skill's folder that is the user's own or edited is left as is and added to kept.
+func prepareSkill(s portalSkill, stores []string, kept *[]string) (string, error) {
+	skillsDir := stores[0]
 	outcome, err := installPortalSkill(s, skillsDir)
 	_, serr := os.Stat(filepath.Join(skillsDir, s.Name))
 	switch {
@@ -388,10 +393,19 @@ func prepareSkill(s portalSkill, skillsDir string) (string, error) {
 	case outcome == badPin:
 		return "its pin is not a github.com repo at a commit with a content hash; not installed", nil
 	case err == nil:
+		if outcome == pack.BundledKept {
+			// As with paws add, a copy the user owns or edited is not copied on as paws's.
+			*kept = append(*kept, filepath.Join(skillsDir, s.Name))
+			return "", nil
+		}
 		// The other harnesses that run paws read their own folders: each gets a copy.
-		for _, m := range skillMirrors(true, "") {
-			if _, err := pack.MirrorSkill(skillsDir, m, s.Name); err != nil {
+		for _, m := range stores[1:] {
+			copied, err := pack.MirrorSkill(skillsDir, m, s.Name)
+			if err != nil {
 				return "", fmt.Errorf("copy to %s: %w", m, err)
+			}
+			if !copied && outcome != "" && fileExists(filepath.Join(m, s.Name)) {
+				*kept = append(*kept, filepath.Join(m, s.Name))
 			}
 		}
 		return "", nil

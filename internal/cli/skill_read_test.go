@@ -350,6 +350,10 @@ func TestACutReadCoversOnlyWhatTheAgentSaw(t *testing.T) {
 	if out := gateCall(t, "Bash", push, log([2]string{"cat " + md, preview}, rest)); out != "{}" {
 		t.Errorf("the preview's 40 lines and lines 41-1000 cover it, got %s", out)
 	}
+	// tail -n 1000 of the 1000 lines starts at line 1: its preview covers lines 1-40 as cat's does.
+	if out := gateCall(t, "Bash", push, log([2]string{"tail -n 1000 " + md, preview}, rest)); out != "{}" {
+		t.Errorf("a cut tail -n 1000 shows lines 1-40; with 41-1000 that covers it, got %s", out)
+	}
 	codexCut := "rule line 1\nrule line 2\n…48211 tokens truncated…\nrule line 1000\n"
 	if out := gateCall(t, "Bash", push, log([2]string{"cat " + md, codexCut})); !strings.Contains(out, `"deny"`) {
 		t.Errorf("an output cut in the middle covers only its first lines, got %s", out)

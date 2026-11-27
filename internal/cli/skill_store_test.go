@@ -558,3 +558,25 @@ func TestKeptCopiesAreNamedInEveryFolder(t *testing.T) {
 		t.Error("the rule is written")
 	}
 }
+
+// A read of a skill in Codex's folder stops counting for Claude Code once that SKILL.md changes, as a read of one in
+// Claude Code's folders does.
+func TestClaudeReadOfACodexCopyExpiresWhenItChanges(t *testing.T) {
+	home, _ := storeEnv(t)
+	mustRun(t, Init, "--agent", "codex", "--global")
+	mine := ownSkill(t, filepath.Join(home, ".agents", "skills"), "humanizer", "my own humanizer\n")
+	mustRun(t, Add, "writing")
+	read := claudeRead(t, mine)
+	old := time.Now().Add(-time.Hour)
+	ts := old.UTC().Format(time.RFC3339Nano)
+	data, _ := os.ReadFile(read)
+	os.WriteFile(read, []byte(strings.ReplaceAll(string(data), `"isSidechain":false,`, `"isSidechain":false,"timestamp":"`+ts+`",`)), 0o600)
+	os.Chtimes(mine, old.Add(-time.Hour), old.Add(-time.Hour))
+	if r := claudeDeny(t, prCreate, read); r != "" {
+		t.Errorf("a read after the last change loads it, got %q", r)
+	}
+	os.Chtimes(mine, time.Now(), time.Now())
+	if r := claudeDeny(t, prCreate, read); r == "" {
+		t.Error("the SKILL.md changed after the read: the call needs a new read")
+	}
+}

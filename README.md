@@ -47,7 +47,8 @@ unbound-paws explain 'gh pr create --fill'
 ### Codex CLI
 
 ```bash
-unbound-paws init --agent codex            # this repo's .codex/hooks.json; --global for ~/.codex/hooks.json
+unbound-paws init --agent codex --global   # ~/.codex/hooks.json: Codex asks you to trust it once
+unbound-paws init --agent codex            # this repo's .codex/hooks.json: trusted in each repo
 unbound-paws init --agent claude,codex     # both, without the questions
 ```
 

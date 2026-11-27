@@ -459,3 +459,21 @@ func TestTurnCallsGradesTheStopsTurn(t *testing.T) {
 		t.Errorf("want t2's one call, got %+v %v", calls, err)
 	}
 }
+
+// A wrapper that runs the next word as the command still runs apply_patch; a path two runs both name is no one's.
+func TestShellPatchWrappersAndAmbiguousResults(t *testing.T) {
+	h := parse(t, stdin(t, "PreToolUse", "t1", map[string]any{"tool_name": "Bash", "tool_input": map[string]any{
+		"command": "command apply_patch <<'EOF'\n*** Begin Patch\n*** Add File: migrations/1.sql\n+x\n*** End Patch\nEOF"}}))
+	if len(h.Calls) != 2 || h.Calls[1].Target != "/repo/migrations/1.sql" {
+		t.Errorf("command apply_patch: want a Write of /repo/migrations/1.sql, got %+v", h.Calls)
+	}
+	ledgerEnv(t)
+	cmd := "cd a && apply_patch <<'EOF'\n*** Begin Patch\n*** Update File: x_test.go\n@@\n+x\n*** End Patch\nEOF\ncd ../b && apply_patch <<'EOF'\n*** Begin Patch\n*** Update File: x_test.go\n@@\n+y\n*** End Patch\nEOF"
+	observe(t, stdin(t, "PreToolUse", "t1", bashCall("p1", cmd)), gate.Decision{})
+	post := bashCall("p1", cmd)
+	post["tool_response"] = "Failed to find expected lines\nSuccess. Updated the following files:\nM x_test.go\n"
+	observe(t, stdin(t, "PostToolUse", "t1", post), gate.Decision{})
+	if parse(t, stdin(t, "PreToolUse", "t1", bashCall("c9", "ls"))).Calls[0].Log.EditedMatching(regexp.MustCompile(`/a/x_test\.go$`)) {
+		t.Error("which run changed x_test.go is unknown: a's copy isn't credited")
+	}
+}

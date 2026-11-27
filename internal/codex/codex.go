@@ -9,6 +9,7 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"slices"
 	"sort"
 	"strings"
 	"time"
@@ -165,8 +166,9 @@ var chainSep = regexp.MustCompile(`&&|\|\||[;\n]`)
 // shellPatch is one apply_patch run in a shell command: its patch text and the folder it runs in.
 type shellPatch struct{ text, dir string }
 
-// applyPatchCmd finds apply_patch where a command starts: at the line's start, after ; & | or (, as a whole word.
-var applyPatchCmd = regexp.MustCompile(`(?m)(?:^|[;&|(])[ \t]*(apply_patch)(?:[ \t<]|$)`)
+// applyPatchCmd finds apply_patch where a command starts: at the line's start, after ; & | or (, as a whole word,
+// behind any of the wrappers that run the next word as the command (command apply_patch, exec, env, nohup, time).
+var applyPatchCmd = regexp.MustCompile(`(?m)(?:^|[;&|(])[ \t]*(?:(?:command|builtin|exec|env|nohup|time|sudo)[ \t]+)*(apply_patch)(?:[ \t<]|$)`)
 
 // shellPatches are the apply_patch runs of a shell command, each with the folder the commands before it moved to.
 func shellPatches(cmd, cwd string) []shellPatch {
@@ -380,12 +382,18 @@ func patchedFiles(raw json.RawMessage, runs []shellPatch) []string {
 				files = append(files, filepath.Clean(path))
 				continue
 			}
+			// When runs in different folders each name this path, the list can't say which one changed it: credit
+			// none, so a no-edit-matching rule still applies rather than passing on an edit that may not have happened.
+			var owners []string
 			for _, run := range runs {
 				for _, f := range parsePatch(run.text) {
-					if filepath.Clean(f.Path) == filepath.Clean(path) || filepath.Join(run.dir, f.Path) == filepath.Join(run.dir, path) {
-						files = append(files, filepath.Join(run.dir, path))
+					if filepath.Clean(f.Path) == filepath.Clean(path) && !slices.Contains(owners, filepath.Join(run.dir, path)) {
+						owners = append(owners, filepath.Join(run.dir, path))
 					}
 				}
+			}
+			if len(owners) == 1 {
+				files = append(files, owners[0])
 			}
 		}
 	}

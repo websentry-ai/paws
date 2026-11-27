@@ -486,3 +486,18 @@ func TestShellPatchAliasAndCdDashDash(t *testing.T) {
 		t.Errorf("want a Write of /repo/migrations/1.sql, got %+v", h.Calls)
 	}
 }
+
+// A bare cd goes home.
+func TestShellPatchAfterBareCd(t *testing.T) {
+	t.Setenv("HOME", "/home/u")
+	h := parse(t, stdin(t, "PreToolUse", "t1", map[string]any{"tool_name": "Bash", "tool_input": map[string]any{
+		"command": "cd && apply_patch <<'EOF'\n*** Begin Patch\n*** Add File: notes.md\n+x\n*** End Patch\nEOF"}}))
+	if len(h.Calls) != 2 || h.Calls[1].Target != "/home/u/notes.md" {
+		t.Errorf("want /home/u/notes.md, got %+v", h.Calls)
+	}
+	h = parse(t, stdin(t, "PreToolUse", "t1", map[string]any{"tool_name": "Bash", "tool_input": map[string]any{
+		"command": "cdx foo && apply_patch <<'EOF'\n*** Begin Patch\n*** Add File: notes.md\n+x\n*** End Patch\nEOF"}}))
+	if len(h.Calls) != 2 || h.Calls[1].Target != "/repo/notes.md" {
+		t.Errorf("cdx is not cd: want /repo/notes.md, got %+v", h.Calls)
+	}
+}

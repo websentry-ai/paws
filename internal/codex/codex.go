@@ -158,7 +158,7 @@ func canonical(in *Input) []call {
 }
 
 // cdStep is one `cd <dir>` command of a chain.
-var cdStep = regexp.MustCompile(`^cd\s+(?:--\s+)?(?:'([^']*)'|"([^"]*)"|(\S+))$`)
+var cdStep = regexp.MustCompile(`^cd(?:\s+--)?(?:\s+(?:'([^']*)'|"([^"]*)"|(\S+)))?$`)
 
 // chainSep splits a command line into its commands.
 var chainSep = regexp.MustCompile(`&&|\|\||[;\n]`)
@@ -200,7 +200,11 @@ func patchDir(before, cwd string) string {
 		}
 		inner := strings.TrimRight(part, ") ")
 		if m := cdStep.FindStringSubmatch(inner); m != nil {
-			cwd = cdTo(m[1]+os.ExpandEnv(m[2]+m[3]), cwd) // "$DIR" and $DIR from the hook's environment; '$DIR' is literal
+			dir := m[1] + os.ExpandEnv(m[2]+m[3]) // "$DIR" and $DIR from the hook's environment; '$DIR' is literal
+			if m[1]+m[2]+m[3] == "" && !strings.ContainsAny(m[0], `'"`) {
+				dir, _ = os.UserHomeDir() // a bare cd goes home
+			}
+			cwd = cdTo(dir, cwd)
 		}
 		for closes := strings.Count(part[len(inner):], ")"); closes > 0 && len(outer) > 0; closes-- {
 			cwd, outer = outer[len(outer)-1], outer[:len(outer)-1] // the subshell ended: back where it began

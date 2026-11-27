@@ -365,7 +365,7 @@ func TestScanPairsASKILLmdReadWithItsSkillAction(t *testing.T) {
 	// A project skill, read by a relative path from the session's own folder: not the scan's.
 	project := filepath.Join(t.TempDir(), "acme")
 	os.MkdirAll(filepath.Join(project, ".git"), 0o755)
-	writeFile(t, filepath.Join(project, ".claude", "skills", "coreutils", "SKILL.md"), "# coreutils\n")
+	writeFile(t, filepath.Join(project, ".claude", "skills", "coreutils", "SKILL.md"), "# coreutils\n"+strings.Repeat("rule\n", 20))
 	cmd := "cat .claude/skills/coreutils/SKILL.md"
 	in, _ := json.Marshal(map[string]string{"command": cmd})
 	writeFile(t, filepath.Join(userHome, ".claude", "projects", "-Users-alice-acme", "sess-1.jsonl"),
@@ -394,5 +394,16 @@ func TestScanPairsASKILLmdReadWithItsSkillAction(t *testing.T) {
 	json.Unmarshal([]byte(dry), &got)
 	if len(got.Loaded) != 0 {
 		t.Errorf("a partial read is no load: loaded %+v", got.Loaded)
+	}
+	// A default Read of a skill past 2000 lines shows its first 2000 only: no load.
+	writeFile(t, filepath.Join(project, ".claude", "skills", "coreutils", "SKILL.md"), strings.Repeat("x\n", 2500))
+	whole, _ := json.Marshal(map[string]any{"file_path": filepath.Join(project, ".claude", "skills", "coreutils", "SKILL.md")})
+	writeFile(t, filepath.Join(userHome, ".claude", "projects", "-Users-alice-acme", "sess-1.jsonl"),
+		`{"type":"assistant","timestamp":"2026-11-03T09:00:00Z","cwd":"`+project+`","message":{"content":[{"type":"tool_use","id":"r4","name":"Read","input":`+string(whole)+`}]}}`+"\n")
+	_, dry = captureStdout(t, func() int { return Scan([]string{"--dry-run"}) })
+	got = historyUpload{}
+	json.Unmarshal([]byte(dry), &got)
+	if len(got.Loaded) != 0 {
+		t.Errorf("a default Read of a 2500-line skill is no load: loaded %+v", got.Loaded)
 	}
 }

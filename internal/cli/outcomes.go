@@ -162,8 +162,10 @@ func gradeCalls(cwd string, ev gate.Event, calls []outcome.Call, denies, allows 
 			rec["retry_command"] = gate.DescribeCall(gate.Event{Tool: ran.Tool, Target: ran.Target, Cwd: cwd})
 		}
 		gate.Stamp(rec, ev)
+		// The model that made the blocked call (a subagent's, or before a /model switch); the Stop's is another's.
+		delete(rec, "model")
 		if d.Model != "" {
-			rec["model"] = d.Model // the model that made the blocked call (a subagent's, or before a /model switch)
+			rec["model"] = d.Model
 		}
 		if d.AgentID != "" {
 			rec["agent_id"] = d.AgentID

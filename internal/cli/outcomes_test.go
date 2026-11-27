@@ -811,3 +811,39 @@ func TestOutcomeKeepsTheBlockedCallsModel(t *testing.T) {
 	}
 	t.Fatal("no outcome record")
 }
+
+// A deny logged without a model leaves the outcome without one: the Stop's model may be another call's.
+func TestOutcomeWithoutTheDenysModelHasNone(t *testing.T) {
+	home, _ := syncEnv(t)
+	cwd, _ := os.Getwd()
+	writeRule(t, filepath.Join(cwd, ".paws", "pre-tool", "rm-gate.md"), rmRule)
+	transcript := filepath.Join(t.TempDir(), "sess-q.jsonl")
+	event := map[string]any{"hook_event_name": "PreToolUse", "session_id": "sess-q", "transcript_path": transcript, "cwd": cwd,
+		"tool_name": "Bash", "tool_input": map[string]any{"command": "rm -rf build"}}
+	if out := runGate(t, event); !strings.Contains(out, `"deny"`) {
+		t.Fatalf("the rule didn't deny: %s", out)
+	}
+	start := time.Now().Add(-20 * time.Second)
+	transcriptLines(t, transcript, start, []struct {
+		cmd    string
+		result string
+		isErr  bool
+	}{
+		{"rm -rf build", "PreToolUse:Bash hook error: paws (rm-gate): load coreutils first", true},
+		{"rm -rf build", "", false},
+	})
+	f, _ := os.OpenFile(transcript, os.O_APPEND|os.O_WRONLY, 0o600)
+	f.WriteString(`{"type":"assistant","timestamp":"` + start.Add(5*time.Second).UTC().Format(time.RFC3339Nano) + `","message":{"model":"claude-haiku-4-5","content":[{"type":"text","text":"done"}]}}` + "\n")
+	f.Close()
+	denyAt(t, home, start.Add(1100*time.Millisecond))
+	runGate(t, map[string]any{"hook_event_name": "Stop", "session_id": "sess-q", "transcript_path": transcript, "cwd": cwd})
+	for _, rec := range auditLines(t, home) {
+		if rec["event"] == "outcome" {
+			if _, has := rec["model"]; has {
+				t.Errorf("the deny had no model; the outcome takes none, got %v", rec["model"])
+			}
+			return
+		}
+	}
+	t.Fatal("no outcome record")
+}

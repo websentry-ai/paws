@@ -36,9 +36,9 @@ func ToEvent(in *Input) gate.Event {
 	switch in.HookEventName {
 	case "PreToolUse":
 		ev.Kind = rule.KindTool
-		ev.SkillLoad = skillLoad(in, ev.Target)
+		ev.SkillLoad, ev.SkillWhole = skillLoad(in, ev.Target)
 	case "PostToolUse":
-		ev.SkillLoad = skillLoad(in, ev.Target)
+		ev.SkillLoad, ev.SkillWhole = skillLoad(in, ev.Target)
 	case "SessionStart":
 		ev.Kind = rule.KindSession
 	}
@@ -46,12 +46,16 @@ func ToEvent(in *Input) gate.Event {
 }
 
 // skillLoad names the skill a call loads: the Skill tool's skill, or the one whose SKILL.md it reads.
-func skillLoad(in *Input, target string) string {
+func skillLoad(in *Input, target string) (skill string, whole bool) {
 	if in.ToolName == "Skill" {
 		s, _ := in.ToolInput["skill"].(string)
-		return s
+		return s, s != ""
 	}
-	return gate.SkillRead(in.ToolName, target, in.CWD)
+	r, ok := gate.ReadOf(in.ToolName, target, in.ToolInput, in.CWD, true)
+	if !ok {
+		return "", false
+	}
+	return r.Skill, gate.Covered([]gate.FileRead{r})
 }
 
 // agentIDRe is what Claude Code's agent ids look like; anything else (a "/" or "..") could name a file

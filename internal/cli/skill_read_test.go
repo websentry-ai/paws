@@ -86,8 +86,8 @@ func TestReadingSKILLmdIsNeverGated(t *testing.T) {
 			audit = append(audit, rec["skill"].(string))
 		}
 	}
-	if len(audit) != 10 {
-		t.Errorf("every read of a SKILL.md logs skill_invoked, got %v", audit)
+	if len(audit) != 9 {
+		t.Errorf("each read of a whole SKILL.md logs skill_invoked (the later range, lines 241-480 of a 3-line file, loads nothing), got %v", audit)
 	}
 }
 

@@ -530,3 +530,13 @@ func TestShellPatchFileWrittenInTheSameCall(t *testing.T) {
 		t.Errorf("a here-string hid the cd: want /repo/migrations/4.sql, got %+v", h.Calls)
 	}
 }
+
+// A patch piped in from a file is gated like one read on stdin.
+func TestShellPatchPipedFromAFile(t *testing.T) {
+	dir := t.TempDir()
+	os.WriteFile(filepath.Join(dir, "fix.patch"), []byte("*** Begin Patch\n*** Update File: migrations/5.sql\n@@\n+y\n*** End Patch\n"), 0o644)
+	h := parse(t, stdin(t, "PreToolUse", "t1", map[string]any{"tool_name": "Bash", "cwd": dir, "tool_input": map[string]any{"command": "cat fix.patch | apply_patch"}}))
+	if len(h.Calls) != 2 || h.Calls[1].Target != filepath.Join(dir, "migrations", "5.sql") {
+		t.Errorf("want an Edit of migrations/5.sql, got %+v", h.Calls)
+	}
+}

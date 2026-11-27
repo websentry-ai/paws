@@ -182,6 +182,9 @@ func shellPatches(cmd, cwd string) []shellPatch {
 			end = starts[k+1]
 		}
 		run := shellPatch{text: cmd[at:end], dir: patchDir(cmd[:at], cwd)}
+		if m := pipedFrom.FindStringSubmatch(cmd[:at]); m != nil && !strings.Contains(run.text, "*** Begin Patch") {
+			run.text = readPatchFile(m[1], run.dir) // cat fix.patch | apply_patch: the patch is that file
+		}
 		if m := patchFromFile.FindStringSubmatch(run.text); m != nil {
 			// apply_patch < fix.patch: the patch is that file, as it is now, or as an earlier command in this call
 			// writes it (any patch text before the run).
@@ -195,16 +198,22 @@ func shellPatches(cmd, cwd string) []shellPatch {
 // patchBlock is a whole patch in a command's text: a here-document body that writes a patch file, say.
 var patchBlock = regexp.MustCompile(`(?s)\*\*\* Begin Patch.*?\*\*\* End Patch`)
 
+// pipedFrom is a `cat <file> |` right before an apply_patch: the patch it pipes in is that file.
+var pipedFrom = regexp.MustCompile(`(?:^|[;&(\n])[ \t]*cat[ \t]+([^\s|;&]+)[ \t]*\|[ \t]*(?:(?:command|builtin|exec|env|nohup|time|sudo|[A-Za-z_][A-Za-z0-9_]*=\S*)[ \t]+)*$`)
+
 // patchFromFile is an apply_patch that reads its patch from a file on stdin: apply_patch < fix.patch (not <<).
 var patchFromFile = regexp.MustCompile(`^apply_?patch[ \t]*<[ \t]*([^<\s]\S*)`)
 
-// readPatchFile is the patch in the file at p (relative to dir), "" when it can't be read or is too big to be one.
+// maxPatchFile bounds the patch file paws reads: far past any patch an agent writes, short of exhausting memory.
+const maxPatchFile = 256 << 20
+
+// readPatchFile is the patch in the file at p (relative to dir), "" when it can't be read.
 func readPatchFile(p, dir string) string {
 	p = strings.Trim(p, `'"`)
 	if !filepath.IsAbs(p) {
 		p = filepath.Join(dir, p)
 	}
-	if st, err := os.Stat(p); err != nil || !st.Mode().IsRegular() || st.Size() > maxRecordText*16 {
+	if st, err := os.Stat(p); err != nil || !st.Mode().IsRegular() || st.Size() > maxPatchFile {
 		return ""
 	}
 	data, _ := os.ReadFile(p)

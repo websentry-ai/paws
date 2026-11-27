@@ -198,7 +198,7 @@ func patchDir(before, cwd string) string {
 		}
 		inner := strings.TrimRight(part, ") ")
 		if m := cdStep.FindStringSubmatch(inner); m != nil {
-			cwd = cdTo(m[1]+m[2]+m[3], cwd)
+			cwd = cdTo(m[1]+os.ExpandEnv(m[2]+m[3]), cwd) // "$DIR" and $DIR from the hook's environment; '$DIR' is literal
 		}
 		for closes := strings.Count(part[len(inner):], ")"); closes > 0 && len(outer) > 0; closes-- {
 			cwd, outer = outer[len(outer)-1], outer[:len(outer)-1] // the subshell ended: back where it began
@@ -338,7 +338,13 @@ func (Adapter) Observe(h *harness.Hook, d gate.Decision) {
 				ok = len(files) > 0
 			}
 		}
-		appendRecords(own, []record{{Kind: "result", At: p.at, Turn: in.TurnID, ID: in.ToolUseID, OK: &ok, Files: files, Agent: in.AgentID}})
+		var out string
+		if json.Unmarshal(in.ToolResponse, &out) != nil {
+			out = string(in.ToolResponse)
+		}
+		c, shown := gate.ShownLines(out) // what the model got of a read
+		appendRecords(own, []record{{Kind: "result", At: p.at, Turn: in.TurnID, ID: in.ToolUseID, OK: &ok, Files: files,
+			Cut: c, Shown: shown, Agent: in.AgentID}})
 	case in.HookEventName == "UserPromptSubmit":
 		appendRecords(own, []record{{Kind: "turn", At: p.at, Turn: in.TurnID}})
 	case in.HookEventName == "PostCompact", in.HookEventName == "SessionStart" && in.Source == "compact":
@@ -364,22 +370,21 @@ func patchedFiles(raw json.RawMessage, dirs ...string) []string {
 	if json.Unmarshal(raw, &s) != nil {
 		s = string(raw)
 	}
-	_, list, ok := strings.Cut(s, "Success. Updated the following files:")
-	if !ok {
-		return nil
-	}
+	// Each apply_patch run prints its own success line and list, in the order the runs ran: the k-th list is the k-th
+	// patch's, relative to the folder that patch ran in.
+	blocks := strings.Split(s, "Success. Updated the following files:")[1:]
 	var files []string
-	for _, line := range strings.Split(list, "\n") {
-		op, path, ok := strings.Cut(strings.TrimSpace(line), " ")
-		if !ok || len(op) != 1 || !strings.Contains("AMD", op) {
-			continue
-		}
-		if filepath.IsAbs(path) {
+	for k, list := range blocks {
+		dir := dirs[min(k, len(dirs)-1)]
+		for _, line := range strings.Split(list, "\n") {
+			op, path, ok := strings.Cut(strings.TrimSpace(line), " ")
+			if !ok || len(op) != 1 || !strings.Contains("AMD", op) {
+				continue
+			}
+			if !filepath.IsAbs(path) {
+				path = filepath.Join(dir, path)
+			}
 			files = append(files, filepath.Clean(path))
-			continue
-		}
-		for _, d := range dirs { // a shell command's patches may each run in their own folder
-			files = append(files, filepath.Join(d, path))
 		}
 	}
 	return files

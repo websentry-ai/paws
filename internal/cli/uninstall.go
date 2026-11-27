@@ -106,6 +106,7 @@ func Uninstall(args []string) int {
 		plan, keep = planScope(plan, keep, "global", []string{filepath.Join(hook.ConfigDir(), "settings.json")}, user, f.keepSkills, overlap{})
 		keep = planUserFiles(keep)
 	}
+	plan, keep = planOtherHarnesses(plan, keep, root, f.project, f.global, f.keepSkills)
 
 	if len(plan) == 0 {
 		fmt.Println("Nothing to remove: paws has not added anything here.")
@@ -172,6 +173,61 @@ To remove the binary itself, use the way you installed it:
 A repo that committed the paws hook keeps it until you remove it there (unbound-paws uninstall, run in that repo).
 `)
 	return code
+}
+
+// planOtherHarnesses adds each other harness's paws hook and the skill copies paws made for it (Codex's
+// .codex/hooks.json and .agents/skills), for the scopes being removed. A copy goes even when its hook is gone.
+func planOtherHarnesses(plan []removal, keep []string, root string, project, global, keepSkills bool) ([]removal, []string) {
+	seen := map[string]bool{} // outside a repo, the project's files can be the global ones
+	for _, a := range adapters {
+		if a == defaultAdapter() {
+			continue
+		}
+		for _, g := range []bool{false, true} {
+			if g && !global || !g && !project {
+				continue
+			}
+			path := a.HookFile(g, root)
+			if seen[path] {
+				continue
+			}
+			seen[path] = true
+			if hasPawsHook(path) {
+				plan = append(plan, removal{what: "hook      " + tilde(path), run: func() error {
+					err := unregisterHook(path)
+					if !g {
+						pruneEmpty(filepath.Dir(path))
+					}
+					return err
+				}})
+			}
+			dir := a.SkillsDirFor(path)
+			if dir == "" || seen[dir] || isLink(dir) {
+				continue
+			}
+			seen[dir] = true
+			for _, s := range pack.PawsSkills(dir) {
+				s, at := s, filepath.Join(dir, s.Name)
+				switch {
+				case keepSkills:
+					keep = append(keep, fmt.Sprintf("skill     %s (--keep-skills)", tilde(at)))
+				case s.Edited:
+					keep = append(keep, fmt.Sprintf("skill     %s (paws installed it, but it was edited since)", tilde(at)))
+				default:
+					plan = append(plan, removal{what: "skill     " + tilde(at), tier: 2, run: func() error {
+						if requiredSkills()[s.Name] && !hasOtherCopy(s.Name, at) {
+							fmt.Printf("Kept %s: a rule that stays requires it\n", tilde(at))
+							return nil
+						}
+						_, err := pack.RemoveBundledSkill(dir, s.Name)
+						pruneEmpty(dir)
+						return err
+					}})
+				}
+			}
+		}
+	}
+	return plan, keep
 }
 
 // overlap says which of a project's files are also the user's: all of them when the project root is the home folder.

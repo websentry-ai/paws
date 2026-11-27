@@ -255,3 +255,32 @@ func TestPortalSkillInACodexFolderIsInstalled(t *testing.T) {
 		t.Errorf("want its rule file written, got %v", rules)
 	}
 }
+
+// The full uninstall takes out the Codex hook and the skill copies paws made for Codex too.
+func TestFullUninstallRemovesCodex(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	t.Setenv("CODEX_HOME", "")
+	t.Setenv("CLAUDE_CONFIG_DIR", "")
+	t.Setenv("PAWS_HOME", filepath.Join(home, ".paws"))
+	repo := filepath.Join(home, "repo")
+	os.MkdirAll(filepath.Join(repo, ".git"), 0o755)
+	t.Chdir(repo)
+	for _, args := range [][]string{{"--agent", "codex"}, {"--agent", "codex", "--global"}} {
+		captureStdout(t, func() int { return Init(args) })
+		captureStdout(t, func() int { return Skill(args) })
+	}
+	if code, out := captureStdout(t, func() int { return Uninstall([]string{"--yes"}) }); code != 0 {
+		t.Fatalf("uninstall exit %d: %s", code, out)
+	}
+	for _, p := range []string{filepath.Join(repo, ".codex", "hooks.json"), filepath.Join(home, ".codex", "hooks.json")} {
+		if hasPawsHook(p) {
+			t.Errorf("%s still runs paws", p)
+		}
+	}
+	for _, d := range []string{filepath.Join(repo, ".agents", "skills", "paws"), filepath.Join(home, ".agents", "skills", "paws")} {
+		if _, err := os.Stat(d); err == nil {
+			t.Errorf("%s is still there", d)
+		}
+	}
+}

@@ -391,3 +391,33 @@ func TestShellPatchesEachFromTheirFolder(t *testing.T) {
 		t.Errorf("want /repo/a/1.sql and /repo/b/2.sql, got %+v", h.Calls)
 	}
 }
+
+// apply_patch's file lists pair with their own runs' folders; a cd to $VAR resolves from the environment.
+func TestShellPatchResultsPairWithTheirFolders(t *testing.T) {
+	ledgerEnv(t)
+	t.Setenv("MIGS", "/repo/db")
+	cmd := "cd a && apply_patch <<'EOF'\n*** Begin Patch\n*** Update File: x_test.go\n@@\n+x\n*** End Patch\nEOF\ncd $MIGS && apply_patch <<'EOF'\n*** Begin Patch\n*** Update File: y.sql\n@@\n+y\n*** End Patch\nEOF"
+	h := parse(t, stdin(t, "PreToolUse", "t1", bashCall("p1", cmd)))
+	if len(h.Calls) != 3 || h.Calls[2].Target != "/repo/db/y.sql" {
+		t.Fatalf("cd $MIGS: want /repo/db/y.sql, got %+v", h.Calls)
+	}
+	Adapter{}.Observe(h, gate.Decision{})
+	post := bashCall("p1", cmd)
+	post["tool_response"] = "Success. Updated the following files:\nM x_test.go\nSuccess. Updated the following files:\nM y.sql\n"
+	observe(t, stdin(t, "PostToolUse", "t1", post), gate.Decision{})
+	log := parse(t, stdin(t, "PreToolUse", "t1", bashCall("c9", "ls"))).Calls[0].Log
+	if !log.EditedMatching(regexp.MustCompile(`^/repo/a/x_test\.go$`)) || !log.EditedMatching(regexp.MustCompile(`^/repo/db/y\.sql$`)) {
+		t.Error("each file is the edit of its own run's folder")
+	}
+}
+
+// A read Codex cut before the model saw it covers only the lines before the cut.
+func TestLedgerCutReadCoversWhatTheModelSaw(t *testing.T) {
+	md := ledgerEnv(t)
+	os.WriteFile(md, []byte(strings.Repeat("rule line\n", 300)), 0o644)
+	observe(t, stdin(t, "PreToolUse", "t1", bashCall("c1", "cat "+md)), gate.Decision{})
+	observe(t, stdin(t, "PostToolUse", "t1", result("c1", "rule line\nrule line\n…9000 tokens truncated…\nrule line\n")), gate.Decision{})
+	if parse(t, stdin(t, "PreToolUse", "t1", bashCall("c9", "git push"))).Calls[0].Log.SkillLoaded("git", 20) {
+		t.Error("two lines of 300 reached the model: not loaded")
+	}
+}

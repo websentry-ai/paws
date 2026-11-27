@@ -43,7 +43,9 @@ type record struct {
 	Denied    []string       `json:"denied,omitempty"` // a deny's paragraph openings, to find a digest's marker
 	OK        *bool          `json:"ok,omitempty"`     // result: the call succeeded
 	Files     []string       `json:"files,omitempty"`  // result of a patch: the files it changed
-	Agent     string         `json:"agent,omitempty"`  // the subagent's id; "" on the main thread
+	Cut       bool           `json:"cut,omitempty"`    // result: Codex showed the model only the first Shown lines
+	Shown     int            `json:"shown,omitempty"`
+	Agent     string         `json:"agent,omitempty"` // the subagent's id; "" on the main thread
 }
 
 // maxRecordText bounds a call's text and input in the ledger: a patch can be megabytes.
@@ -240,11 +242,20 @@ func (s session) SkillLoaded(skill string, window int) bool {
 	if skill == "" {
 		return false
 	}
-	ok := results(readLedger(s.own))
+	recs := readLedger(s.own)
+	ok := results(recs)
+	cut := map[string]record{} // each result that reached the model cut short
+	for _, r := range recs {
+		if r.Kind == "result" && r.Cut {
+			cut[r.ID] = r
+		}
+	}
 	var reads []gate.FileRead
 	for _, r := range s.window(window) {
 		if r.SkillLoad == skill && r.ReadFile != "" && r.Verdict == "allow" && ok[r.ID] {
-			reads = append(reads, gate.FileRead{Skill: skill, File: r.ReadFile, Lines: rule.Lines{From: r.ReadFrom, To: r.ReadTo}, At: r.At})
+			res := cut[r.ID]
+			reads = append(reads, gate.FileRead{Skill: skill, File: r.ReadFile, Lines: rule.Lines{From: r.ReadFrom, To: r.ReadTo}, At: r.At,
+				Cut: res.Cut, Shown: res.Shown})
 		}
 	}
 	return gate.Covered(reads)

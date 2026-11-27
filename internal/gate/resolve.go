@@ -26,7 +26,10 @@ type Event struct {
 	// SkillLoad names the skill this call loads (the Skill tool, or a read of the skill's SKILL.md); such a call is
 	// never gated, since it is the call that clears a require-skill gate.
 	SkillLoad string
-	Log       Session // the session's past; nil reads Transcript and Own as Claude Code logs
+	// SkillWhole is set when this call loads the skill on its own: the Skill tool, or a read of the whole SKILL.md
+	// (a chunk of it is still a skill read, never gated, but loads nothing alone).
+	SkillWhole bool
+	Log        Session // the session's past; nil reads Transcript and Own as Claude Code logs
 	Harness   Harness // skill folders and deny wording; nil is SkillTool
 }
 

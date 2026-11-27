@@ -80,7 +80,7 @@ func GateFor(args []string) (code int) {
 		a.Observe(h, gate.Decision{})
 		return allow()
 	case "PreToolUse":
-		if ev.SkillLoad != "" {
+		if ev.SkillLoad != "" && ev.SkillWhole { // a chunk of a SKILL.md loads nothing alone: not an invocation
 			gate.LogTelemetry("skill_invoked", ev, map[string]any{"skill": ev.SkillLoad})
 		}
 	}

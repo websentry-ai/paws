@@ -260,6 +260,7 @@ func logCalls(line []byte, session string) []history.Call {
 		} else {
 			in := Input{HookEventName: "PreToolUse", ToolName: b.Name, ToolInput: b.Input}
 			c.Target = in.Command() // what the gate would match a rule against
+			c.Partial = b.Name == "Read" && (b.Input["offset"] != nil || b.Input["limit"] != nil)
 		}
 		out = append(out, c)
 	}

@@ -383,10 +383,12 @@ func TestScanPairsASKILLmdReadWithItsSkillAction(t *testing.T) {
 	if len(got.Loaded) != 1 || got.Loaded[0].Name != "coreutils" {
 		t.Errorf("a read of coreutils' SKILL.md is a load of coreutils: loaded %+v", got.Loaded)
 	}
-	// head -n 5 reads part of it: no load.
+	// head -n 5, or a Read with a limit, reads part of it: no load.
 	in, _ = json.Marshal(map[string]string{"command": "head -n 5 .claude/skills/coreutils/SKILL.md"})
+	read, _ := json.Marshal(map[string]any{"file_path": filepath.Join(project, ".claude", "skills", "coreutils", "SKILL.md"), "limit": 5})
 	writeFile(t, filepath.Join(userHome, ".claude", "projects", "-Users-alice-acme", "sess-1.jsonl"),
-		`{"type":"assistant","timestamp":"2026-11-03T09:00:00Z","cwd":"`+project+`","message":{"content":[{"type":"tool_use","id":"r2","name":"Bash","input":`+string(in)+`}]}}`+"\n")
+		`{"type":"assistant","timestamp":"2026-11-03T09:00:00Z","cwd":"`+project+`","message":{"content":[{"type":"tool_use","id":"r2","name":"Bash","input":`+string(in)+`}]}}`+"\n"+
+			`{"type":"assistant","timestamp":"2026-11-03T09:00:01Z","cwd":"`+project+`","message":{"content":[{"type":"tool_use","id":"r3","name":"Read","input":`+string(read)+`}]}}`+"\n")
 	_, dry = captureStdout(t, func() int { return Scan([]string{"--dry-run"}) })
 	got = historyUpload{}
 	json.Unmarshal([]byte(dry), &got)

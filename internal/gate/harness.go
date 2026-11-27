@@ -162,6 +162,27 @@ type FileRead struct {
 	File  string
 	Lines rule.Lines
 	At    time.Time
+	// Cut is set when the harness showed the agent only the first Shown lines of the read's output (too long).
+	Cut   bool
+	Shown int
+}
+
+// cutMark is how Codex marks output it shortened before the model saw it: …N tokens truncated….
+var cutMark = regexp.MustCompile(`(?:…|\.\.\.)\s*\d+ (?:tokens|lines|chars|characters|bytes) truncated\s*(?:…|\.\.\.)`)
+
+// ShownLines reports whether a read's output reached the agent cut short, and how many whole lines from its start
+// did. Claude Code puts a <persisted-output> note with a 2KB preview in place of a long output; Codex cuts out the
+// middle and marks it.
+func ShownLines(output string) (cut bool, shown int) {
+	if rest, ok := strings.CutPrefix(output, "<persisted-output>"); ok {
+		_, preview, _ := strings.Cut(rest, "Preview (first ")
+		_, preview, _ = strings.Cut(preview, "\n")
+		return true, strings.Count(preview, "\n") // a line the preview cuts in two doesn't count
+	}
+	if loc := cutMark.FindStringIndex(output); loc != nil {
+		return true, strings.Count(output[:loc[0]], "\n")
+	}
+	return false, 0
 }
 
 // readLimit is how many lines Claude Code's Read prints when the call sets no limit.
@@ -225,6 +246,12 @@ func ReadOf(tool, target string, input map[string]any, cwd string, exists bool) 
 func Covered(reads []FileRead) bool {
 	byFile := map[string][]rule.Lines{}
 	for _, r := range reads {
+		if r.Cut { // only the first lines of the output reached the agent
+			if r.Lines.From < 0 || r.Shown < 1 {
+				continue
+			}
+			r.Lines.To = r.Lines.From + r.Shown - 1
+		}
 		if st, err := os.Stat(r.File); err == nil && !r.At.IsZero() && r.At.Before(st.ModTime()) {
 			continue // both times come from this machine's clock
 		}

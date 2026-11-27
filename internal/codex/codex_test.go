@@ -5,6 +5,7 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -752,5 +753,22 @@ func TestLedgerConcurrentSpawnsCountEachOther(t *testing.T) {
 	}
 	if n := parse(t, stdin(t, "PreToolUse", "t1", bashCall("c9", "ls"))).Calls[0].Log.AgentsSinceUserTurn(); n != 2 {
 		t.Errorf("a later call sees both spawns, got %d", n)
+	}
+}
+
+// A context line in an Update File hunk that reads like a header is the file's text, as Codex reads it; a header
+// right after Begin Patch or after an Add File's lines may be indented.
+func TestPatchContextLineIsNotAHeader(t *testing.T) {
+	got := parsePatch("*** Begin Patch\n*** Update File: README.md\n@@\n *** Update File: migrations/x.sql\n-old\n+new\n" +
+		"*** Add File: a.txt\n+a\n  *** Update File: b.txt\n@@\n+b\n*** End Patch")
+	var paths []string
+	for _, f := range got {
+		paths = append(paths, f.Path)
+	}
+	if !slices.Equal(paths, []string{"README.md", "a.txt", "b.txt"}) {
+		t.Errorf("want README.md, a.txt, b.txt; got %v", paths)
+	}
+	if got[0].Added != "new" {
+		t.Errorf("README.md adds %q, want new", got[0].Added)
 	}
 }

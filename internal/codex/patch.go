@@ -34,10 +34,19 @@ func parsePatch(patch string) []patchFile {
 		files = append(files, patchFile{Path: strings.TrimSpace(path), New: isNew})
 		cur = len(files) - 1
 	}
+	inUpdate := false // in an Update File's hunks, where a line that starts with " ", "+" or "-" is the file's text
 	for _, line := range strings.Split(strings.ReplaceAll(patch, "\r\n", "\n"), "\n") {
-		if t := strings.TrimSpace(line); strings.HasPrefix(t, "*** ") {
-			line = t // Codex reads a header with spaces around it too
+		if inUpdate && line != "" && strings.ContainsRune(" +-", rune(line[0])) {
+			if cur >= 0 && line[0] == '+' {
+				added = append(added, line[1:])
+			}
+			continue // " *** Update File: x" here is a context line, as Codex reads it
 		}
+		if t := strings.TrimSpace(line); strings.HasPrefix(t, "*** ") {
+			line = t // Codex reads a hunk's first line, its header, with spaces around it too
+		}
+		inUpdate = inUpdate && !strings.HasPrefix(line, "*** ") ||
+			strings.HasPrefix(line, "*** Update File: ") || strings.HasPrefix(line, "*** Move to: ")
 		switch {
 		case strings.HasPrefix(line, "*** Add File: "):
 			start(strings.TrimPrefix(line, "*** Add File: "), true)

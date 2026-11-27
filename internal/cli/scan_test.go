@@ -383,4 +383,14 @@ func TestScanPairsASKILLmdReadWithItsSkillAction(t *testing.T) {
 	if len(got.Loaded) != 1 || got.Loaded[0].Name != "coreutils" {
 		t.Errorf("a read of coreutils' SKILL.md is a load of coreutils: loaded %+v", got.Loaded)
 	}
+	// head -n 5 reads part of it: no load.
+	in, _ = json.Marshal(map[string]string{"command": "head -n 5 .claude/skills/coreutils/SKILL.md"})
+	writeFile(t, filepath.Join(userHome, ".claude", "projects", "-Users-alice-acme", "sess-1.jsonl"),
+		`{"type":"assistant","timestamp":"2026-11-03T09:00:00Z","cwd":"`+project+`","message":{"content":[{"type":"tool_use","id":"r2","name":"Bash","input":`+string(in)+`}]}}`+"\n")
+	_, dry = captureStdout(t, func() int { return Scan([]string{"--dry-run"}) })
+	got = historyUpload{}
+	json.Unmarshal([]byte(dry), &got)
+	if len(got.Loaded) != 0 {
+		t.Errorf("a partial read is no load: loaded %+v", got.Loaded)
+	}
 }

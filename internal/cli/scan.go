@@ -108,14 +108,16 @@ func (s skipSynced) Calls(since, until time.Time, fn func(history.Call)) (int, e
 	return len(counted), nil // sessions with a call left in
 }
 
-// skillReads is a history.Source whose calls that read a skill's SKILL.md are the skill loads they are, as the hook
-// logs them: they count toward `loaded`.
+// skillReads is a history.Source whose calls that read a whole SKILL.md are the skill loads they are: they count
+// toward `loaded`, like the Skill tool. A read of part of the file stays an ordinary call: alone it loads nothing.
 type skillReads struct{ history.Source }
 
 func (s skillReads) Calls(since, until time.Time, fn func(history.Call)) (int, error) {
 	return s.Source.Calls(since, until, func(c history.Call) {
-		if skill := gate.PastSkillRead(c.Tool, c.Target, c.Cwd); skill != "" { // from the session's folder
-			c.Tool, c.Target = history.SkillTool, skill
+		// From the session's folder. A Read takes no offset or limit here (history keeps only the path): its range is
+		// the default, the file's first 2000 lines.
+		if r, ok := gate.ReadOf(c.Tool, c.Target, nil, c.Cwd, false); ok && r.Lines.From == 1 && (r.Lines.To == 0 || c.Tool == "Read") {
+			c.Tool, c.Target = history.SkillTool, r.Skill
 		}
 		fn(c)
 	})

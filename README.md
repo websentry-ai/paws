@@ -33,8 +33,8 @@ Now ask Claude Code for a commit or a PR. You'll see:
 
 ```
 agent runs `git commit ...`  → paws denies once:
-  paws (rule humanizer-commit): this command needs the "humanizer" skill. Load it with the Skill tool,
-  then retry this exact command. This is paws working as intended, nothing is broken.
+  paws (rule humanizer-commit): this command needs the "humanizer" skill. Load it with the Skill tool and
+  follow it, then run the command again, changed if the skill says so. This is paws working as intended, nothing is broken.
 agent invokes humanizer, retries → the commit goes through, humanized
 ```
 

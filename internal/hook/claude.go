@@ -85,7 +85,7 @@ func (Claude) SkillTrees() []string { return []string{filepath.Join(ConfigDir(),
 // LoadSkills is the Skill tool sentence, plus the SKILL.md paths paws found: a skill installed after the session
 // started isn't in its skill list, so the Skill tool can't load it, and reading the file is the way in.
 func (Claude) LoadSkills(skills []gate.Skill, noun string) string {
-	return gate.SkillTool.LoadSkills(skills, noun) + readAlso(skills)
+	return gate.SkillToolInstruction(skills, noun) + readAlso(skills) + " " + gate.Reassurance + "."
 }
 
 func (Claude) LoadAtStart(s gate.Skill) string {

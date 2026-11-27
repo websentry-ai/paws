@@ -91,11 +91,21 @@ func (skillTool) SkillDirs(cwd string) []string {
 }
 
 func (skillTool) LoadSkills(skills []Skill, noun string) string {
-	pronoun := "it"
+	return SkillToolInstruction(skills, noun) + " " + Reassurance + "."
+}
+
+// SkillToolInstruction is how Claude Code loads skills and retries a call. It says to follow them and change the
+// call if they say so: told to retry "this exact command", a small model re-ran it unchanged.
+func SkillToolInstruction(skills []Skill, noun string) string {
+	it, says := "it", "the skill says"
 	if len(skills) > 1 {
-		pronoun = "them"
+		it, says = "them", "the skills say"
 	}
-	return fmt.Sprintf("Load %s with the Skill tool, then retry this exact %s. %s.", pronoun, noun, Reassurance)
+	verb := "make the " + noun
+	if noun == "command" {
+		verb = "run the command"
+	}
+	return fmt.Sprintf("Load %s with the Skill tool and follow %s, then %s again, changed if %s so.", it, it, verb, says)
 }
 
 // Reassurance ends a require-skill deny, after its instruction: the harness shows a deny as an error.

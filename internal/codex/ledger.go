@@ -300,14 +300,14 @@ func (s session) EditedMatching(glob *regexp.Regexp) bool {
 }
 
 // AgentsSinceUserTurn counts the subagents the main thread spawned in the current turn, the spawn being gated
-// included, as Claude Code's transcript holds it.
+// included, as Claude Code's transcript holds it. A spawn a hook denied started no agent and isn't counted.
 func (s session) AgentsSinceUserTurn() int {
 	n := 0
 	if s.spawning {
 		n++
 	}
 	for _, r := range readLedger(s.main) {
-		if r.Kind == "call" && r.Turn == s.turn && (r.Tool == "Agent" || r.Tool == "Task") {
+		if r.Kind == "call" && r.Turn == s.turn && r.Verdict != "deny" && (r.Tool == "Agent" || r.Tool == "Task") {
 			n++
 		}
 	}

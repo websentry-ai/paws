@@ -134,6 +134,19 @@ func TestRenderDenyForCodex(t *testing.T) {
 }
 
 // ledgerEnv is a scratch PAWS_HOME and an installed skill's SKILL.md.
+// TestMain keeps every test off the real home: a test that skips ledgerEnv still reads and writes temp folders.
+func TestMain(m *testing.M) {
+	tmp, err := os.MkdirTemp("", "paws-codex-test")
+	if err != nil {
+		panic(err)
+	}
+	os.Setenv("HOME", tmp)
+	os.Setenv("PAWS_HOME", filepath.Join(tmp, ".paws"))
+	code := m.Run()
+	os.RemoveAll(tmp)
+	os.Exit(code)
+}
+
 func ledgerEnv(t *testing.T) string {
 	t.Helper()
 	t.Setenv("PAWS_HOME", t.TempDir())
@@ -660,5 +673,47 @@ func TestSkillReadWholeOrPart(t *testing.T) {
 		if ev.SkillLoad != "git" || ev.SkillWhole != whole {
 			t.Errorf("%s: want skill git, whole %v; got %q, %v", cmd, whole, ev.SkillLoad, ev.SkillWhole)
 		}
+	}
+}
+
+// apply_patch run by another shell (bash -c, eval, xargs) is a shell patch too, and a cd with a redirect or inside
+// the string still moves it; a file named apply_patch or patch text mentioning it is not a run.
+func TestShellPatchInWrappersAndRedirectedCd(t *testing.T) {
+	patch := "<<'EOF'\n*** Begin Patch\n*** Add File: 1.sql\n+x\n*** End Patch\nEOF"
+	for cmd, want := range map[string]string{
+		"bash -c \"apply_patch " + patch + "\"":                 "/repo/1.sql",
+		"bash -lc \"cd migrations && apply_patch " + patch + "\"": "/repo/migrations/1.sql",
+		"eval 'cd migrations'; apply_patch " + patch:             "/repo/migrations/1.sql",
+		"cd migrations >/dev/null && apply_patch " + patch:       "/repo/migrations/1.sql",
+		"cd migrations 2>&1 && apply_patch " + patch:             "/repo/migrations/1.sql",
+		"cd >/dev/null migrations && apply_patch " + patch:       "/repo/migrations/1.sql",
+		"echo " + patch + " | xargs -0 apply_patch":              "/repo/1.sql",
+	} {
+		h := parse(t, stdin(t, "PreToolUse", "t1", map[string]any{"tool_name": "Bash", "tool_input": map[string]any{"command": cmd}}))
+		if !gated(h.Calls, want) {
+			t.Errorf("%q: want %s gated, got %+v", cmd, want, h.Calls)
+		}
+	}
+	h := parse(t, stdin(t, "PreToolUse", "t1", bashCall("c1", "python tools/apply_patch.py fix.diff && cat apply_patch.md")))
+	if len(h.Calls) != 1 {
+		t.Errorf("a file named apply_patch runs no patch, got %+v", h.Calls)
+	}
+	h = parse(t, stdin(t, "PreToolUse", "t1", bashCall("c2",
+		"apply_patch <<'EOF'\n*** Begin Patch\n*** Update File: docs.md\n@@\n+run apply_patch here\n*** Update File: b.md\n@@\n+y\n*** End Patch\nEOF")))
+	if !gated(h.Calls, "/repo/docs.md") || !gated(h.Calls, "/repo/b.md") {
+		t.Errorf("a patch that mentions apply_patch is still one patch, got %+v", h.Calls)
+	}
+}
+
+// A spawn a hook denied started no agent: the retry is still the first.
+func TestLedgerAgentCountSkipsDeniedSpawns(t *testing.T) {
+	ledgerEnv(t)
+	spawn := func(id string) map[string]any {
+		return map[string]any{"tool_name": "Agent", "tool_use_id": id, "tool_input": map[string]any{"prompt": "x"}}
+	}
+	observe(t, stdin(t, "PreToolUse", "t1", spawn("s1")), gate.Decision{Verdict: gate.Deny, Reason: "no"})
+	observe(t, stdin(t, "PreToolUse", "t1", spawn("s2")), gate.Decision{})
+	if n := parse(t, stdin(t, "PreToolUse", "t1", bashCall("c9", "ls"))).Calls[0].Log.AgentsSinceUserTurn(); n != 1 {
+		t.Errorf("one agent started, got %d", n)
 	}
 }

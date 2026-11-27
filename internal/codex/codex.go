@@ -177,6 +177,12 @@ func canonical(in *Input) []call {
 // cdStep is one `cd <dir>` command of a chain.
 var cdStep = regexp.MustCompile(`^cd(?:\s+--)?(?:\s+(?:'([^']*)'|"([^"]*)"|(\S+)))?$`)
 
+// redirect is a redirection in a command: >/dev/null, 2>&1, &>log, < in.
+var redirect = regexp.MustCompile(`\s*(?:\d*>>?|&>>?|\d*<)&?\s*(?:'[^']*'|"[^"]*"|[^\s'"]+)`)
+
+// shellWrap opens a command string another shell runs: bash -c ", sh -lc ', eval ".
+var shellWrap = regexp.MustCompile(`^(?:(?:ba|z|da|k)?sh(?:\s+-\w+)*\s+-\w*c\w*|eval)\s+['"]?`)
+
 // chainSep splits a command line into its commands.
 var chainSep = regexp.MustCompile(`&&|\|\||[;\n]`)
 
@@ -187,18 +193,20 @@ type shellPatch struct {
 	dirs []string // every folder it may run in: dir, and each folder the commands before it pass through
 }
 
-// applyPatchCmd finds apply_patch (or its applypatch alias) where a command starts (also after {, !, then, do,
-// else, elif): at the line's start, after ; & | or (, as a whole word,
-// behind any of the wrappers that run the next word as the command (command apply_patch, exec, env, nohup, time) and
-// any FOO=bar assignments.
-var applyPatchCmd = regexp.MustCompile(`(?m)(?:^|[;&|({!]|\b(?:then|do|else|elif)[ \t])[ \t]*(?:(?:command|builtin|exec|env|nohup|time|sudo|[A-Za-z_][A-Za-z0-9_]*=\S*)[ \t]+)*(apply_?patch)(?:[ \t<]|$)`)
+// applyPatchCmd finds apply_patch (or its applypatch alias) as a word anywhere in the command, not part of a
+// file name (apply_patch.py, tools/apply_patch). Every place a shell can run it (after a wrapper, in bash -c or
+// eval, behind xargs) counts: a mention that runs nothing gates only the patch text after it.
+var applyPatchCmd = regexp.MustCompile(`(?:^|[^\w./-])(apply_?patch)(?:[^\w./-]|$)`)
 
 // shellPatches are the apply_patch runs of a shell command, each with the folder the commands before it moved to.
 func shellPatches(cmd, cwd string) []shellPatch {
 	var out []shellPatch
 	var starts []int // where each apply_patch command begins: not "apply_patch" inside a file name
+	blocks := patchBlock.FindAllStringIndex(cmd, -1)
 	for _, m := range applyPatchCmd.FindAllStringSubmatchIndex(cmd, -1) {
-		starts = append(starts, m[2])
+		if !slices.ContainsFunc(blocks, func(b []int) bool { return b[0] < m[2] && m[2] < b[1] }) { // not patch text
+			starts = append(starts, m[2])
+		}
 	}
 	for k, at := range starts {
 		end := len(cmd)
@@ -214,6 +222,10 @@ func shellPatches(cmd, cwd string) []shellPatch {
 			file = m[1]
 		} else if m := pipedFrom.FindStringSubmatch(cmd[:at]); m != nil && !strings.Contains(run.text, "*** Begin Patch") {
 			file = m[1]
+		}
+		if file == "" && !strings.Contains(run.text, "*** Begin Patch") {
+			// No patch of its own: it may get one piped in (echo ... | xargs apply_patch). Any patch text before it.
+			run.text = strings.Join(append(patchBlock.FindAllString(cmd[:at], -1), run.text), "\n")
 		}
 		if file != "" {
 			if !strings.HasPrefix(file, "'") { // "$F" and $F expand; '$F' is literal
@@ -278,7 +290,14 @@ func patchDir(before, cwd string) (string, []string) {
 			outer, part = append(outer, frame{cwd, slices.Clone(here)}), strings.TrimSpace(part[1:])
 		}
 		inner := strings.TrimRight(part, ") ")
-		if m := cdStep.FindStringSubmatch(inner); m != nil {
+		// cd src >/dev/null is cd src; in bash -c "cd src && ..." or eval 'cd src; ...' the cd runs too.
+		step := strings.TrimSpace(redirect.ReplaceAllString(shellWrap.ReplaceAllString(inner, ""), ""))
+		for _, q := range []string{"'", `"`} { // the wrapper's closing quote: eval 'cd src'
+			if strings.Count(step, q)%2 == 1 {
+				step = strings.TrimSuffix(step, q)
+			}
+		}
+		if m := cdStep.FindStringSubmatch(step); m != nil {
 			dir := m[1] + expandWith(vars, m[2]+m[3]) // "$DIR" and $DIR from the command, then the environment; '$DIR' is literal
 			if m[1]+m[2]+m[3] == "" && !strings.ContainsAny(m[0], `'"`) {
 				dir, _ = os.UserHomeDir() // a bare cd goes home

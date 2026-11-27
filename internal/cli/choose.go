@@ -71,7 +71,7 @@ func (c *chooser) one(title string, labels []string, def int) (int, error) {
 }
 
 // menu is the raw-mode question: arrows (or j/k) move, space ticks (many) or the cursor picks (one), enter
-// confirms, Ctrl-C or Esc cancels.
+// confirms, Ctrl-C cancels. A lone Esc does nothing: telling it from an arrow's Esc [ would need a timeout.
 func (c *chooser) menu(title string, labels []string, on []bool, many bool) ([]bool, error) {
 	hint := "↑/↓ to move, enter to choose"
 	if many {
@@ -110,9 +110,9 @@ func (c *chooser) menu(title string, labels []string, on []bool, many bool) ([]b
 		switch b {
 		case 3, 4: // Ctrl-C, Ctrl-D
 			return nil, errCancelled
-		case 27: // Esc, or an arrow: Esc [ A/B
+		case 27: // an arrow: Esc [ A/B. Anything else after Esc is read as its own key.
 			if next, _ := c.in.Peek(1); len(next) == 0 || next[0] != '[' {
-				return nil, errCancelled
+				continue
 			}
 			c.in.ReadByte()
 			switch k, _ := c.in.ReadByte(); k {

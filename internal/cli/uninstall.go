@@ -92,12 +92,19 @@ func Uninstall(args []string) int {
 	if !f.project && !f.global {
 		f.project, f.global = true, true
 	}
+	cwd, _ := os.Getwd()
+	root := projectRoot(cwd)
+	// An agent left unticked that still runs paws keeps what every agent shares: then Claude Code loses only its hook.
+	staying := ""
+	for _, a := range adapters {
+		if a != defaultAdapter() && !all && !agents[a] && (hasPawsHook(a.HookFile(false, root)) || hasPawsHook(a.HookFile(true, ""))) {
+			staying = a.Title()
+		}
+	}
 
 	var plan []removal
 	var keep []string
 	requiredCache = nil
-	cwd, _ := os.Getwd()
-	root := projectRoot(cwd)
 	user := pack.UserTarget(gate.UserDir())
 	// Outside a repo, in the home folder, some or all of the project's files are the global ones. Each part that
 	// is shared stays with the global scope.
@@ -105,6 +112,10 @@ func Uninstall(args []string) int {
 	if f.project && !f.global && shared.hooks && shared.skills && shared.packs {
 		fmt.Fprintln(os.Stderr, "paws: this folder is not in a repo, so its project files are your global ones. Run --project from a repo, or use --global.")
 		return 2
+	}
+	if claude && staying != "" {
+		plan, keep = planClaudeHooks(plan, keep, root, f.project, f.global, staying)
+		claude = false
 	}
 	// Claude Code's part is also what every harness shares: the login, portal and pack rules, and the pack state.
 	if claude && f.global {
@@ -185,6 +196,24 @@ To remove the binary itself, use the way you installed it:
 A repo that committed the paws hook keeps it until you remove it there (unbound-paws uninstall, run in that repo).
 `)
 	return code
+}
+
+// planClaudeHooks removes only Claude Code's paws hooks, for the scopes being removed: another agent still runs
+// paws, so the rules, packs, skills and login it shares stay.
+func planClaudeHooks(plan []removal, keep []string, root string, project, global bool, staying string) ([]removal, []string) {
+	var files []string
+	if project {
+		files = append(files, filepath.Join(root, ".claude", "settings.json"), filepath.Join(root, ".claude", "settings.local.json"))
+	}
+	if global {
+		files = append(files, filepath.Join(hook.ConfigDir(), "settings.json"))
+	}
+	for _, path := range files {
+		if hasPawsHook(path) {
+			plan = append(plan, removal{what: "hook      " + tilde(path), run: func() error { return unregisterHook(path) }})
+		}
+	}
+	return plan, append(keep, fmt.Sprintf("rules, packs, skills and login (%s still runs paws)", staying))
 }
 
 // askUninstall asks which agents to remove paws from (the ones it is set up for ticked) and from where.

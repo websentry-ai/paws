@@ -129,3 +129,34 @@ func TestUninstallAsksWhichAgents(t *testing.T) {
 		t.Errorf("Claude Code wasn't picked: its hook stays:\n%s", out)
 	}
 }
+
+// Removing paws from Claude Code only, while Codex still runs it, takes Claude Code's hook and keeps the rules.
+func TestUninstallClaudeOnlyKeepsWhatCodexShares(t *testing.T) {
+	_, repo := askEnv(t, "1\n2\ny\n", false)
+	interactive = func() bool { return false }
+	captureStdout(t, func() int { return Init([]string{"--agent", "claude,codex"}) })
+	rule := filepath.Join(repo, ".paws", "packs", "writing", "writing", "r.md")
+	writeFile(t, rule, "---\nname: r\nevent: pre-tool\naction:\n  type: require-skill\n  skill: s\n---\n")
+	interactive = func() bool { return true }
+	code, out := captureStdout(t, func() int { return Uninstall(nil) })
+	if code != 0 {
+		t.Fatalf("uninstall exit %d: %s", code, out)
+	}
+	if hasPawsHook(filepath.Join(repo, ".claude", "settings.json")) || !hasPawsHook(filepath.Join(repo, ".codex", "hooks.json")) {
+		t.Errorf("Claude Code's hook goes, Codex's stays:\n%s", out)
+	}
+	if _, err := os.Stat(rule); err != nil || !strings.Contains(out, "Codex still runs paws") {
+		t.Errorf("the pack rules Codex still uses stay: %v\n%s", err, out)
+	}
+}
+
+// A lone Esc in the menu is no key: the menu goes on and enter still confirms.
+func TestInitMenuIgnoresALoneEsc(t *testing.T) {
+	_, repo := askEnv(t, "\x1bx\r\r", true)
+	if code, out := captureStdout(t, func() int { return Init(nil) }); code != 0 {
+		t.Fatalf("init exit %d: %s", code, out)
+	}
+	if !hasPawsHook(filepath.Join(repo, ".claude", "settings.json")) {
+		t.Error("Esc then enter keeps the ticked default")
+	}
+}

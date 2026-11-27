@@ -259,9 +259,7 @@ func sessionSkillContext(r *rule.Rule, ev Event) string {
 
 // skillReason is the default require-skill deny: it says paws sent it and which rules, so a person
 // reading the chat knows where the block came from, and names every missing skill in one sentence.
-// The instruction comes first and the reassurance last: Claude Code labels every deny "hook error", so the reason
-// says nothing is broken, but opening with that cut how often a small model retried correctly.
-// e.g. paws (rule git--git): this needs the "git" skill. Load and follow it, then run the command again, changed if it says so.
+// e.g. paws (rule git--git): this needs the "git" skill. Load it, then run the command again.
 func skillReason(names, skills []string, ev Event) string {
 	label := "rule " + names[0]
 	if len(names) > 1 {

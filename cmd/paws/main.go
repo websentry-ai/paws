@@ -75,7 +75,10 @@ func usage() {
 Usage:
   unbound-paws gate                                      Run as a Claude Code hook (reads event JSON on stdin).
   unbound-paws init [--global | --settings <path>]       Register paws in a Claude Code settings.json.
-  unbound-paws uninstall [--global | --settings <path>]  Remove paws from a settings.json.
+  unbound-paws uninstall [--project] [--global] [--keep-skills] [--yes]
+                                                         Remove everything paws added; lists it and asks first.
+  unbound-paws uninstall --hook-only [--global | --settings <path>]
+                                                         Remove only the hook from a settings.json.
   unbound-paws skill [--global | --settings <path>]      Install or reinstall the paws skill (Claude writes rules with it).
   unbound-paws explain [--tool T] [--event E] <command>  Dry-run: show matching rules and the decision.
   echo '<event json>' | unbound-paws explain -           Dry-run a full event JSON.

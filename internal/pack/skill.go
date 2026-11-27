@@ -247,6 +247,26 @@ func replaceable(dir string) bool {
 	return err == nil && now == m.Installed
 }
 
+// untouched is replaceable plus a check the content hash can't make: it skips hidden paths, and paws writes none
+// but the marker, so a hidden file or a link inside the skill is the user's.
+func untouched(dir string) bool {
+	if !replaceable(dir) {
+		return false
+	}
+	ok := true
+	filepath.WalkDir(dir, func(p string, d fs.DirEntry, err error) error {
+		if err != nil || p == dir {
+			return nil
+		}
+		if rel, _ := filepath.Rel(dir, p); rel != markerFile && d.Name() != ".DS_Store" && (strings.HasPrefix(d.Name(), ".") || !d.IsDir() && !d.Type().IsRegular()) {
+			ok = false
+			return filepath.SkipAll
+		}
+		return nil
+	})
+	return ok
+}
+
 // removeSkill deletes a skill directory only if paws installed it and it is unedited; it
 // reports whether it removed it.
 func removeSkill(skillsDir, name string) (bool, error) {
@@ -254,7 +274,7 @@ func removeSkill(skillsDir, name string) (bool, error) {
 		return false, fmt.Errorf("invalid skill name %q", name)
 	}
 	dir := filepath.Join(skillsDir, name)
-	if !replaceable(dir) {
+	if !untouched(dir) {
 		return false, nil
 	}
 	return true, os.RemoveAll(dir)
@@ -362,6 +382,28 @@ func readMarker(dir string) marker {
 	data, _ := os.ReadFile(filepath.Join(dir, markerFile))
 	json.Unmarshal(data, &m)
 	return m
+}
+
+// PawsSkill is a skill directory that carries paws's install marker, so paws put it there.
+type PawsSkill struct {
+	Name   string
+	Edited bool // its content no longer matches what paws wrote, so paws won't delete it
+}
+
+// PawsSkills lists the skills in skillsDir that paws installed, by the marker file. A directory without the
+// marker is the user's and never appears here.
+func PawsSkills(skillsDir string) []PawsSkill {
+	entries, _ := os.ReadDir(skillsDir)
+	var out []PawsSkill
+	for _, e := range entries {
+		dir := filepath.Join(skillsDir, e.Name())
+		// A symbolic link to a skill is the user's wiring, not a directory paws installed.
+		if !e.IsDir() || !catalog.ValidSkillName(e.Name()) || !pawsOwned(dir) {
+			continue
+		}
+		out = append(out, PawsSkill{Name: e.Name(), Edited: !untouched(dir)})
+	}
+	return out
 }
 
 // RemoveBundledSkill removes a bundled skill paws installed and nobody edited; it reports

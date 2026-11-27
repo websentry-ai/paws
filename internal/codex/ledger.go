@@ -354,10 +354,24 @@ func (t turns) LastRecordAt(until time.Time) (time.Time, bool) {
 // made during it.
 func (t turns) TurnCalls(until time.Time) ([]outcome.Call, time.Time, error) {
 	main := readLedger(ledgerPath(t.session, ""))
-	turn := ""
+	// The Stop names its turn: that one, unless until is before it began (the grader asking for the turn before).
+	// Otherwise the turn of the last record at or before until; append order can't be trusted alone, since an async
+	// UserPromptSubmit can land late.
+	turn, began := "", time.Time{}
 	for _, r := range main {
-		if r.Turn != "" && !r.At.After(until) {
-			turn = r.Turn
+		if r.Turn == t.turn && (began.IsZero() || r.At.Before(began)) {
+			began = r.At
+		}
+	}
+	if !began.IsZero() && !until.Before(began) {
+		turn = t.turn
+	}
+	if turn == "" {
+		var latest time.Time
+		for _, r := range main {
+			if r.Turn != "" && r.Turn != t.turn && !r.At.After(until) && !r.At.Before(latest) {
+				turn, latest = r.Turn, r.At
+			}
 		}
 	}
 	if turn == "" {

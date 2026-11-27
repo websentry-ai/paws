@@ -165,16 +165,15 @@ var chainSep = regexp.MustCompile(`&&|\|\||[;\n]`)
 // shellPatch is one apply_patch run in a shell command: its patch text and the folder it runs in.
 type shellPatch struct{ text, dir string }
 
+// applyPatchCmd finds apply_patch where a command starts: at the line's start, after ; & | or (, as a whole word.
+var applyPatchCmd = regexp.MustCompile(`(?m)(?:^|[;&|(])[ \t]*(apply_patch)(?:[ \t<]|$)`)
+
 // shellPatches are the apply_patch runs of a shell command, each with the folder the commands before it moved to.
 func shellPatches(cmd, cwd string) []shellPatch {
 	var out []shellPatch
-	starts := []int{}
-	for i := 0; ; {
-		j := strings.Index(cmd[i:], "apply_patch")
-		if j < 0 {
-			break
-		}
-		starts, i = append(starts, i+j), i+j+len("apply_patch")
+	var starts []int // where each apply_patch command begins: not "apply_patch" inside a file name
+	for _, m := range applyPatchCmd.FindAllStringSubmatchIndex(cmd, -1) {
+		starts = append(starts, m[2])
 	}
 	for k, at := range starts {
 		end := len(cmd)
@@ -326,14 +325,12 @@ func (Adapter) Observe(h *harness.Hook, d gate.Decision) {
 		if in.ToolName == "apply_patch" || in.ToolName == "Bash" && len(p.calls) > 1 {
 			// A patch: the files it changed are the ones apply_patch lists after its success line. Through the shell
 			// there is no exit code, so that line is the only sign it applied.
-			var dirs []string
-			for _, sp := range shellPatches(cmdOf(in), in.CWD) {
-				dirs = append(dirs, sp.dir)
+			runs := shellPatches(cmdOf(in), in.CWD)
+			if in.ToolName == "apply_patch" {
+				patch, _ := in.ToolInput["command"].(string)
+				runs = []shellPatch{{text: patch, dir: in.CWD}} // the tool runs in the hook's cwd
 			}
-			if len(dirs) == 0 {
-				dirs = []string{in.CWD} // the apply_patch tool runs in the hook's cwd
-			}
-			files = patchedFiles(in.ToolResponse, dirs...)
+			files = patchedFiles(in.ToolResponse, runs)
 			if in.ToolName == "Bash" {
 				ok = len(files) > 0
 			}
@@ -365,26 +362,31 @@ func cmdOf(in *Input) string {
 
 // patchedFiles are the files apply_patch says it changed: the "A path", "M path" and "D path" lines after its
 // "Success. Updated the following files:" line, absolute.
-func patchedFiles(raw json.RawMessage, dirs ...string) []string {
+func patchedFiles(raw json.RawMessage, runs []shellPatch) []string {
 	var s string
 	if json.Unmarshal(raw, &s) != nil {
 		s = string(raw)
 	}
-	// Each apply_patch run prints its own success line and list, in the order the runs ran: the k-th list is the k-th
-	// patch's, relative to the folder that patch ran in.
-	blocks := strings.Split(s, "Success. Updated the following files:")[1:]
+	// A listed path is relative to the folder its own run ran in: the run whose patch names that file. Pairing by
+	// name, not by position, keeps a failed run (it lists nothing) from shifting the rest.
 	var files []string
-	for k, list := range blocks {
-		dir := dirs[min(k, len(dirs)-1)]
+	for _, list := range strings.Split(s, "Success. Updated the following files:")[1:] {
 		for _, line := range strings.Split(list, "\n") {
 			op, path, ok := strings.Cut(strings.TrimSpace(line), " ")
 			if !ok || len(op) != 1 || !strings.Contains("AMD", op) {
 				continue
 			}
-			if !filepath.IsAbs(path) {
-				path = filepath.Join(dir, path)
+			if filepath.IsAbs(path) {
+				files = append(files, filepath.Clean(path))
+				continue
 			}
-			files = append(files, filepath.Clean(path))
+			for _, run := range runs {
+				for _, f := range parsePatch(run.text) {
+					if filepath.Clean(f.Path) == filepath.Clean(path) || filepath.Join(run.dir, f.Path) == filepath.Join(run.dir, path) {
+						files = append(files, filepath.Join(run.dir, path))
+					}
+				}
+			}
 		}
 	}
 	return files

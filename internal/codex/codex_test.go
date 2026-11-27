@@ -421,3 +421,41 @@ func TestLedgerCutReadCoversWhatTheModelSaw(t *testing.T) {
 		t.Error("two lines of 300 reached the model: not loaded")
 	}
 }
+
+// "apply_patch" inside a file name doesn't start a new patch: the file is still gated.
+func TestShellPatchNamedApplyPatch(t *testing.T) {
+	h := parse(t, stdin(t, "PreToolUse", "t1", map[string]any{"tool_name": "Bash", "tool_input": map[string]any{
+		"command": "apply_patch <<'EOF'\n*** Begin Patch\n*** Update File: tools/apply_patch.py\n@@\n+x\n*** End Patch\nEOF"}}))
+	if len(h.Calls) != 2 || h.Calls[1].Tool != "Edit" || h.Calls[1].Target != "/repo/tools/apply_patch.py" {
+		t.Errorf("want an Edit of /repo/tools/apply_patch.py, got %+v", h.Calls)
+	}
+}
+
+// A failed run lists no files; the next run's list still pairs with its own folder.
+func TestShellPatchResultsAfterAFailedRun(t *testing.T) {
+	ledgerEnv(t)
+	cmd := "cd a && apply_patch <<'EOF'\n*** Begin Patch\n*** Update File: x.go\n@@\n+x\n*** End Patch\nEOF\ncd ../b && apply_patch <<'EOF'\n*** Begin Patch\n*** Update File: y_test.go\n@@\n+y\n*** End Patch\nEOF"
+	observe(t, stdin(t, "PreToolUse", "t1", bashCall("p1", cmd)), gate.Decision{})
+	post := bashCall("p1", cmd)
+	post["tool_response"] = "Failed to find expected lines in x.go\nSuccess. Updated the following files:\nM y_test.go\n"
+	observe(t, stdin(t, "PostToolUse", "t1", post), gate.Decision{})
+	log := parse(t, stdin(t, "PreToolUse", "t1", bashCall("c9", "ls"))).Calls[0].Log
+	if !log.EditedMatching(regexp.MustCompile(`^/repo/b/y_test\.go$`)) || log.EditedMatching(regexp.MustCompile(`x\.go$`)) {
+		t.Error("y_test.go in b was edited; x.go wasn't")
+	}
+}
+
+// The Stop grades its own turn, even when an earlier turn's marker lands after its calls.
+func TestTurnCallsGradesTheStopsTurn(t *testing.T) {
+	ledgerEnv(t)
+	observe(t, stdin(t, "PreToolUse", "t2", bashCall("c1", "git push")), gate.Decision{Verdict: gate.Deny, Reason: "no"})
+	// The turn before's marker, from an async UserPromptSubmit, lands after t2's call.
+	appendRecords(ledgerPath("01a218bf-886e", ""), []record{{Kind: "turn", At: time.Now().Add(-time.Minute), Turn: "t1"}})
+	ledgerCache = map[string][]record{}
+	tl := Adapter{}.Turns(parse(t, stdin(t, "Stop", "t2", nil)))
+	at, _ := tl.LastRecordAt(time.Now())
+	calls, _, err := tl.TurnCalls(at)
+	if err != nil || len(calls) != 1 || calls[0].Target != "git push" {
+		t.Errorf("want t2's one call, got %+v %v", calls, err)
+	}
+}

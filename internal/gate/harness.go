@@ -167,8 +167,10 @@ type FileRead struct {
 	Shown int
 }
 
-// cutMark is how Codex marks output it shortened before the model saw it: …N tokens truncated….
-var cutMark = regexp.MustCompile(`(?:…|\.\.\.)\s*\d+ (?:tokens|lines|chars|characters|bytes) truncated\s*(?:…|\.\.\.)`)
+// cutMark is how a harness marks output it shortened before the agent saw it, on a line of its own: Codex's
+// "…N tokens truncated…", Claude Code's "... [N lines truncated] ...". A skill's text that merely mentions one in a
+// sentence isn't a cut.
+var cutMark = regexp.MustCompile(`(?m)^[ \t]*(?:…|\.\.\.)?[ \t]*\[?\d+ (?:tokens|lines|chars|characters|bytes) truncated\]?[ \t]*(?:…|\.\.\.)?[ \t]*$`)
 
 // ShownLines reports whether a read's output reached the agent cut short, and how many whole lines from its start
 // did. Claude Code puts a <persisted-output> note with a 2KB preview in place of a long output; Codex cuts out the

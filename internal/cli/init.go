@@ -174,8 +174,14 @@ func mirrorInstalled(a harness.Adapter, settingsPath string) {
 	}
 	cwd, _ := os.Getwd()
 	root := projectRoot(cwd)
+	// A hook file given with --settings reads the skills folder beside it, so both scopes' skills go there.
+	custom := filepath.Clean(settingsPath) != filepath.Clean(a.HookFile(false, root)) &&
+		filepath.Clean(settingsPath) != filepath.Clean(a.HookFile(true, root))
 	for _, global := range []bool{false, true} {
 		to := a.SkillsDirFor(a.HookFile(global, root))
+		if custom {
+			to = a.SkillsDirFor(settingsPath)
+		}
 		var copied []string
 		for _, other := range installOrder() {
 			if from := other.SkillsDirFor(other.HookFile(global, root)); from != "" && filepath.Clean(from) != filepath.Clean(to) {

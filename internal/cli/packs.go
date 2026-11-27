@@ -116,6 +116,10 @@ func target(project bool) pack.Target {
 	stores := skillStores(!project, root)
 	t.SkillsDir, t.Mirrors = stores[0], stores[1:]
 	t.Elsewhere = otherSkillDirs(!project, root, stores)
+	if !project {
+		// Portal sync installs into the same user folders: a skill the portal turns on outlives a pack's removal.
+		t.InUse = func(skill string) bool { return slices.Contains(loadPortalState().Skills, skill) }
+	}
 	return t
 }
 

@@ -28,6 +28,8 @@ type Target struct {
 	// Elsewhere are other harnesses' skills folders paws doesn't copy into now (their hook is gone, or in another
 	// repo): a skill removed here is removed there too, so no stale copy outlives its pack.
 	Elsewhere []string
+	// InUse, when set, names skills something besides the packs still needs (the portal's): removing a pack keeps them.
+	InUse func(skill string) bool
 }
 
 // UserTarget installs for one user: bindings under the paws user dir (loaded in every repo),
@@ -53,6 +55,8 @@ func ProjectTarget(root string) Target {
 		StateFile: filepath.Join(root, ".paws", "installed.yaml"),
 	}
 }
+
+func (t Target) inUse(skill string) bool { return t.InUse != nil && t.InUse(skill) }
 
 // Installed is one pack's record in the state file.
 type Installed struct {
@@ -285,7 +289,7 @@ func Add(c *catalog.Catalog, name string, bindings []string, picks map[string]st
 	}
 	ok = true
 	for _, sk := range dropped {
-		if !st.needs(sk) {
+		if !st.needs(sk) && !t.inUse(sk) {
 			t.removeSkill(sk)
 		}
 	}
@@ -347,7 +351,7 @@ func Remove(name string, t Target) (removedSkills []string, err error) {
 	}
 	delete(st.Packs, name)
 	for _, s := range inst.Skills {
-		if st.needs(s) {
+		if st.needs(s) || t.inUse(s) {
 			continue
 		}
 		removed, err := t.removeSkill(s)

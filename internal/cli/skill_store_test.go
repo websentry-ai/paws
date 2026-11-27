@@ -580,3 +580,18 @@ func TestClaudeReadOfACodexCopyExpiresWhenItChanges(t *testing.T) {
 		t.Error("the SKILL.md changed after the read: the call needs a new read")
 	}
 }
+
+// A hook file given with --settings gets the skills in the folder beside it, not the default ones.
+func TestClaudeAddedWithSettingsGetsTheSkillsBesideIt(t *testing.T) {
+	home, _ := storeEnv(t)
+	mustRun(t, Init, "--agent", "codex", "--global")
+	mustRun(t, Add, "writing")
+	settings := filepath.Join(t.TempDir(), ".claude", "settings.json")
+	mustRun(t, Init, "--agent", "claude", "--settings", settings)
+	if !isThere(filepath.Join(filepath.Dir(settings), "skills", "humanizer", "SKILL.md")) {
+		t.Error("humanizer belongs beside the given settings file")
+	}
+	if isThere(filepath.Join(home, ".claude", "skills", "humanizer")) {
+		t.Error("nothing is written to Claude Code's default folder")
+	}
+}

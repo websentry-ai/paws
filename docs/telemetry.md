@@ -79,7 +79,7 @@ A deny with no outcome record (you interrupted, or the turn never ended) counts 
 
 | `event` | Written on | Extra fields |
 |---|---|---|
-| `skill_invoked` | PreToolUse on a skill load: the Skill tool, or a plain read that prints a skill's whole `SKILL.md` (`Read`, or a lone `cat`/`sed -n`/`head`/... of the file; a part of it is not an invocation) | `skill` |
+| `skill_invoked` | PreToolUse on a skill load: the Skill tool, or a plain read that prints a skill's whole `SKILL.md` (`Read`, or a lone `cat`/`sed -n`/`head`/... of the file, or of several SKILL.md files at once: one record per skill; a part of a file is not an invocation) | `skill` |
 | `tool_result` | PostToolUse: a tool call that ran and succeeded (denied and failed calls write none) | `tool` |
 | `turn_end` | Stop (the agent finished its turn) | — |
 

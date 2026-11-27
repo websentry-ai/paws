@@ -22,24 +22,34 @@ var AllLines = Lines{From: 1}
 // chains, pipes, redirects, assigns or expands anything is not a plain read, so `cat f && git push` never passes for
 // one; nor is a read whose lines can't be told (head -c, an awk program that filters).
 func PlainRead(line string) (string, Lines, bool) {
+	files, lines, ok := PlainReads(line)
+	if !ok || len(files) != 1 {
+		return "", Lines{}, false
+	}
+	return files[0], lines, true
+}
+
+// PlainReads is PlainRead for a line that prints several files, each the same lines: cat a b, head -n 50 a b. sed
+// and awk count lines across their files, so with more than one file they count only when they print them whole.
+func PlainReads(line string) ([]string, Lines, bool) {
 	f, err := syntax.NewParser(syntax.Variant(syntax.LangBash)).Parse(strings.NewReader(line), "")
 	if err != nil || len(f.Stmts) != 1 {
-		return "", Lines{}, false
+		return nil, Lines{}, false
 	}
 	st := f.Stmts[0]
 	call, ok := st.Cmd.(*syntax.CallExpr)
 	if !ok || st.Negated || st.Background || st.Coprocess || len(st.Redirs) > 0 || len(call.Assigns) > 0 || len(call.Args) < 2 {
-		return "", Lines{}, false
+		return nil, Lines{}, false
 	}
 	words := make([]string, len(call.Args))
 	for i, w := range call.Args {
 		if words[i], ok = literalWord(w); !ok {
-			return "", Lines{}, false
+			return nil, Lines{}, false
 		}
 	}
 	prog := words[0]
 	if strings.Contains(prog, "/") && !systemBin.MatchString(prog) {
-		return "", Lines{}, false // ./cat or /tmp/cat may be anything; only the system's readers are known to just read
+		return nil, Lines{}, false // ./cat or /tmp/cat may be anything; only the system's readers are known to just read
 	}
 	return readTarget(path.Base(prog), words[1:])
 }
@@ -110,10 +120,10 @@ func quiet(flag string) bool {
 	return flag == "--quiet" || flag == "--silent" || !strings.HasPrefix(flag, "--") && strings.Contains(flag, "n")
 }
 
-// readTarget is the file a reader's arguments print and its lines, when they print exactly one file and nothing else.
-func readTarget(prog string, args []string) (string, Lines, bool) {
+// readTarget is the files a reader's arguments print and their lines, when they print files and nothing else.
+func readTarget(prog string, args []string) ([]string, Lines, bool) {
 	if !readers[prog] {
-		return "", Lines{}, false
+		return nil, Lines{}, false
 	}
 	if prog == "batcat" {
 		prog = "bat"
@@ -128,12 +138,12 @@ func readTarget(prog string, args []string) (string, Lines, bool) {
 			i = len(args)
 		case strings.HasPrefix(a, "-") && a != "-":
 			if !readFlags[prog].MatchString(a) {
-				return "", Lines{}, false
+				return nil, Lines{}, false
 			}
 			flags = append(flags, a)
 			if valueFlags[prog][a] {
 				if i+1 >= len(args) {
-					return "", Lines{}, false
+					return nil, Lines{}, false
 				}
 				i++
 				if prog == "sed" {
@@ -156,15 +166,15 @@ func readTarget(prog string, args []string) (string, Lines, bool) {
 	switch prog {
 	case "sed":
 		m := sedPrint.FindStringSubmatch(firstOr(operands))
-		if !slices.ContainsFunc(flags, quiet) || len(operands) != 2 || m == nil {
-			return "", Lines{}, false
+		if !slices.ContainsFunc(flags, quiet) || len(operands) < 2 || m == nil {
+			return nil, Lines{}, false
 		}
 		lines = sedLines(m)
 		operands = operands[1:]
 	case "awk":
 		m := awkPrint.FindStringSubmatch(firstOr(operands))
-		if len(operands) != 2 || m == nil {
-			return "", Lines{}, false
+		if len(operands) < 2 || m == nil {
+			return nil, Lines{}, false
 		}
 		if m[2] != "" {
 			n, _ := strconv.Atoi(m[2])
@@ -172,7 +182,7 @@ func readTarget(prog string, args []string) (string, Lines, bool) {
 				n--
 			}
 			if n < 1 {
-				return "", Lines{}, false // NR<1 prints nothing
+				return nil, Lines{}, false // NR<1 prints nothing
 			}
 			lines = Lines{From: 1, To: n}
 		}
@@ -180,26 +190,29 @@ func readTarget(prog string, args []string) (string, Lines, bool) {
 	case "head", "tail":
 		m := lineCount.FindStringSubmatch(count)
 		if m == nil {
-			return "", Lines{}, false
+			return nil, Lines{}, false
 		}
 		n, err := strconv.Atoi(m[2])
 		switch {
 		case err != nil || n == 0 && m[1] == "":
-			return "", Lines{}, false // nothing printed, or a count too big to be one
+			return nil, Lines{}, false // nothing printed, or a count too big to be one
 		case prog == "head" && m[1] == "":
 			lines = Lines{From: 1, To: n}
 		case prog == "head":
-			return "", Lines{}, false
+			return nil, Lines{}, false
 		case m[1] == "+":
 			lines = Lines{From: max(n, 1)}
 		default:
 			lines = Lines{From: -n}
 		}
 	}
-	if len(operands) != 1 || operands[0] == "-" || lines.To != 0 && lines.To < lines.From {
-		return "", Lines{}, false
+	if len(operands) == 0 || slices.Contains(operands, "-") || lines.To != 0 && lines.To < lines.From {
+		return nil, Lines{}, false
 	}
-	return operands[0], lines, true
+	if len(operands) > 1 && (prog == "sed" || prog == "awk") && lines != AllLines {
+		return nil, Lines{}, false // their line numbers run on across the files
+	}
+	return operands, lines, true
 }
 
 // sedLines is the range a sedPrint match prints.

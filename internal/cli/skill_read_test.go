@@ -422,3 +422,37 @@ func TestCommandRunningReadsOfSKILLmdAreGated(t *testing.T) {
 		}
 	}
 }
+
+// A plain read of several SKILL.md files at once (as Codex desktop does: cat a/SKILL.md b/SKILL.md) is a load of
+// each skill it prints whole. The read itself is never gated; a read that also prints another file is a command.
+func TestReadingSeveralSKILLmdFilesLoadsEach(t *testing.T) {
+	home := portalEnv(t, http.NotFoundHandler())
+	writeRule(t, filepath.Join(home, "push.md"), "name: push\nevent: pre-tool\nmatcher:\n  tool: Bash\n  command_regex: git push\naction:\n  type: require-skill\n  skill: deployer\n")
+	writeRule(t, filepath.Join(home, "catch-all.md"), "name: catch-all\nevent: pre-tool\nmatcher:\n  tool: Bash\n  command_regex: ^cat\naction:\n  type: require-skill\n  skill: other\n")
+	md, other := skillMD(t, "deployer"), skillMD(t, "other")
+	notes := filepath.Join(t.TempDir(), "notes.txt")
+	writeFile(t, notes, "x\n")
+	read := "cat " + other + " " + md
+	if out := gateCall(t, "Bash", map[string]any{"command": read}, ""); out != "{}" {
+		t.Errorf("a read of two SKILL.md files is never gated, got %s", out)
+	}
+	if out := gateCall(t, "Bash", map[string]any{"command": "cat " + md + " " + notes}, ""); !strings.Contains(out, `"deny"`) {
+		t.Errorf("a read that also prints another file is a command the cat rule gates, got %s", out)
+	}
+	transcript := func(output string) string {
+		p := filepath.Join(t.TempDir(), "s.jsonl")
+		in, _ := json.Marshal(map[string]string{"command": read})
+		res, _ := json.Marshal(output)
+		writeFile(t, p, `{"type":"user","isSidechain":false,"message":{"role":"user","content":"push it"}}`+"\n"+
+			`{"type":"assistant","isSidechain":false,"message":{"content":[{"type":"tool_use","id":"toolu_r","name":"Bash","input":`+string(in)+`}]}}`+"\n"+
+			`{"type":"user","isSidechain":false,"message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"toolu_r","content":`+string(res)+`}]},"toolUseResult":{"stdout":"x"}}`+"\n")
+		return p
+	}
+	push := map[string]any{"command": "git push"}
+	if out := gateCall(t, "Bash", push, transcript("# other\n# deployer\n")); out != "{}" {
+		t.Errorf("the read loaded deployer, the second file, got %s", out)
+	}
+	if out := gateCall(t, "Bash", push, transcript("# other\n…400 tokens truncated…\n")); !strings.Contains(out, `"deny"`) {
+		t.Errorf("a cut read of several files covers none of them, got %s", out)
+	}
+}

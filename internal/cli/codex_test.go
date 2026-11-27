@@ -383,3 +383,26 @@ func TestCodexUnreadablePatchFileIsGated(t *testing.T) {
 		t.Error("a readable patch file is gated by the files it names")
 	}
 }
+
+// Codex desktop reads several SKILL.md files in one cat: each one it prints whole is loaded.
+func TestCodexReadOfSeveralSKILLmdFilesLoadsEach(t *testing.T) {
+	home := portalEnv(t, http.NotFoundHandler())
+	writeRule(t, filepath.Join(home, "push.md"), "name: push\nevent: pre-tool\nmatcher:\n  tool: Bash\n  command_regex: git push\naction:\n  type: require-skill\n  skill: git\n")
+	md, other := codexSkill(t, "git"), codexSkill(t, "other")
+	read := "cat " + other + " " + md
+	bash := func(id, cmd string) map[string]any {
+		return map[string]any{"tool_name": "Bash", "tool_use_id": id, "tool_input": map[string]any{"command": cmd}}
+	}
+	if reasonOf(t, runGate(t, codexCall("PreToolUse", "t1", bash("c0", "git push")))) == "" {
+		t.Fatal("before the read, the push is denied")
+	}
+	if out := runGate(t, codexCall("PreToolUse", "t1", bash("c1", read))); out != "{}" {
+		t.Fatalf("the read is never gated, got %s", out)
+	}
+	post := bash("c1", read)
+	post["tool_response"] = "Exit code: 0\nOutput:\n# other\n# git\n"
+	runGate(t, codexCall("PostToolUse", "t1", post))
+	if out := runGate(t, codexCall("PreToolUse", "t1", bash("c2", "git push"))); out != "{}" {
+		t.Errorf("the read loaded git, the second file: the push passes, got %s", out)
+	}
+}

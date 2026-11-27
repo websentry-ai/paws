@@ -178,6 +178,9 @@ type FileRead struct {
 	// Cut is set when the harness showed the agent only the first Shown lines of the read's output (too long).
 	Cut   bool
 	Shown int
+	// Of is how many files the call read (cat a/SKILL.md b/SKILL.md is 2): a cut output of several files can't say
+	// which lines of which file the agent saw, so it covers none.
+	Of int
 }
 
 // cutMark is how a harness marks output it shortened before the agent saw it, on a line of its own: Codex's
@@ -204,16 +207,26 @@ func ShownLines(output string) (cut bool, shown int) {
 const readLimit = 2000
 
 // ReadOf is the SKILL.md read a call makes (see SkillRead), with the lines it prints: a Read's offset and limit from
-// input, a Bash reader's range. With exists false the file may be gone since.
+// input, a Bash reader's range. With exists false the file may be gone since. A read of several SKILL.md files is
+// its first; ReadsOf has them all.
 func ReadOf(tool, target string, input map[string]any, cwd string, exists bool) (FileRead, bool) {
+	rs := ReadsOf(tool, target, input, cwd, exists)
+	if len(rs) == 0 {
+		return FileRead{}, false
+	}
+	return rs[0], true
+}
+
+// ReadsOf is every SKILL.md read a call makes: the Read tool's file, or each file a plain Bash read prints (cat
+// a/SKILL.md b/SKILL.md). A read of several files is a skill read only when every one is a skill's SKILL.md.
+func ReadsOf(tool, target string, input map[string]any, cwd string, exists bool) []FileRead {
 	if cwd == "" {
 		cwd, _ = os.Getwd()
 	}
-	var p string
+	var files []string
 	var lines rule.Lines
 	switch tool {
 	case "Read":
-		p = target
 		// Without a limit, a Read prints readLimit lines: Claude Code cuts a longer file there.
 		offset, _ := input["offset"].(float64)
 		limit, _ := input["limit"].(float64)
@@ -222,9 +235,35 @@ func ReadOf(tool, target string, input map[string]any, cwd string, exists bool) 
 		}
 		lines = rule.Lines{From: max(int(offset), 1)}
 		lines.To = lines.From + int(limit) - 1
+		files = []string{target}
 	case "Bash":
-		p, lines, _ = rule.PlainRead(target)
+		files, lines, _ = rule.PlainReads(target)
 	}
+	var reads []FileRead
+	for _, p := range files {
+		r, ok := skillFile(p, lines, cwd, exists)
+		if !ok {
+			return nil
+		}
+		r.Of = len(files)
+		reads = append(reads, r)
+	}
+	return reads
+}
+
+// SkillLoadOf names the skills a call reads the SKILL.md of, and whether the call alone prints each file whole.
+func SkillLoadOf(tool, target string, input map[string]any, cwd string) (skills []string, whole bool) {
+	reads := ReadsOf(tool, target, input, cwd, true)
+	whole = len(reads) > 0
+	for _, r := range reads {
+		skills = append(skills, r.Skill)
+		whole = whole && Covered([]FileRead{r})
+	}
+	return skills, whole
+}
+
+// skillFile is a read of p when p is a skill's SKILL.md under one of the SkillRoots (and, with exists, still there).
+func skillFile(p string, lines rule.Lines, cwd string, exists bool) (FileRead, bool) {
 	if p == "" {
 		return FileRead{}, false
 	}
@@ -264,6 +303,9 @@ func Covered(reads []FileRead) bool {
 	byFile := map[string][]rule.Lines{}
 	for _, r := range reads {
 		if r.Cut { // only the first lines of the output reached the agent
+			if r.Of > 1 {
+				continue
+			}
 			if r.Lines.From < 0 { // tail -n N: its output starts N lines from the end
 				n, ok := lineCount(r.File)
 				if !ok {

@@ -108,9 +108,9 @@ func (a Adapter) Parse(stdin []byte) (*harness.Hook, error) {
 		switch in.HookEventName {
 		case "PreToolUse":
 			ev.Kind = rule.KindTool
-			ev.SkillLoad, ev.SkillWhole = skillRead(c, in.CWD)
+			ev.SkillLoad, ev.SkillWhole, ev.SkillLoads = skillRead(c, in.CWD)
 		case "PostToolUse":
-			ev.SkillLoad, ev.SkillWhole = skillRead(c, in.CWD)
+			ev.SkillLoad, ev.SkillWhole, ev.SkillLoads = skillRead(c, in.CWD)
 		case "SessionStart":
 			ev.Kind, ev.Target = rule.KindSession, in.Source
 		}
@@ -155,13 +155,13 @@ func postRan(in *Input, calls []call) []bool {
 	return ran
 }
 
-// skillRead names the skill whose SKILL.md a call reads, and whether the read alone prints all of it.
-func skillRead(c call, cwd string) (string, bool) {
-	r, ok := gate.ReadOf(c.tool, c.target, c.input, cwd, true)
-	if !ok {
-		return "", false
+// skillRead names the skills whose SKILL.md a call reads, the first, and whether the read alone prints them whole.
+func skillRead(c call, cwd string) (first string, whole bool, all []string) {
+	all, whole = gate.SkillLoadOf(c.tool, c.target, c.input, cwd)
+	if len(all) == 0 {
+		return "", false, nil
 	}
-	return r.Skill, gate.Covered([]gate.FileRead{r})
+	return all[0], whole, all
 }
 
 // canonical maps a Codex tool call to canonical calls: Bash as is, apply_patch to a Write (new file) or Edit per
@@ -543,8 +543,12 @@ func (Adapter) Observe(h *harness.Hook, d gate.Decision) {
 			rec := record{Kind: "call", At: p.at, Turn: in.TurnID, ID: in.ToolUseID, Part: i, Tool: c.tool,
 				Target: c.target, Text: c.text, Input: c.input, Verdict: verdict, SkillLoad: h.Calls[i].SkillLoad,
 				Denied: heads, Agent: in.AgentID}
-			if r, ok := gate.ReadOf(c.tool, c.target, c.input, in.CWD, true); ok {
+			if reads := gate.ReadsOf(c.tool, c.target, c.input, in.CWD, true); len(reads) > 0 {
+				r := reads[0]
 				rec.ReadFile, rec.ReadFrom, rec.ReadTo = r.File, r.Lines.From, r.Lines.To
+				for _, m := range reads[1:] {
+					rec.MoreReads = append(rec.MoreReads, moreRead{Skill: m.Skill, File: m.File, From: m.Lines.From, To: m.Lines.To})
+				}
 			}
 			recs = append(recs, rec)
 		}

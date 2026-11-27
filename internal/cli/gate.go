@@ -88,7 +88,13 @@ func GateFor(args []string) (code int) {
 		return allow()
 	case "PreToolUse":
 		if ev.SkillLoad != "" && ev.SkillWhole { // a chunk of a SKILL.md loads nothing alone: not an invocation
-			gate.LogTelemetry("skill_invoked", ev, map[string]any{"skill": ev.SkillLoad})
+			skills := ev.SkillLoads
+			if len(skills) == 0 {
+				skills = []string{ev.SkillLoad}
+			}
+			for _, s := range skills {
+				gate.LogTelemetry("skill_invoked", ev, map[string]any{"skill": s})
+			}
 		}
 	}
 	res := gate.Collect(h.Cwd)

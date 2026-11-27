@@ -40,10 +40,11 @@ type record struct {
 	ReadFile  string         `json:"read_file,omitempty"`  // that SKILL.md, and the lines the read prints
 	ReadFrom  int            `json:"read_from,omitempty"`  // (read_to 0: to the end; read_from < 0: the last lines)
 	ReadTo    int            `json:"read_to,omitempty"`
-	Denied    []string       `json:"denied,omitempty"` // a deny's paragraph openings, to find a digest's marker
-	OK        *bool          `json:"ok,omitempty"`     // result: the call succeeded
-	Files     []string       `json:"files,omitempty"`  // result of a patch: the files it changed
-	Cut       bool           `json:"cut,omitempty"`    // result: Codex showed the model only the first Shown lines
+	MoreReads []moreRead     `json:"more_reads,omitempty"` // the other SKILL.md files a read of several prints
+	Denied    []string       `json:"denied,omitempty"`     // a deny's paragraph openings, to find a digest's marker
+	OK        *bool          `json:"ok,omitempty"`         // result: the call succeeded
+	Files     []string       `json:"files,omitempty"`      // result of a patch: the files it changed
+	Cut       bool           `json:"cut,omitempty"`        // result: Codex showed the model only the first Shown lines
 	Shown     int            `json:"shown,omitempty"`
 	Agent     string         `json:"agent,omitempty"` // the subagent's id; "" on the main thread
 }
@@ -199,6 +200,14 @@ func results(recs []record) map[string]bool {
 	return ok
 }
 
+// moreRead is one more SKILL.md a read of several files prints: the skill, the file and its lines.
+type moreRead struct {
+	Skill string `json:"skill"`
+	File  string `json:"file"`
+	From  int    `json:"from,omitempty"`
+	To    int    `json:"to,omitempty"`
+}
+
 // session is a Codex call's gate.Session: the calling thread's ledger, and the main thread's for session-wide
 // questions.
 type session struct {
@@ -253,10 +262,16 @@ func (s session) SkillLoaded(skill string, window int) bool {
 	}
 	var reads []gate.FileRead
 	for _, r := range s.window(window) {
-		if r.SkillLoad == skill && r.ReadFile != "" && r.Verdict == "allow" && ok[r.ID] {
-			res := cut[r.ID]
-			reads = append(reads, gate.FileRead{Skill: skill, File: r.ReadFile, Lines: rule.Lines{From: r.ReadFrom, To: r.ReadTo}, At: r.At,
-				Cut: res.Cut, Shown: res.Shown})
+		if r.ReadFile == "" || r.Verdict != "allow" || !ok[r.ID] {
+			continue
+		}
+		res := cut[r.ID]
+		all := append([]moreRead{{Skill: r.SkillLoad, File: r.ReadFile, From: r.ReadFrom, To: r.ReadTo}}, r.MoreReads...)
+		for _, m := range all {
+			if m.Skill == skill {
+				reads = append(reads, gate.FileRead{Skill: skill, File: m.File, Lines: rule.Lines{From: m.From, To: m.To}, At: r.At,
+					Cut: res.Cut, Shown: res.Shown, Of: len(all)})
+			}
 		}
 	}
 	return gate.Covered(reads)

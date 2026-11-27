@@ -362,12 +362,14 @@ func TestScanPairsASKILLmdReadWithItsSkillAction(t *testing.T) {
 	srv.triggers = scanTriggersJSON
 	fixScanClock(t)
 	userHome, _ := os.UserHomeDir()
-	md := filepath.Join(userHome, ".claude", "skills", "coreutils", "SKILL.md")
-	writeFile(t, md, "# coreutils\n")
-	cmd := "cat " + md
+	// A project skill, read by a relative path from the session's own folder: not the scan's.
+	project := filepath.Join(t.TempDir(), "acme")
+	os.MkdirAll(filepath.Join(project, ".git"), 0o755)
+	writeFile(t, filepath.Join(project, ".claude", "skills", "coreutils", "SKILL.md"), "# coreutils\n")
+	cmd := "cat .claude/skills/coreutils/SKILL.md"
 	in, _ := json.Marshal(map[string]string{"command": cmd})
 	writeFile(t, filepath.Join(userHome, ".claude", "projects", "-Users-alice-acme", "sess-1.jsonl"),
-		`{"type":"assistant","timestamp":"2026-11-03T09:00:00Z","message":{"content":[{"type":"tool_use","id":"r1","name":"Bash","input":`+string(in)+`}]}}`+"\n")
+		`{"type":"assistant","timestamp":"2026-11-03T09:00:00Z","cwd":"`+project+`","message":{"content":[{"type":"tool_use","id":"r1","name":"Bash","input":`+string(in)+`}]}}`+"\n")
 	api := strings.TrimSuffix(os.Getenv("PAWS_PORTAL_API"), "/")
 	writePrivate(filepath.Join(home, "credentials.json"), credentials{API: api, Token: "tok-abc", CreatedAt: "2026-11-02T12:00:00Z"})
 	appendLines(t, filepath.Join(home, "audit.log"),

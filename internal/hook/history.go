@@ -192,6 +192,7 @@ var resultIDPattern = regexp.MustCompile(`"tool_use_id"\s*:\s*"([^"\\]+)"`)
 type logRecord struct {
 	Type      string    `json:"type"`
 	Timestamp time.Time `json:"timestamp"`
+	Cwd       string    `json:"cwd"`
 	Message   struct {
 		Content json.RawMessage `json:"content"`
 	} `json:"message"`
@@ -253,7 +254,7 @@ func logCalls(line []byte, session string) []history.Call {
 		if json.Unmarshal(raw, &b) != nil || b.Type != "tool_use" || b.Name == "" {
 			continue
 		}
-		c := history.Call{ID: b.ID, Tool: b.Name, At: rec.Timestamp, Session: session}
+		c := history.Call{ID: b.ID, Tool: b.Name, At: rec.Timestamp, Session: session, Cwd: rec.Cwd}
 		if b.Name == history.SkillTool {
 			c.Target, _ = b.Input["skill"].(string)
 		} else {

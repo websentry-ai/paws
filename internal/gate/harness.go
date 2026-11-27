@@ -298,7 +298,7 @@ func skillFile(p string, lines rule.Lines, cwd string, exists bool) (FileRead, b
 
 // Covered reports whether successful reads together printed every line of one SKILL.md, in any order: 1,240p then
 // 241,480p of a 300-line file covers it, 1,240p alone doesn't. A read made before the file last changed printed an
-// older version, so it doesn't count. A file gone since counts as covered only by a read of the whole of it.
+// older version, so it doesn't count; nor does a read of a file deleted since, as for an edit.
 func Covered(reads []FileRead) bool {
 	byFile := map[string][]rule.Lines{}
 	for _, r := range reads {
@@ -331,11 +331,11 @@ func Covered(reads []FileRead) bool {
 	return false
 }
 
-// covers reports whether ranges hold lines 1 through n. With n unknown (the file is gone), only a read to the end
-// of the file from its first line does: a bounded one, a Read's 2000 lines included, may have missed the rest.
+// covers reports whether ranges hold lines 1 through n. With n unknown (the file is gone) nothing does: the skill
+// was deleted after the read, which counts no more than one edited after it.
 func covers(ranges []rule.Lines, n int, known bool) bool {
 	if !known {
-		return slices.ContainsFunc(ranges, func(l rule.Lines) bool { return l.From == 1 && l.To == 0 })
+		return false
 	}
 	type span struct{ from, to int }
 	var spans []span

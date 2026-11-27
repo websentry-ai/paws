@@ -149,12 +149,14 @@ func TestReadingSKILLmdClearsTheGate(t *testing.T) {
 	if out := gateCall(t, "Bash", push, transcript("Read", string(readInput), true)); !strings.Contains(out, `"deny"`) {
 		t.Errorf("a failed read loads nothing, got %s", out)
 	}
-	// A read of the whole file that succeeded still counts once the file is gone: its text is in the agent's
-	// context. A Read can't say it reached the end, so a cat stands in.
+	// A read of the whole file stops counting once the file is deleted, as it would once the file changed.
 	done := transcript("Bash", `{"command":"cat `+md+`"}`, false)
-	os.Remove(md)
 	if out := gateCall(t, "Bash", push, done); out != "{}" {
-		t.Errorf("a past read of a SKILL.md removed since should still count, got %s", out)
+		t.Errorf("a whole read of the SKILL.md counts, got %s", out)
+	}
+	os.Remove(md)
+	if out := gateCall(t, "Bash", push, done); !strings.Contains(out, `"deny"`) {
+		t.Errorf("the SKILL.md was deleted after the read: the load no longer counts, got %s", out)
 	}
 	recs := auditLines(t, home)
 	if len(recs) < 2 || recs[0]["satisfied_by"] != "skill-load" || recs[0]["harness"] != "claude-code" || recs[0]["model"] != "claude-sonnet-4-6" {

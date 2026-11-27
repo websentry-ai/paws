@@ -35,7 +35,7 @@ type Harness interface {
 	// SkillDirs are the folders this harness loads skills from for cwd: the user's, then the project's.
 	SkillDirs(cwd string) []string
 	// LoadSkills ends a require-skill deny: how to load skills (each with the SKILL.md paws found, or ""), then retry
-	// the call, named by noun ("command", "edit", "tool call"), and then Reassurance.
+	// the call, named by noun ("command", "edit", "tool call").
 	LoadSkills(skills []Skill, noun string) string
 	// LoadAtStart ends the session-start context of a rule that needs skill.
 	LoadAtStart(skill Skill) string
@@ -90,26 +90,31 @@ func (skillTool) SkillDirs(cwd string) []string {
 	return []string{pack.UserTarget(UserDir()).SkillsDir, pack.ProjectTarget(repoRoot(cwd)).SkillsDir}
 }
 
-func (skillTool) LoadSkills(skills []Skill, noun string) string {
-	return SkillToolInstruction(skills, noun) + " " + Reassurance + "."
-}
+func (skillTool) LoadSkills(skills []Skill, noun string) string { return SkillToolInstruction(skills, noun) }
 
 // SkillToolInstruction is how Claude Code loads skills and retries a call. It says to follow them and change the
-// call if they say so: told to retry "this exact command", a small model re-ran it unchanged.
+// call if they say so: told only to load and retry, a small model re-ran a call the skill forbids, unchanged.
 func SkillToolInstruction(skills []Skill, noun string) string {
+	return fmt.Sprintf("Load and %s.", FollowAndRetry(skills, noun))
+}
+
+// FollowAndRetry is a deny's instruction after the load: "follow it, then run the command again, changed if it
+// says so".
+func FollowAndRetry(skills []Skill, noun string) string {
 	it, says := "it", "it says"
 	if len(skills) > 1 {
 		it, says = "them", "they say"
 	}
-	verb := "make the " + noun
-	if noun == "command" {
-		verb = "run the command"
-	}
-	return fmt.Sprintf("Load and follow %s, then %s again, changed if %s so.", it, verb, says)
+	return fmt.Sprintf("follow %s, then %s again, changed if %s so", it, Retry(noun), says)
 }
 
-// Reassurance ends a require-skill deny, after its instruction: the harness shows a deny as an error.
-const Reassurance = "This is paws working as intended"
+// Retry is the second half of a deny's instruction: "run the command", or "make the edit" / "make the tool call".
+func Retry(noun string) string {
+	if noun == "command" {
+		return "run the command"
+	}
+	return "make the " + noun
+}
 
 func (skillTool) LoadAtStart(Skill) string {
 	return "Load it with the Skill tool before you start work."

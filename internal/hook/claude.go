@@ -82,11 +82,9 @@ func (Claude) SkillDirs(cwd string) []string { return gate.SkillTool.SkillDirs(c
 // SkillTrees: a plugin's skills sit at <config>/plugins/<...>/skills/<skill>/SKILL.md.
 func (Claude) SkillTrees() []string { return []string{filepath.Join(ConfigDir(), "plugins")} }
 
-// LoadSkills is the Skill tool sentence, plus the SKILL.md paths paws found: a skill installed after the session
-// started isn't in its skill list, so the Skill tool can't load it, and reading the file is the way in.
-func (Claude) LoadSkills(skills []gate.Skill, noun string) string {
-	return gate.SkillToolInstruction(skills, noun) + readAlso(skills) + " " + gate.Reassurance + "."
-}
+// LoadSkills is the Skill tool sentence. A SKILL.md read loads a skill too (one installed mid-session isn't in the
+// Skill tool's list); the deny doesn't name the path, to stay short.
+func (Claude) LoadSkills(skills []gate.Skill, noun string) string { return gate.SkillToolInstruction(skills, noun) }
 
 func (Claude) LoadAtStart(s gate.Skill) string {
 	return gate.SkillTool.LoadAtStart(s) + readAlso([]gate.Skill{s})

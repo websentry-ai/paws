@@ -164,18 +164,17 @@ func TestReadingSKILLmdClearsTheGate(t *testing.T) {
 	}
 }
 
-// A deny names the SKILL.md paws found, since a skill installed mid-session can't load with the Skill tool.
-func TestDenyNamesTheSKILLmdPath(t *testing.T) {
+// A Claude Code deny is short: the skill and the retry, no SKILL.md path, whether or not paws finds the file.
+func TestDenyIsShort(t *testing.T) {
 	home := portalEnv(t, http.NotFoundHandler())
 	writeRule(t, filepath.Join(home, "catch-all.md"), "name: catch-all\nevent: pre-tool\naction:\n  type: require-skill\n  skill: deployer\n")
-	want := `paws (rule catch-all): this command needs the "deployer" skill. Load and follow it, then run the command again, changed if it says so.`
-	const reassured = " This is paws working as intended."
-	if r := deny(t, "ls"); r != want+reassured {
+	want := `paws (rule catch-all): this needs the "deployer" skill. Load and follow it, then run the command again, changed if it says so.`
+	if r := deny(t, "ls"); r != want {
 		t.Errorf("no SKILL.md installed: got %q, want %q", r, want)
 	}
-	md := skillMD(t, "deployer")
-	if r := deny(t, "ls"); r != want+" Reading "+md+" in full also works."+reassured {
-		t.Errorf("got %q", r)
+	skillMD(t, "deployer")
+	if r := deny(t, "ls"); r != want {
+		t.Errorf("SKILL.md installed: got %q, want %q", r, want)
 	}
 }
 

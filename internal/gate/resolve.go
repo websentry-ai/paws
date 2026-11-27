@@ -261,7 +261,7 @@ func sessionSkillContext(r *rule.Rule, ev Event) string {
 // reading the chat knows where the block came from, and names every missing skill in one sentence.
 // The instruction comes first and the reassurance last: Claude Code labels every deny "hook error", so the reason
 // says nothing is broken, but opening with that cut how often a small model retried correctly.
-// e.g. paws (rule git--git): this command needs the "git" skill. Load and follow it, then run the command again, changed if it says so. This is paws working as intended.
+// e.g. paws (rule git--git): this needs the "git" skill. Load and follow it, then run the command again, changed if it says so.
 func skillReason(names, skills []string, ev Event) string {
 	label := "rule " + names[0]
 	if len(names) > 1 {
@@ -278,7 +278,7 @@ func skillReason(names, skills []string, ev Event) string {
 		need = fmt.Sprintf("the %s and %s skills", strings.Join(quoted[:len(quoted)-1], ", "), quoted[len(quoted)-1])
 	}
 	noun := actionNoun(ev)
-	return fmt.Sprintf("paws (%s): this %s needs %s. %s", label, noun, need, ev.harness().LoadSkills(refs, noun))
+	return fmt.Sprintf("paws (%s): this needs %s. %s", label, need, ev.harness().LoadSkills(refs, noun))
 }
 
 // actionNoun names the call a deny blocks: Claude retries "this exact command" for Bash, and the

@@ -354,6 +354,16 @@ func TestACutReadCoversOnlyWhatTheAgentSaw(t *testing.T) {
 	if out := gateCall(t, "Bash", push, log([2]string{"tail -n 1000 " + md, preview}, rest)); out != "{}" {
 		t.Errorf("a cut tail -n 1000 shows lines 1-40; with 41-1000 that covers it, got %s", out)
 	}
+	claudeCut := "rule line 1\nrule line 2\n... [996 lines truncated] ...\nrule line 999\nrule line 1000\n"
+	if out := gateCall(t, "Bash", push, log([2]string{"cat " + md, claudeCut})); !strings.Contains(out, `"deny"`) {
+		t.Errorf("an output Claude Code cut with [N lines truncated] covers only its first lines, got %s", out)
+	}
+	// A skill line that only mentions a cut, in a sentence, is not one.
+	os.WriteFile(md, []byte("Codex can print ... 12 lines truncated ... when output is long.\n"), 0o644)
+	if out := gateCall(t, "Bash", push, log([2]string{"cat " + md, "Codex can print ... 12 lines truncated ... when output is long.\n"})); out != "{}" {
+		t.Errorf("a full read of a skill that mentions a cut loads it, got %s", out)
+	}
+	os.WriteFile(md, []byte(body.String()), 0o644)
 	codexCut := "rule line 1\nrule line 2\n…48211 tokens truncated…\nrule line 1000\n"
 	if out := gateCall(t, "Bash", push, log([2]string{"cat " + md, codexCut})); !strings.Contains(out, `"deny"`) {
 		t.Errorf("an output cut in the middle covers only its first lines, got %s", out)

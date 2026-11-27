@@ -107,6 +107,19 @@ func (s skipSynced) Calls(since, until time.Time, fn func(history.Call)) (int, e
 	return len(counted), nil // sessions with a call left in
 }
 
+// skillReads is a history.Source whose calls that read a skill's SKILL.md are the skill loads they are, as the hook
+// logs them: they count toward `loaded`.
+type skillReads struct{ history.Source }
+
+func (s skillReads) Calls(since, until time.Time, fn func(history.Call)) (int, error) {
+	return s.Source.Calls(since, until, func(c history.Call) {
+		if skill := gate.PastSkillRead(c.Tool, c.Target, ""); skill != "" {
+			c.Tool, c.Target = history.SkillTool, skill
+		}
+		fn(c)
+	})
+}
+
 // take marks and reports the earliest unused record of c's session that is c: same tool, the same command (Bash,
 // as the hook redacts it), file (as the hook keeps it, relative to the repo) or action key, written while c could
 // have been running. The log has whole seconds, so a record may read up to a second before the call.
@@ -336,6 +349,7 @@ func buildScan(creds *credentials, days int) ([]byte, history.Summary, error) {
 	since := until.AddDate(0, 0, -days)
 	a := defaultAdapter()
 	src, dir := a.History()
+	src = skillReads{src}
 	// Once logged in, sync uploads every call the hook logged, from before the login too (the first sync sends the
 	// whole audit log). Each of those reached the portal already, so it is left out; a call the hook never logged (paws
 	// not registered there, or not yet) still counts.

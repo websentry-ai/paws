@@ -378,4 +378,7 @@ func TestScanPairsASKILLmdReadWithItsSkillAction(t *testing.T) {
 	if code != 0 || got.ToolCalls != 0 {
 		t.Errorf("the read the hook logged as a Skill action counted again: exit %d, %d calls", code, got.ToolCalls)
 	}
+	if len(got.Loaded) != 1 || got.Loaded[0].Name != "coreutils" {
+		t.Errorf("a read of coreutils' SKILL.md is a load of coreutils: loaded %+v", got.Loaded)
+	}
 }

@@ -613,6 +613,9 @@ func (Adapter) Turns(h *harness.Hook) harness.TurnLog {
 
 // SkillDirs are where Codex finds skills: ~/.agents/skills, the repo's .agents/skills and $CODEX_HOME/skills; then
 // Claude Code's folders, whose skills the agent can read just the same when paws names the file.
+//
+// The user's folder comes before the project's on purpose: Claude Code ranks personal skills above project skills,
+// and gate.SkillTool lists them in that order. A deny that needs skill X then names the same X on both harnesses.
 func (Adapter) SkillDirs(cwd string) []string {
 	return append([]string{userSkills(), filepath.Join(gate.RepoRoot(cwd), ".agents", "skills"), filepath.Join(Home(), "skills")},
 		gate.SkillTool.SkillDirs(cwd)...)

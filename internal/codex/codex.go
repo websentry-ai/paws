@@ -161,28 +161,40 @@ var cdStep = regexp.MustCompile(`^cd\s+(?:'([^']*)'|"([^"]*)"|(\S+))$`)
 var chainSep = regexp.MustCompile(`&&|\|\||[;\n]`)
 
 // patchDir is where a shell patch runs: the hook's cwd, moved by each `cd` in the commands before apply_patch, so a
-// relative path in `ls && cd migrations && apply_patch ...` is a file in migrations/.
+// relative path in `ls && cd migrations && apply_patch ...` is a file in migrations/. A cd inside a subshell that
+// closes before apply_patch moves nothing.
 func patchDir(cmd, cwd string) string {
 	before, _, ok := strings.Cut(cmd, "apply_patch")
 	if !ok {
 		return cwd
 	}
+	var outer []string // the folder each open subshell started in
 	for _, part := range chainSep.Split(before, -1) {
-		m := cdStep.FindStringSubmatch(strings.TrimLeft(strings.TrimSpace(part), "( ")) // (cd x && apply_patch ...)
-		if m == nil {
-			continue
+		part = strings.TrimSpace(part)
+		for strings.HasPrefix(part, "(") {
+			outer, part = append(outer, cwd), strings.TrimSpace(part[1:])
 		}
-		dir := m[1] + m[2] + m[3]
-		if rest, ok := strings.CutPrefix(dir, "~/"); ok {
-			home, _ := os.UserHomeDir()
-			dir = filepath.Join(home, rest)
+		inner := strings.TrimRight(part, ") ")
+		if m := cdStep.FindStringSubmatch(inner); m != nil {
+			cwd = cdTo(m[1]+m[2]+m[3], cwd)
 		}
-		if !filepath.IsAbs(dir) {
-			dir = filepath.Join(cwd, dir)
+		for closes := strings.Count(part[len(inner):], ")"); closes > 0 && len(outer) > 0; closes-- {
+			cwd, outer = outer[len(outer)-1], outer[:len(outer)-1] // the subshell ended: back where it began
 		}
-		cwd = filepath.Clean(dir) // cd a && cd b: b is from a
 	}
 	return cwd
+}
+
+// cdTo is the folder `cd dir` moves to from cwd.
+func cdTo(dir, cwd string) string {
+	if rest, ok := strings.CutPrefix(dir, "~/"); ok {
+		home, _ := os.UserHomeDir()
+		dir = filepath.Join(home, rest)
+	}
+	if !filepath.IsAbs(dir) {
+		dir = filepath.Join(cwd, dir)
+	}
+	return filepath.Clean(dir)
 }
 
 // patchCalls are a patch's files as canonical calls: a Write for a new file, an Edit for any other, relative paths

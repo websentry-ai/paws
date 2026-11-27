@@ -241,3 +241,17 @@ func TestCodexProjectHookIsGuarded(t *testing.T) {
 		t.Error("a guarded Codex entry is still paws's")
 	}
 }
+
+// A custom portal skill the user put only in Codex's skill folder is there: its rules are written, not skipped.
+func TestPortalSkillInACodexFolderIsInstalled(t *testing.T) {
+	home := portalEnv(t, http.NotFoundHandler())
+	codexSkill(t, "house-style")
+	res, err := applyConfig(portalConfig{ConfigHash: "h1", Skills: []portalSkill{{Name: "house-style", Kind: "skill", Load: "full", Status: "on",
+		Actions: []portalAction{{ID: "docs", Label: "Edit docs", Event: "pre-tool", Tool: "Write|Edit", FileGlob: "docs/**"}}}}}, t.TempDir())
+	if err != nil || len(res.Applied) != 1 || res.Pending {
+		t.Fatalf("want house-style applied, got %+v %v", res, err)
+	}
+	if rules, _ := filepath.Glob(filepath.Join(home, "portal", "house-style--*.md")); len(rules) != 1 {
+		t.Errorf("want its rule file written, got %v", rules)
+	}
+}

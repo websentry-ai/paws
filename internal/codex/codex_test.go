@@ -373,3 +373,12 @@ func TestShellPatchNeedsApplyPatch(t *testing.T) {
 		t.Errorf("want /repo/migrations/1.sql, got %+v", h.Calls)
 	}
 }
+
+// A cd inside a subshell that closes before apply_patch moves nothing.
+func TestShellPatchAfterAClosedSubshell(t *testing.T) {
+	h := parse(t, stdin(t, "PreToolUse", "t1", map[string]any{"tool_name": "Bash", "tool_input": map[string]any{
+		"command": "(cd tmp && ls) && cd db && apply_patch <<'EOF'\n*** Begin Patch\n*** Add File: 1.sql\n+x\n*** End Patch\nEOF"}}))
+	if len(h.Calls) != 2 || h.Calls[1].Target != "/repo/db/1.sql" {
+		t.Errorf("want /repo/db/1.sql, got %+v", h.Calls)
+	}
+}

@@ -182,13 +182,16 @@ func shellPatches(cmd, cwd string) []shellPatch {
 			end = starts[k+1]
 		}
 		run := shellPatch{text: cmd[at:end], dir: patchDir(cmd[:at], cwd)}
-		if m := pipedFrom.FindStringSubmatch(cmd[:at]); m != nil && !strings.Contains(run.text, "*** Begin Patch") {
-			run.text = readPatchFile(m[1], run.dir) // cat fix.patch | apply_patch: the patch is that file
-		}
+		// A patch from a file (apply_patch < fix.patch, cat fix.patch | apply_patch) is that file as it is now, or as
+		// an earlier command in this call writes it: any patch text before the run.
+		file := ""
 		if m := patchFromFile.FindStringSubmatch(run.text); m != nil {
-			// apply_patch < fix.patch: the patch is that file, as it is now, or as an earlier command in this call
-			// writes it (any patch text before the run).
-			run.text = readPatchFile(m[1], run.dir) + "\n" + strings.Join(patchBlock.FindAllString(cmd[:at], -1), "\n")
+			file = m[1]
+		} else if m := pipedFrom.FindStringSubmatch(cmd[:at]); m != nil && !strings.Contains(run.text, "*** Begin Patch") {
+			file = m[1]
+		}
+		if file != "" {
+			run.text = readPatchFile(file, run.dir) + "\n" + strings.Join(patchBlock.FindAllString(cmd[:at], -1), "\n")
 		}
 		out = append(out, run)
 	}

@@ -539,4 +539,9 @@ func TestShellPatchPipedFromAFile(t *testing.T) {
 	if len(h.Calls) != 2 || h.Calls[1].Target != filepath.Join(dir, "migrations", "5.sql") {
 		t.Errorf("want an Edit of migrations/5.sql, got %+v", h.Calls)
 	}
+	h = parse(t, stdin(t, "PreToolUse", "t1", map[string]any{"tool_name": "Bash", "cwd": dir, "tool_input": map[string]any{
+		"command": "cat > new.patch <<'EOF'\n*** Begin Patch\n*** Add File: migrations/6.sql\n+z\n*** End Patch\nEOF\ncat new.patch | apply_patch"}}))
+	if len(h.Calls) != 2 || h.Calls[1].Target != filepath.Join(dir, "migrations", "6.sql") {
+		t.Errorf("a piped file written in the same call: want a Write of migrations/6.sql, got %+v", h.Calls)
+	}
 }

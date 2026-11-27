@@ -1,6 +1,7 @@
 package cli
 
 import (
+	"encoding/json"
 	"os"
 	"path/filepath"
 	"strings"
@@ -457,5 +458,61 @@ func TestSyncKeepsEditedAndUpdatesOlderCopies(t *testing.T) {
 	// As with paws add, the edit isn't copied on into Codex's folder as paws's own.
 	if data, _ := os.ReadFile(codex); string(data) != "# humanizer v2\n" {
 		t.Errorf("Codex's copy: %q", data)
+	}
+}
+
+// claudeRead is a Claude Code transcript where the Read tool read file in full.
+func claudeRead(t *testing.T, file string) string {
+	t.Helper()
+	in, _ := json.Marshal(map[string]string{"file_path": file})
+	p := filepath.Join(t.TempDir(), "s.jsonl")
+	writeFile(t, p, `{"type":"user","isSidechain":false,"message":{"role":"user","content":"open the PR"}}`+"\n"+
+		`{"type":"assistant","isSidechain":false,"message":{"content":[{"type":"tool_use","id":"toolu_r","name":"Read","input":`+string(in)+`}]}}`+"\n"+
+		`{"type":"user","isSidechain":false,"message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"toolu_r","content":"x"}]},"toolUseResult":{"type":"text"}}`+"\n")
+	return p
+}
+
+// Codex runs paws globally and Claude Code only in another repo: a global add from here installs for Codex only.
+// Claude Code, in that repo, is told to read Codex's copy, and the read lets the call through.
+func TestClaudeElsewhereReadsTheCodexCopy(t *testing.T) {
+	home, repo := storeEnv(t)
+	mustRun(t, Init, "--agent", "codex", "--global")
+	other := filepath.Join(home, "other")
+	os.MkdirAll(filepath.Join(other, ".git"), 0o755)
+	t.Chdir(other)
+	mustRun(t, Init)
+	t.Chdir(repo)
+	mustRun(t, Add, "writing")
+	md := filepath.Join(home, ".agents", "skills", "humanizer", "SKILL.md")
+	if isThere(filepath.Join(home, ".claude", "skills", "humanizer")) || !isThere(md) {
+		t.Fatal("Claude Code isn't set up here: the global add installs for Codex only")
+	}
+	t.Chdir(other)
+	if r := claudeDeny(t, prCreate, ""); r != `paws (rule humanizer-pr): this needs the "humanizer" skill. Read `+md+`, then run the command again.` {
+		t.Errorf("deny %q, want it to name %s", r, md)
+	}
+	if r := claudeDeny(t, prCreate, claudeRead(t, md)); r != "" {
+		t.Errorf("reading Codex's copy lets the call through, got %q", r)
+	}
+}
+
+// Claude Code set up after Codex, with the user's own copy in Codex's folder (init copies only paws's): Claude Code is
+// told to read the user's copy, which loads it.
+func TestClaudeAfterCodexReadsTheUsersCopy(t *testing.T) {
+	home, _ := storeEnv(t)
+	mustRun(t, Init, "--agent", "codex", "--global")
+	mine := ownSkill(t, filepath.Join(home, ".agents", "skills"), "humanizer", "my own humanizer\n")
+	mustRun(t, Add, "writing")
+	mustRun(t, Init, "--global")
+	if r := claudeDeny(t, prCreate, ""); !strings.Contains(r, "Read "+mine+", then run the command again.") {
+		t.Errorf("deny %q, want it to name %s", r, mine)
+	}
+	if r := claudeDeny(t, prCreate, claudeRead(t, mine)); r != "" {
+		t.Errorf("reading the user's copy lets the call through, got %q", r)
+	}
+	// With a copy in Claude Code's own folder, the deny is the short Skill tool sentence again.
+	ownSkill(t, filepath.Join(home, ".claude", "skills"), "humanizer", "mine for Claude\n")
+	if r := claudeDeny(t, prCreate, ""); !strings.HasSuffix(r, "Load it, then run the command again.") {
+		t.Errorf("deny %q", r)
 	}
 }

@@ -2,8 +2,10 @@ package hook
 
 import (
 	"encoding/json"
+	"fmt"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"time"
 
@@ -77,14 +79,50 @@ func (Claude) History() (history.Source, string) {
 	return Transcripts{Dir: dir}, dir
 }
 
-func (Claude) SkillDirs(cwd string) []string { return gate.SkillTool.SkillDirs(cwd) }
+// SkillDirs are Claude Code's folders, then the ones paws installs Codex's skills into (~/.agents/skills, the repo's
+// .agents/skills): Claude Code doesn't list a skill that is only there, but the agent can read its SKILL.md when the
+// deny names the file. paws installs only for the agents set up here, so a global skill added while Claude Code ran
+// paws in another repo only, or a same-name skill of the user's that paws kept for Codex, may be only there.
+func (Claude) SkillDirs(cwd string) []string {
+	home, _ := os.UserHomeDir()
+	return append(gate.SkillTool.SkillDirs(cwd), filepath.Join(home, ".agents", "skills"), filepath.Join(gate.RepoRoot(cwd), ".agents", "skills"))
+}
 
 // SkillTrees: a plugin's skills sit at <config>/plugins/<...>/skills/<skill>/SKILL.md.
 func (Claude) SkillTrees() []string { return []string{filepath.Join(ConfigDir(), "plugins")} }
 
 // LoadSkills is the Skill tool sentence. A SKILL.md read loads a skill too (one installed mid-session isn't in the
-// Skill tool's list); the deny doesn't name the path, to stay short.
-func (Claude) LoadSkills(skills []gate.Skill, noun string) string { return gate.SkillToolInstruction(skills, noun) }
+// Skill tool's list); the deny doesn't name the path, to stay short. When a skill is only in another agent's folder,
+// where the Skill tool can't find it, the deny names the files to read instead.
+func (Claude) LoadSkills(skills []gate.Skill, noun string) string {
+	if !slices.ContainsFunc(skills, outsideClaude) {
+		return gate.SkillToolInstruction(skills, noun)
+	}
+	files := make([]string, len(skills))
+	for i, s := range skills {
+		files[i] = s.File
+		if s.File == "" {
+			files[i] = fmt.Sprintf("the %s skill's SKILL.md", s.Name)
+		}
+	}
+	return fmt.Sprintf("Read %s, then %s again.", andList(files), gate.Retry(noun))
+}
+
+// outsideClaude reports whether paws found s's SKILL.md in a folder other than Claude Code's own skills folders.
+func outsideClaude(s gate.Skill) bool {
+	if s.File == "" {
+		return false
+	}
+	dir := filepath.Dir(filepath.Dir(filepath.Dir(s.File))) // <dir>/skills/<skill>/SKILL.md
+	return filepath.Base(dir) != ".claude" && filepath.Clean(dir) != filepath.Clean(ConfigDir())
+}
+
+func andList(items []string) string {
+	if len(items) == 1 {
+		return items[0]
+	}
+	return strings.Join(items[:len(items)-1], ", ") + " and " + items[len(items)-1]
+}
 
 func (Claude) LoadAtStart(s gate.Skill) string {
 	return gate.SkillTool.LoadAtStart(s) + readAlso([]gate.Skill{s})

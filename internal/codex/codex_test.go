@@ -501,3 +501,18 @@ func TestShellPatchAfterBareCd(t *testing.T) {
 		t.Errorf("cdx is not cd: want /repo/notes.md, got %+v", h.Calls)
 	}
 }
+
+// Heredoc text before a patch is data, not cd commands; a patch read from a file on stdin is gated too.
+func TestShellPatchHeredocDataAndStdinFile(t *testing.T) {
+	h := parse(t, stdin(t, "PreToolUse", "t1", map[string]any{"tool_name": "Bash", "tool_input": map[string]any{
+		"command": "cat > notes.txt <<'EOF'\ncd elsewhere\nEOF\napply_patch <<'EOF'\n*** Begin Patch\n*** Add File: 1.sql\n+x\n*** End Patch\nEOF"}}))
+	if len(h.Calls) != 2 || h.Calls[1].Target != "/repo/1.sql" {
+		t.Errorf("heredoc data moved the folder: want /repo/1.sql, got %+v", h.Calls)
+	}
+	dir := t.TempDir()
+	os.WriteFile(filepath.Join(dir, "fix.patch"), []byte("*** Begin Patch\n*** Update File: migrations/2.sql\n@@\n+y\n*** End Patch\n"), 0o644)
+	h = parse(t, stdin(t, "PreToolUse", "t1", map[string]any{"tool_name": "Bash", "cwd": dir, "tool_input": map[string]any{"command": "apply_patch < fix.patch"}}))
+	if len(h.Calls) != 2 || h.Calls[1].Tool != "Edit" || h.Calls[1].Target != filepath.Join(dir, "migrations", "2.sql") {
+		t.Errorf("apply_patch < fix.patch: want an Edit of migrations/2.sql, got %+v", h.Calls)
+	}
+}

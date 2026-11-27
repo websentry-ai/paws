@@ -126,10 +126,8 @@ func canonical(in *Input) []call {
 		// also edits files: those are gated too, as Codex's apply_patch tool is.
 		cmd := str("command")
 		calls := []call{{tool: "Bash", target: cmd, text: cmd, input: map[string]any{"command": cmd}}}
-		if before, _, ok := strings.Cut(cmd, "*** Begin Patch"); ok && applyPatchCmd.MatchString(before) {
-			for _, sp := range shellPatches(cmd, in.CWD) {
-				calls = append(calls, patchCalls(sp.text, sp.dir)...)
-			}
+		for _, sp := range shellPatches(cmd, in.CWD) {
+			calls = append(calls, patchCalls(sp.text, sp.dir)...)
 		}
 		return calls
 	case in.ToolName == "apply_patch":
@@ -183,9 +181,29 @@ func shellPatches(cmd, cwd string) []shellPatch {
 		if k+1 < len(starts) {
 			end = starts[k+1]
 		}
-		out = append(out, shellPatch{text: cmd[at:end], dir: patchDir(cmd[:at], cwd)})
+		run := shellPatch{text: cmd[at:end], dir: patchDir(cmd[:at], cwd)}
+		if m := patchFromFile.FindStringSubmatch(run.text); m != nil {
+			run.text = readPatchFile(m[1], run.dir) // apply_patch < fix.patch: the patch is that file
+		}
+		out = append(out, run)
 	}
 	return out
+}
+
+// patchFromFile is an apply_patch that reads its patch from a file on stdin: apply_patch < fix.patch (not <<).
+var patchFromFile = regexp.MustCompile(`^apply_?patch[ \t]*<[ \t]*([^<\s]\S*)`)
+
+// readPatchFile is the patch in the file at p (relative to dir), "" when it can't be read or is too big to be one.
+func readPatchFile(p, dir string) string {
+	p = strings.Trim(p, `'"`)
+	if !filepath.IsAbs(p) {
+		p = filepath.Join(dir, p)
+	}
+	if st, err := os.Stat(p); err != nil || !st.Mode().IsRegular() || st.Size() > maxRecordText*16 {
+		return ""
+	}
+	data, _ := os.ReadFile(p)
+	return string(data)
 }
 
 // patchDir is where a shell patch runs, given the command before it: the hook's cwd, moved by each `cd`, so a
@@ -193,7 +211,7 @@ func shellPatches(cmd, cwd string) []shellPatch {
 // closes before apply_patch moves nothing.
 func patchDir(before, cwd string) string {
 	var outer []string // the folder each open subshell started in
-	for _, part := range chainSep.Split(before, -1) {
+	for _, part := range chainSep.Split(withoutHeredocs(before), -1) {
 		part = strings.TrimSpace(part)
 		for strings.HasPrefix(part, "(") {
 			outer, part = append(outer, cwd), strings.TrimSpace(part[1:])
@@ -223,6 +241,30 @@ func cdTo(dir, cwd string) string {
 		dir = filepath.Join(cwd, dir)
 	}
 	return filepath.Clean(dir)
+}
+
+// heredocStart opens a here-document: <<EOF, <<'EOF', <<"EOF", <<-EOF.
+var heredocStart = regexp.MustCompile(`<<-?[ \t]*['"]?([A-Za-z_][A-Za-z0-9_]*)['"]?`)
+
+// withoutHeredocs is a command line with its here-document bodies taken out: their lines are data, not commands, so
+// a `cd x` line inside one moves nothing.
+func withoutHeredocs(s string) string {
+	var out []string
+	end := "" // the delimiter that closes the body being skipped
+	for _, line := range strings.Split(s, "\n") {
+		switch {
+		case end != "":
+			if strings.TrimSpace(line) == end {
+				end = ""
+			}
+		default:
+			out = append(out, line)
+			if m := heredocStart.FindStringSubmatch(line); m != nil {
+				end = m[1]
+			}
+		}
+	}
+	return strings.Join(out, "\n")
 }
 
 // patchCalls are a patch's files as canonical calls: a Write for a new file, an Edit for any other, relative paths

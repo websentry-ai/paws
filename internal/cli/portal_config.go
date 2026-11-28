@@ -227,6 +227,13 @@ func writeAtomic(path string, data []byte, perm os.FileMode) error {
 // returns nil when nothing changed. The applied hash is recorded only when every skill could be
 // fetched, so a network failure is retried at the next check.
 func pullConfig(creds *credentials, st *portalState, known, cwd string) (*applyResult, error) {
+	// Every check notes the agents running paws here, so an agent hooked in this repo only counts for clashes when a
+	// later check runs elsewhere, whether or not this one re-applies.
+	for _, n := range hookedNames() {
+		if !slices.Contains(st.Agents, n) {
+			st.Agents = append(st.Agents, n)
+		}
+	}
 	hash := known
 	if hash == "" {
 		var h struct {
@@ -245,11 +252,6 @@ func pullConfig(creds *credentials, st *portalState, known, cwd string) (*applyR
 		return nil, err
 	}
 	useSkillFiles(creds.API) // the backend that sent the config holds its skills' files
-	for _, n := range hookedNames() {
-		if !slices.Contains(st.Agents, n) {
-			st.Agents = append(st.Agents, n)
-		}
-	}
 	res, err := applyConfig(cfg, cwd, st.Agents)
 	st.Skills = res.Applied
 	st.Clashes, st.Clashed, st.Installed, st.ClashChecked = res.Clashes, res.Clashed, res.Catalog, true

@@ -557,6 +557,29 @@ func TestSyncFindsAClashWithAnOlderStateFile(t *testing.T) {
 	}
 }
 
+// Codex hooked in a repo where a sync finds nothing to change is still noted: a copy of the user's in Codex's folder
+// that appears later is a clash for a sync run elsewhere.
+func TestPortalNotesAnAgentOnAnUnchangedSync(t *testing.T) {
+	home, srv := syncEnv(t)
+	t.Setenv("CODEX_HOME", "")
+	userHome := os.Getenv("HOME")
+	mustRun(t, Init, "--global")
+	srv.configHash = "h1"
+	srv.config = configJSON(t, "h1", humanizerSkill(fakeUpstream(t, "# humanizer\n")))
+	mustRun(t, Sync)
+	repo := filepath.Join(userHome, "repo-a")
+	os.MkdirAll(filepath.Join(repo, ".git"), 0o755)
+	t.Chdir(repo)
+	mustRun(t, Init, "--agent", "codex")
+	mustRun(t, Sync) // same hash, nothing to apply
+	t.Chdir(userHome)
+	os.RemoveAll(filepath.Join(userHome, ".agents", "skills", "humanizer")) // init copied paws's there
+	ownSkill(t, filepath.Join(userHome, ".agents", "skills"), "humanizer", "mine\n")
+	if out := mustRun(t, Sync); !strings.Contains(out, `skipped humanizer: you already have a skill named "humanizer" (~/.agents/skills/humanizer)`) || len(portalFiles(t, home)) != 0 {
+		t.Errorf("sync output:\n%s", out)
+	}
+}
+
 // The user replaces paws's copy with their own in place: the same config's next check leaves the skill out.
 func TestSyncFindsAClashThatReplacedPawsCopy(t *testing.T) {
 	home, srv := syncEnv(t)

@@ -259,7 +259,11 @@ func pullConfig(creds *credentials, st *portalState, known, cwd string) (*applyR
 	useSkillFiles(creds.API) // the backend that sent the config holds its skills' files
 	res, err := applyConfig(cfg, cwd, st.Agents)
 	st.Skills = res.Applied
-	st.Clashes, st.Clashed, st.ClashDirs, st.Installed, st.ClashChecked = res.Clashes, res.Clashed, res.ClashDirs, res.Catalog, true
+	if err == nil {
+		// Only a clean apply records its clashes: after a failed one (say a rule file paws couldn't remove), the
+		// state stays as it was, so the next check sees the drift again and retries.
+		st.Clashes, st.Clashed, st.ClashDirs, st.Installed, st.ClashChecked = res.Clashes, res.Clashed, res.ClashDirs, res.Catalog, true
+	}
 	if err == nil && !res.Pending {
 		st.AppliedHash = cfg.ConfigHash
 	}
@@ -282,8 +286,8 @@ func portalDrifted(st *portalState, cwd string) bool {
 		return true // applied by an older paws, which kept a skill's rules on for a user's own copy of it
 	}
 	for _, name := range st.Clashed {
-		if len(pack.OwnCopies(loaded, name)) == 0 {
-			return true // the user's copy that kept it out is gone
+		if !samePaths(pack.OwnCopies(loaded, name), st.ClashDirs[name]) {
+			return true // the user's copies that kept it out changed: all gone, or one more or fewer to name
 		}
 	}
 	for _, name := range st.Installed {
@@ -640,4 +644,21 @@ func writeManaged(dir string, want map[string][]byte) error {
 		}
 	}
 	return nil
+}
+
+// samePaths reports whether a and b hold the same paths, in any order.
+func samePaths(a, b []string) bool {
+	if len(a) != len(b) {
+		return false
+	}
+	seen := map[string]int{}
+	for _, p := range a {
+		seen[filepath.Clean(p)]++
+	}
+	for _, p := range b {
+		if seen[filepath.Clean(p)]--; seen[filepath.Clean(p)] < 0 {
+			return false
+		}
+	}
+	return true
 }

@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 	"testing/fstest"
@@ -620,7 +621,7 @@ func TestPortalClashesRememberAgentsHookedInARepo(t *testing.T) {
 	}
 }
 
-// Portal sync keeps an edited paws copy// Portal sync keeps an edited paws copy, says so, and updates an unedited older one in both agents' folders.
+// Portal sync keeps an edited paws copy, says so, and updates an unedited older one in both agents' folders.
 func TestSyncKeepsEditedAndUpdatesOlderCopies(t *testing.T) {
 	_, srv := syncEnv(t)
 	t.Setenv("CODEX_HOME", "")
@@ -833,5 +834,63 @@ func TestSyncReportsClashesToThePortal(t *testing.T) {
 func TestSyncSendsNoClashesBeforeAnyCheck(t *testing.T) {
 	if got := clashReports(portalState{}); got != nil {
 		t.Errorf("clashReports(empty state) = %v, want nil", *got)
+	}
+}
+
+// The user removes one of two copies that keep a skill out: the same config's next sync names only the one left, in
+// its output and in what it tells the portal.
+func TestSyncRenamesTheCopiesBehindAClash(t *testing.T) {
+	_, srv := syncEnv(t)
+	t.Setenv("CODEX_HOME", "")
+	userHome := os.Getenv("HOME")
+	mustRun(t, Init, "--global")
+	mustRun(t, Init, "--global", "--agent", "codex")
+	ownSkill(t, filepath.Join(userHome, ".claude", "skills"), "humanizer", "mine\n")
+	ownSkill(t, filepath.Join(userHome, ".agents", "skills"), "humanizer", "mine\n")
+	srv.configHash = "h1"
+	srv.config = configJSON(t, "h1", humanizerSkill(fakeUpstream(t, "# humanizer\n")))
+	if out := mustRun(t, Sync); !strings.Contains(out, "~/.claude/skills/humanizer, ~/.agents/skills/humanizer") {
+		t.Errorf("sync with both copies:\n%s", out)
+	}
+	os.RemoveAll(filepath.Join(userHome, ".agents", "skills", "humanizer"))
+	out := mustRun(t, Sync)
+	if !strings.Contains(out, `skipped humanizer: you already have a skill named "humanizer" (~/.claude/skills/humanizer), so`) {
+		t.Errorf("sync after one copy went:\n%s", out)
+	}
+	var b struct {
+		Clashes []clashReport `json:"clashes"`
+	}
+	json.Unmarshal([]byte(srv.bodies[len(srv.bodies)-1]), &b)
+	if len(b.Clashes) != 1 || strings.Join(b.Clashes[0].Paths, ",") != "~/.claude/skills/humanizer" {
+		t.Errorf("clashes sent: %+v", b.Clashes)
+	}
+}
+
+// A same-hash sync finds a new clash but can't remove the skill's rule file: it records nothing, so the next sync,
+// once it can write, retries and takes the rule away.
+func TestSyncRetriesAClashItCouldNotApply(t *testing.T) {
+	home, srv := syncEnv(t)
+	userHome := os.Getenv("HOME")
+	mustRun(t, Init, "--global")
+	srv.configHash = "h1"
+	srv.config = configJSON(t, "h1", humanizerSkill(fakeUpstream(t, "# humanizer\n")))
+	mustRun(t, Sync)
+	if len(portalFiles(t, home)) == 0 {
+		t.Fatal("no portal rule after the first sync")
+	}
+	os.RemoveAll(filepath.Join(userHome, ".claude", "skills", "humanizer"))
+	ownSkill(t, filepath.Join(userHome, ".claude", "skills"), "humanizer", "mine\n")
+	// A non-empty folder in place of the rule file: paws can't remove it, and can still save its state.
+	rule := filepath.Join(home, "portal", portalFiles(t, home)[0])
+	os.Remove(rule)
+	os.MkdirAll(filepath.Join(rule, "x"), 0o755)
+	captureStdout(t, func() int { return Sync(nil) })
+	if st := loadPortalState(); slices.Contains(st.Clashed, "humanizer") {
+		t.Errorf("a failed apply recorded the clash: %+v", st)
+	}
+	os.RemoveAll(rule)
+	os.WriteFile(rule, []byte("left over\n"), 0o644)
+	if out := mustRun(t, Sync); !strings.Contains(out, "skipped humanizer") || len(portalFiles(t, home)) != 0 {
+		t.Errorf("the retry left the rule:\n%s\n%v", out, portalFiles(t, home))
 	}
 }

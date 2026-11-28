@@ -10,6 +10,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"slices"
 	"sort"
 	"strconv"
 	"strings"
@@ -36,6 +37,25 @@ type portalState struct {
 	Revoked     bool      `json:"revoked,omitempty"` // the portal answered 401; login was forgotten
 	// AccountDeleted: the portal said the account was deleted (403 account_deleted); Revoked is set too.
 	AccountDeleted bool `json:"account_deleted,omitempty"`
+	// Clashes are the last applied config's notes on skills the user already has their own of: paws synced neither the
+	// skill nor its rules. A session start shows them.
+	Clashes []string `json:"clashes,omitempty"`
+	// Clashed are the skills the last applied config left out for a clash: once the user's copy goes, the next check
+	// re-applies though the config hash hasn't changed.
+	Clashed []string `json:"clashed,omitempty"`
+	// ClashDirs are, for each skill in Clashed, the user's own copies that kept it out, which the next sync reports
+	// to the portal so its Skills page can say why the skill doesn't run on this laptop.
+	ClashDirs map[string][]string `json:"clash_dirs,omitempty"`
+	// Installed are the applied skills whose files paws installs (catalog skills): a copy of the user's appearing by
+	// one's name, beside paws's or in its place, re-applies the config, which leaves the skill out.
+	Installed []string `json:"installed,omitempty"`
+	// Agents are the agents seen running paws (globally, or in the repo a sync ran in) when a config was applied. The
+	// portal's skills are global, so a user's own copy where any of them loads skills is a clash, wherever the next
+	// sync runs; an agent hooked in one repo only counts from then on.
+	Agents []string `json:"agents,omitempty"`
+	// ClashChecked is set once a config was applied by a paws that leaves out clashing skills. A state file without
+	// it re-applies once, so rules an older paws kept on for a user's own copy go.
+	ClashChecked bool `json:"clash_checked,omitempty"`
 }
 
 // portalConfig is GET /config: the account's skills that are on.
@@ -96,8 +116,13 @@ type applyResult struct {
 	Hash    string
 	Applied []string // skills whose rule files are in place
 	Skipped []string // "<skill>: <reason>"
-	Kept    []string // a catalog skill's folders that were already there and paws may not replace; left as they are
-	Pending bool     // a skill was left out; keep checking instead of recording the hash
+	Kept    []string // a catalog skill's folders paws installed and the user edited since; left as they are
+	Clashes []string // notes on catalog skills the user already has their own of, also in Skipped
+	Clashed []string // the skills those notes are about
+	// ClashDirs are the user's own copies behind each clash.
+	ClashDirs map[string][]string
+	Catalog   []string // the applied skills whose files paws installs
+	Pending   bool     // a skill was left out; keep checking instead of recording the hash
 }
 
 func portalDir() string {
@@ -207,6 +232,13 @@ func writeAtomic(path string, data []byte, perm os.FileMode) error {
 // returns nil when nothing changed. The applied hash is recorded only when every skill could be
 // fetched, so a network failure is retried at the next check.
 func pullConfig(creds *credentials, st *portalState, known, cwd string) (*applyResult, error) {
+	// Every check notes the agents running paws here, so an agent hooked in this repo only counts for clashes when a
+	// later check runs elsewhere, whether or not this one re-applies.
+	for _, n := range hookedNames() {
+		if !slices.Contains(st.Agents, n) {
+			st.Agents = append(st.Agents, n)
+		}
+	}
 	hash := known
 	if hash == "" {
 		var h struct {
@@ -225,8 +257,13 @@ func pullConfig(creds *credentials, st *portalState, known, cwd string) (*applyR
 		return nil, err
 	}
 	useSkillFiles(creds.API) // the backend that sent the config holds its skills' files
-	res, err := applyConfig(cfg, cwd)
-	st.Skills = res.Applied
+	res, err := applyConfig(cfg, cwd, st.Agents)
+	if err == nil {
+		// Only a clean apply is recorded: after a failed one (say a rule file paws couldn't remove), the state stays as
+		// it was, an older paws's included, so the next check sees the same drift and retries.
+		st.Skills = res.Applied
+		st.Clashes, st.Clashed, st.ClashDirs, st.Installed, st.ClashChecked = res.Clashes, res.Clashed, res.ClashDirs, res.Catalog, true
+	}
 	if err == nil && !res.Pending {
 		st.AppliedHash = cfg.ConfigHash
 	}
@@ -244,6 +281,20 @@ func portalDrifted(st *portalState, cwd string) bool {
 	}
 	skillsDir := pack.UserTarget(gate.UserDir()).SkillsDir
 	projectSkills := pack.ProjectTarget(projectRoot(cwd)).SkillsDir
+	loaded := loadedSkillDirs(true, projectRoot(cwd), st.Agents)
+	if !st.ClashChecked && len(st.Skills) > 0 {
+		return true // applied by an older paws, which kept a skill's rules on for a user's own copy of it
+	}
+	for _, name := range st.Clashed {
+		if !samePaths(pack.OwnCopies(loaded, name), st.ClashDirs[name]) {
+			return true // the user's copies that kept it out changed: all gone, or one more or fewer to name
+		}
+	}
+	for _, name := range st.Installed {
+		if len(pack.OwnCopies(loaded, name)) > 0 {
+			return true // a copy of the user's by that name, put there since or in the folder of an agent set up since
+		}
+	}
 	for _, name := range st.Skills {
 		if rules, _ := filepath.Glob(filepath.Join(dir, name+"--*.md")); len(rules) == 0 {
 			return true
@@ -278,7 +329,7 @@ func portalGet(creds *credentials, path string, v any) error {
 // and action, plus a digest per load=rule skill. Skills install first, and a full skill's rules
 // are written only once its SKILL.md is in place (user skills, or cwd's project), so a rule is
 // never live before the skill it requires can load.
-func applyConfig(cfg portalConfig, cwd string) (applyResult, error) {
+func applyConfig(cfg portalConfig, cwd string, agents []string) (applyResult, error) {
 	res := applyResult{Hash: cfg.ConfigHash}
 	dir := portalDir()
 	if dir == "" {
@@ -287,10 +338,23 @@ func applyConfig(cfg portalConfig, cwd string) (applyResult, error) {
 	stores := skillStores(true, "")
 	skillsDir := stores[0]
 	projectSkills := pack.ProjectTarget(projectRoot(cwd)).SkillsDir
+	loaded := loadedSkillDirs(true, projectRoot(cwd), agents)
 	want := map[string][]byte{} // path under dir -> content
 	var errs []error
 	for _, s := range cfg.Skills {
 		if s.Status == "off" {
+			continue
+		}
+		if own := pack.OwnCopies(loaded, s.Name); pawsInstalls(s) && len(own) > 0 {
+			// paws would install its copy beside the user's, and its rules would gate on whichever the agent loads.
+			note := clashNote(s.Name, own, "sync it", "sync again")
+			res.Skipped = append(res.Skipped, s.Name+": "+note)
+			res.Clashes, res.Clashed = append(res.Clashes, note), append(res.Clashed, s.Name)
+			if res.ClashDirs == nil {
+				res.ClashDirs = map[string][]string{}
+			}
+			res.ClashDirs[s.Name] = own
+			// Not pending: the config is applied as the user has it. portalDrifted re-applies once their copy is gone.
 			continue
 		}
 		files, skip, err := skillFiles(s, stores, dir, &res.Kept)
@@ -313,6 +377,9 @@ func applyConfig(cfg portalConfig, cwd string) (applyResult, error) {
 			want[p] = data
 		}
 		res.Applied = append(res.Applied, s.Name)
+		if pawsInstalls(s) {
+			res.Catalog = append(res.Catalog, s.Name)
+		}
 	}
 	sort.Strings(res.Applied)
 	if err := writeManaged(dir, want); err != nil {
@@ -433,6 +500,12 @@ func actionFiles(s portalSkill, digest, dir string) (map[string][]byte, []string
 
 // badPin: the config names an upstream skill without a github.com repo, a commit ref and a content hash.
 const badPin = "bad-pin"
+
+// pawsInstalls reports whether paws installs s's files (a catalog skill, pinned by hash): a custom skill is the user's
+// own to provide, and a load=rule skill installs nothing.
+func pawsInstalls(s portalSkill) bool {
+	return s.Load != "rule" && (s.ContentHash != "" || s.Upstream != nil && s.Upstream.Repo != "")
+}
 
 // installPortalSkill installs a catalog skill from the paws backend: the files the config's content hash names,
 // checked against it. An upstream skill must name a github.com repo at a commit, where the backend got the files; a
@@ -571,4 +644,21 @@ func writeManaged(dir string, want map[string][]byte) error {
 		}
 	}
 	return nil
+}
+
+// samePaths reports whether a and b hold the same paths, in any order.
+func samePaths(a, b []string) bool {
+	if len(a) != len(b) {
+		return false
+	}
+	seen := map[string]int{}
+	for _, p := range a {
+		seen[filepath.Clean(p)]++
+	}
+	for _, p := range b {
+		if seen[filepath.Clean(p)]--; seen[filepath.Clean(p)] < 0 {
+			return false
+		}
+	}
+	return true
 }

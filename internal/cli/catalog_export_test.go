@@ -186,7 +186,7 @@ func TestPortalIndexIsTheWholeCheckedCatalog(t *testing.T) {
 	}
 	var packs []pushPack
 	json.Unmarshal(doc["packs"], &packs)
-	if len(packs) != 1 || strings.Join(packs[0].Paths, ",") != "writing/humanizer-pr.md,writing/humanizer-commit.md" {
+	if len(packs) != 2 || packs[0].Name != "craft" || strings.Join(packs[1].Paths, ",") != "writing/humanizer-pr.md,writing/humanizer-commit.md" {
 		t.Errorf("packs %+v", packs)
 	}
 	// Only the skill Unbound wrote travels with its files; upstream ones the backend fetches at their pin.

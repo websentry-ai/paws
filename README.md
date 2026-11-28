@@ -72,7 +72,10 @@ unbound-paws remove writing
 `unbound-paws add` installs the bindings and the skills they require. The catalog
 lives on the paws server, so `add` and `search` need the network: each skill is
 downloaded from it and refused unless its files hash to the pinned content hash.
-Skills you already have, or have edited, are left alone.
+A copy paws installed and you edited stays as you left it, and its rules still apply.
+If you already have your own skill by the same name in a folder an agent loads, paws
+installs neither that skill nor the rules that need it, and says so. Rename or remove
+yours, then run `add` (or `sync`) again. The portal works the same way.
 See [docs/catalog.md](docs/catalog.md).
 
 ## Your own rules

@@ -199,6 +199,11 @@ func mirrorInstalled(a harness.Adapter, settingsPath string) {
 func copyPawsSkills(from, to string) []string {
 	var copied []string
 	for _, s := range pack.PawsSkills(from) {
+		if own := pack.OwnCopies([]string{to}, s.Name); len(own) > 0 {
+			// The portal's next sync leaves the skill out (portalDrifted); a pack's rules stay until it is added again.
+			fmt.Fprintf(os.Stderr, "paws: you already have a skill named %q (%s), so paws didn't copy its own there\n", s.Name, shortPath(own[0]))
+			continue
+		}
 		if s.Edited || fileExists(filepath.Join(to, s.Name)) {
 			continue
 		}

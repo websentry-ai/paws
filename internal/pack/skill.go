@@ -244,6 +244,24 @@ func KeptCopies(dirs []string, name string) []string {
 	return kept
 }
 
+// OwnCopies are the <dir>/<name> folders, of dirs, that the user put there: no paws install marker. A paws copy the
+// user edited is not one of them.
+func OwnCopies(dirs []string, name string) []string {
+	var own []string
+	seen := map[string]bool{}
+	for _, d := range dirs {
+		p := filepath.Join(d, name)
+		if seen[filepath.Clean(p)] {
+			continue
+		}
+		seen[filepath.Clean(p)] = true
+		if exists(p) && !pawsOwned(p) {
+			own = append(own, p)
+		}
+	}
+	return own
+}
+
 // FromPaws reports whether paws installed the skill directory dir: it carries the install marker.
 func FromPaws(dir string) bool { return pawsOwned(dir) }
 

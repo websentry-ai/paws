@@ -215,8 +215,11 @@ func TestSyncRefusesMismatchedSkillsAndKeepsUserCopies(t *testing.T) {
 	if data, _ := os.ReadFile(filepath.Join(skills, "git", "SKILL.md")); string(data) != "mine\n" {
 		t.Errorf("the user's skill was overwritten: %q", data)
 	}
-	// git is not in this test's catalog: a custom skill, and the user's copy carries its rules.
-	if got := fmt.Sprint(portalFiles(t, home)); got != "[git--c.md]" {
+	// git has a content hash, so paws would install it; the user's own copy clashes, and no rule goes live for it.
+	if !strings.Contains(out, `  skipped git: you already have a skill named "git" (~/.claude/skills/git), so paws won't sync it.`) {
+		t.Errorf("sync output %q", out)
+	}
+	if got := fmt.Sprint(portalFiles(t, home)); got != "[]" {
 		t.Errorf("portal files %s", got)
 	}
 	if st := loadPortalState(); st.AppliedHash != "" {

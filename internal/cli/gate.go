@@ -110,6 +110,12 @@ func GateFor(args []string) (code int) {
 	if len(problems) > 0 {
 		notice = "paws: " + strings.Join(problems, ", ") + " (run `unbound-paws explain` for details)"
 	}
+	if h.Event == "SessionStart" {
+		// A portal skill paws left out because the user has their own: say so where the user looks, once a session.
+		for _, c := range loadPortalState().Clashes {
+			notice = strings.TrimPrefix(notice+"\n", "\n") + "paws: " + c
+		}
+	}
 	a.Observe(h, d)
 	out := a.Render(h, d, notice)
 	wrote = true

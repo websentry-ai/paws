@@ -76,10 +76,13 @@ func syncRound(cwd string, every time.Duration) {
 		known = up.configHash
 	}
 	res, err := pullConfig(creds, &st, known, cwd)
-	if forgetIfRevoked(err) || res == nil {
+	if forgetIfRevoked(err) {
 		return
 	}
-	savePortalState(st)
+	savePortalState(st) // the agents pullConfig noted, even when nothing changed
+	if res == nil {
+		return
+	}
 	if res.Hash == st.AppliedHash {
 		reportApplied(creds, st.AppliedHash, cwd)
 	}

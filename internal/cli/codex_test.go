@@ -250,7 +250,7 @@ func TestPortalSkillInACodexFolderIsInstalled(t *testing.T) {
 	home := portalEnv(t, http.NotFoundHandler())
 	codexSkill(t, "house-style")
 	res, err := applyConfig(portalConfig{ConfigHash: "h1", Skills: []portalSkill{{Name: "house-style", Kind: "skill", Load: "full", Status: "on",
-		Actions: []portalAction{{ID: "docs", Label: "Edit docs", Event: "pre-tool", Tool: "Write|Edit", FileGlob: "docs/**"}}}}}, t.TempDir())
+		Actions: []portalAction{{ID: "docs", Label: "Edit docs", Event: "pre-tool", Tool: "Write|Edit", FileGlob: "docs/**"}}}}}, t.TempDir(), nil)
 	if err != nil || len(res.Applied) != 1 || res.Pending {
 		t.Fatalf("want house-style applied, got %+v %v", res, err)
 	}

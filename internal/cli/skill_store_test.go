@@ -537,23 +537,55 @@ func TestSyncLeavesOutASkillTheUserHas(t *testing.T) {
 	}
 }
 
-// A state file from before this change knows nothing of clashes: a clash that appears beside a skill paws installed
-// is still found, by the paws copy's marker.
+// A state file an older paws wrote, which kept the rules on for the user's own copy (no paws copy anywhere): the next
+// check re-applies once, and leaves the skill out.
 func TestSyncFindsAClashWithAnOlderStateFile(t *testing.T) {
 	home, srv := syncEnv(t)
-	t.Setenv("CODEX_HOME", "")
 	userHome := os.Getenv("HOME")
 	mustRun(t, Init, "--global")
 	srv.configHash = "h1"
 	srv.config = configJSON(t, "h1", humanizerSkill(fakeUpstream(t, "# humanizer\n")))
 	mustRun(t, Sync)
+	os.RemoveAll(filepath.Join(userHome, ".claude", "skills", "humanizer"))
+	ownSkill(t, filepath.Join(userHome, ".claude", "skills"), "humanizer", "mine\n")
 	st := loadPortalState()
-	st.Clashes, st.Clashed = nil, nil
+	st.Clashes, st.Clashed, st.Installed, st.ClashChecked = nil, nil, nil, false
 	savePortalState(st)
-	mustRun(t, Init, "--agent", "codex", "--global")
-	os.RemoveAll(filepath.Join(userHome, ".agents", "skills", "humanizer"))
-	ownSkill(t, filepath.Join(userHome, ".agents", "skills"), "humanizer", "mine\n")
 	if out := mustRun(t, Sync); !strings.Contains(out, "skipped humanizer: you already have a skill named") || len(portalFiles(t, home)) != 0 {
+		t.Errorf("sync output:\n%s", out)
+	}
+}
+
+// The user replaces paws's copy with their own in place: the same config's next check leaves the skill out.
+func TestSyncFindsAClashThatReplacedPawsCopy(t *testing.T) {
+	home, srv := syncEnv(t)
+	userHome := os.Getenv("HOME")
+	mustRun(t, Init, "--global")
+	srv.configHash = "h1"
+	srv.config = configJSON(t, "h1", humanizerSkill(fakeUpstream(t, "# humanizer\n")))
+	mustRun(t, Sync)
+	os.RemoveAll(filepath.Join(userHome, ".claude", "skills", "humanizer"))
+	ownSkill(t, filepath.Join(userHome, ".claude", "skills"), "humanizer", "mine\n")
+	if out := mustRun(t, Sync); !strings.Contains(out, "skipped humanizer: you already have a skill named") || len(portalFiles(t, home)) != 0 {
+		t.Errorf("sync output:\n%s", out)
+	}
+}
+
+// Codex hooked in this repo only doesn't count for the portal's global skills: the user's own ~/.agents copy is no
+// clash, so the answer doesn't change with the folder the sync runs in.
+func TestPortalClashesCountGlobalHooksOnly(t *testing.T) {
+	home, srv := syncEnv(t)
+	t.Setenv("CODEX_HOME", "")
+	userHome := os.Getenv("HOME")
+	mustRun(t, Init, "--global")
+	repo := filepath.Join(userHome, "repo-a")
+	os.MkdirAll(filepath.Join(repo, ".git"), 0o755)
+	t.Chdir(repo)
+	mustRun(t, Init, "--agent", "codex")
+	ownSkill(t, filepath.Join(userHome, ".agents", "skills"), "humanizer", "mine\n")
+	srv.configHash = "h1"
+	srv.config = configJSON(t, "h1", humanizerSkill(fakeUpstream(t, "# humanizer\n")))
+	if out := mustRun(t, Sync); strings.Contains(out, "you already have") || len(portalFiles(t, home)) != 1 {
 		t.Errorf("sync output:\n%s", out)
 	}
 }

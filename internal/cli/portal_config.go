@@ -10,7 +10,6 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
-	"slices"
 	"sort"
 	"strconv"
 	"strings"
@@ -43,6 +42,12 @@ type portalState struct {
 	// Clashed are the skills the last applied config left out for a clash: once the user's copy goes, the next check
 	// re-applies though the config hash hasn't changed.
 	Clashed []string `json:"clashed,omitempty"`
+	// Installed are the applied skills whose files paws installs (catalog skills): a copy of the user's appearing by
+	// one's name, beside paws's or in its place, re-applies the config, which leaves the skill out.
+	Installed []string `json:"installed,omitempty"`
+	// ClashChecked is set once a config was applied by a paws that leaves out clashing skills. A state file without
+	// it re-applies once, so rules an older paws kept on for a user's own copy go.
+	ClashChecked bool `json:"clash_checked,omitempty"`
 }
 
 // portalConfig is GET /config: the account's skills that are on.
@@ -106,6 +111,7 @@ type applyResult struct {
 	Kept    []string // a catalog skill's folders paws installed and the user edited since; left as they are
 	Clashes []string // notes on catalog skills the user already has their own of, also in Skipped
 	Clashed []string // the skills those notes are about
+	Catalog []string // the applied skills whose files paws installs
 	Pending bool     // a skill was left out; keep checking instead of recording the hash
 }
 
@@ -236,7 +242,7 @@ func pullConfig(creds *credentials, st *portalState, known, cwd string) (*applyR
 	useSkillFiles(creds.API) // the backend that sent the config holds its skills' files
 	res, err := applyConfig(cfg, cwd)
 	st.Skills = res.Applied
-	st.Clashes, st.Clashed = res.Clashes, res.Clashed
+	st.Clashes, st.Clashed, st.Installed, st.ClashChecked = res.Clashes, res.Clashed, res.Catalog, true
 	if err == nil && !res.Pending {
 		st.AppliedHash = cfg.ConfigHash
 	}
@@ -255,18 +261,20 @@ func portalDrifted(st *portalState, cwd string) bool {
 	skillsDir := pack.UserTarget(gate.UserDir()).SkillsDir
 	projectSkills := pack.ProjectTarget(projectRoot(cwd)).SkillsDir
 	loaded := loadedSkillDirs(true, projectRoot(cwd))
+	if !st.ClashChecked && len(st.Skills) > 0 {
+		return true // applied by an older paws, which kept a skill's rules on for a user's own copy of it
+	}
 	for _, name := range st.Clashed {
 		if len(pack.OwnCopies(loaded, name)) == 0 {
 			return true // the user's copy that kept it out is gone
 		}
 	}
-	for _, name := range st.Skills {
-		// A skill paws installed (its copy carries the marker) that now has a copy of the user's beside it, put there
-		// since, or in the folder of an agent set up since: re-apply, which leaves it out. A custom skill has no
-		// paws copy, so the user's own copy of it is no clash.
-		if len(pack.OwnCopies(loaded, name)) > 0 && slices.ContainsFunc(loaded, func(d string) bool { return pack.FromPaws(filepath.Join(d, name)) }) {
-			return true
+	for _, name := range st.Installed {
+		if len(pack.OwnCopies(loaded, name)) > 0 {
+			return true // a copy of the user's by that name, put there since or in the folder of an agent set up since
 		}
+	}
+	for _, name := range st.Skills {
 		if rules, _ := filepath.Glob(filepath.Join(dir, name+"--*.md")); len(rules) == 0 {
 			return true
 		}
@@ -344,6 +352,9 @@ func applyConfig(cfg portalConfig, cwd string) (applyResult, error) {
 			want[p] = data
 		}
 		res.Applied = append(res.Applied, s.Name)
+		if pawsInstalls(s) {
+			res.Catalog = append(res.Catalog, s.Name)
+		}
 	}
 	sort.Strings(res.Applied)
 	if err := writeManaged(dir, want); err != nil {

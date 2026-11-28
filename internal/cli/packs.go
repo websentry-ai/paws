@@ -125,13 +125,16 @@ func target(project bool) pack.Target {
 	return t
 }
 
-// loadedSkillDirs are the skills folders the agents that run paws here load skills from: their user folders, plus,
-// for a project (global false), the project's at root, since an agent loads both. With no agent hooked, Claude Code's.
+// loadedSkillDirs are the skills folders the agents that run paws load skills from: for a global install, the user
+// folders of the agents hooked globally; for a project (global false), the user and project folders of the agents
+// hooked here, since an agent loads both. With no agent hooked, Claude Code's.
 // A skill of the user's own in one of them clashes with paws's copy: the agent would load one or the other.
 func loadedSkillDirs(global bool, root string) []string {
 	var hooked []harness.Adapter
 	for _, a := range installOrder() {
-		if hookedIn(a) {
+		// A global install (the portal's, an add without --project) counts the agents that run paws everywhere: one
+		// hooked in this repo only would make the answer depend on where the command ran.
+		if !global && hookedIn(a) || global && hasPawsHook(a.HookFile(true, root)) {
 			hooked = append(hooked, a)
 		}
 	}

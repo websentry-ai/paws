@@ -232,6 +232,21 @@ func pawsOwned(dir string) bool {
 	return err == nil
 }
 
+// KeptCopies are the <dir>/<name> folders, of dirs, that hold a skill paws may not replace: the user's own, or a paws
+// copy edited since.
+func KeptCopies(dirs []string, name string) []string {
+	var kept []string
+	for _, d := range dirs {
+		if p := filepath.Join(d, name); exists(p) && !replaceable(p) {
+			kept = append(kept, p)
+		}
+	}
+	return kept
+}
+
+// FromPaws reports whether paws installed the skill directory dir: it carries the install marker.
+func FromPaws(dir string) bool { return pawsOwned(dir) }
+
 // replaceable reports whether paws may overwrite or delete a skill directory: it installed it
 // and the content still hashes to what it wrote. A user's edits make it theirs.
 func replaceable(dir string) bool {
@@ -263,13 +278,16 @@ func MirrorSkill(from, to, name string) (installed bool, err error) {
 	return installSkill(os.DirFS(src), to, name, marker{Skill: m.Skill, Source: m.Source, Hash: m.Hash})
 }
 
-// removeSkill removes a skill paws installed from the target's skills folder and its mirrors; removed is the
-// target's own folder.
+// removeSkill removes a skill paws installed from the target's skills folder and its mirrors; removed is whether any
+// copy went (the folder paws installs into can change as harnesses come and go).
 func (t Target) removeSkill(name string) (removed bool, err error) {
 	for _, m := range append(append([]string{}, t.Mirrors...), t.Elsewhere...) {
-		removeSkill(m, name)
+		if ok, _ := removeSkill(m, name); ok {
+			removed = true
+		}
 	}
-	return removeSkill(t.SkillsDir, name)
+	ok, err := removeSkill(t.SkillsDir, name)
+	return removed || ok, err
 }
 
 // untouched is replaceable plus a check the content hash can't make: it skips hidden paths, and paws writes none

@@ -92,20 +92,17 @@ func (skillTool) SkillDirs(cwd string) []string {
 
 func (skillTool) LoadSkills(skills []Skill, noun string) string { return SkillToolInstruction(skills, noun) }
 
-// SkillToolInstruction is how Claude Code loads skills and retries a call. It says to follow them and change the
-// call if they say so: told only to load and retry, a small model re-ran a call the skill forbids, unchanged.
+// SkillToolInstruction is how Claude Code loads skills and retries a call: "Load it, then run the command again."
 func SkillToolInstruction(skills []Skill, noun string) string {
-	return fmt.Sprintf("Load and %s.", FollowAndRetry(skills, noun))
+	return fmt.Sprintf("Load %s, then %s again.", ItOrThem(skills), Retry(noun))
 }
 
-// FollowAndRetry is a deny's instruction after the load: "follow it, then run the command again, changed if it
-// says so".
-func FollowAndRetry(skills []Skill, noun string) string {
-	it, says := "it", "it says"
+// ItOrThem is "it" for one skill and "them" for several.
+func ItOrThem(skills []Skill) string {
 	if len(skills) > 1 {
-		it, says = "them", "they say"
+		return "them"
 	}
-	return fmt.Sprintf("follow %s, then %s again, changed if %s so", it, Retry(noun), says)
+	return "it"
 }
 
 // Retry is the second half of a deny's instruction: "run the command", or "make the edit" / "make the tool call".

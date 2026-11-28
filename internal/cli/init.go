@@ -140,7 +140,7 @@ func initOne(a harness.Adapter, settingsPath string) (did initDone) {
 		return did
 	}
 	did.code = 0
-	mirrorInstalled(a, settingsPath, global)
+	mirrorInstalled(a, settingsPath)
 	if !changed {
 		fmt.Printf("%s: paws already registered in %s\n", a.Title(), shortPath(settingsPath))
 		return did
@@ -165,19 +165,38 @@ func initOne(a harness.Adapter, settingsPath string) (did initDone) {
 	return did
 }
 
-// mirrorInstalled copies the skills paws installed for Claude Code, in the hook file's scope, into another
-// harness's skills folder, as a pack install would have had the hook been there: a harness added later sees them.
-// A copy already there stays.
-func mirrorInstalled(a harness.Adapter, settingsPath string, global bool) {
-	to := a.SkillsDirFor(settingsPath)
-	if a == defaultAdapter() || to == "" {
+// mirrorInstalled copies the skills paws installed for the other harnesses into this harness's skills folders, the
+// user's and this repo's, as a pack install would have had the hook been there: a harness added later sees them,
+// whichever scope its hook is in, since global and project rules both reach it here. A copy already there stays.
+func mirrorInstalled(a harness.Adapter, settingsPath string) {
+	if a.SkillsDirFor(settingsPath) == "" {
 		return
 	}
 	cwd, _ := os.Getwd()
-	from := pack.ProjectTarget(projectRoot(cwd)).SkillsDir
-	if global {
-		from = pack.UserTarget(gate.UserDir()).SkillsDir
+	root := projectRoot(cwd)
+	// A hook file given with --settings reads the skills folder beside it, so both scopes' skills go there.
+	custom := filepath.Clean(settingsPath) != filepath.Clean(a.HookFile(false, root)) &&
+		filepath.Clean(settingsPath) != filepath.Clean(a.HookFile(true, root))
+	for _, global := range []bool{false, true} {
+		to := a.SkillsDirFor(a.HookFile(global, root))
+		if custom {
+			to = a.SkillsDirFor(settingsPath)
+		}
+		var copied []string
+		for _, other := range installOrder() {
+			if from := other.SkillsDirFor(other.HookFile(global, root)); from != "" && filepath.Clean(from) != filepath.Clean(to) {
+				copied = append(copied, copyPawsSkills(from, to)...)
+			}
+		}
+		if len(copied) > 0 {
+			fmt.Printf("  copied %d skill(s) paws installed into %s: %s\n", len(copied), shortPath(to), strings.Join(copied, ", "))
+		}
 	}
+}
+
+// copyPawsSkills copies each unedited skill paws installed in from into to, unless to has one by that name; it
+// returns the names it copied.
+func copyPawsSkills(from, to string) []string {
 	var copied []string
 	for _, s := range pack.PawsSkills(from) {
 		if s.Edited || fileExists(filepath.Join(to, s.Name)) {
@@ -189,9 +208,7 @@ func mirrorInstalled(a harness.Adapter, settingsPath string, global bool) {
 			copied = append(copied, s.Name)
 		}
 	}
-	if len(copied) > 0 {
-		fmt.Printf("  copied %d skill(s) paws installed into %s: %s\n", len(copied), shortPath(to), strings.Join(copied, ", "))
-	}
+	return copied
 }
 
 // initTarget is one hook file init writes: a harness and its hook file.
@@ -642,12 +659,13 @@ func Skill(args []string) int {
 		fmt.Fprintf(os.Stderr, "paws: %v\n", err)
 		return 1
 	}
-	dest := filepath.Join(skillsDir, "paws")
 	mirrorFailed := false
 	if !slices.Contains(args, "--agent") && !slices.Contains(args, "--settings") {
-		// No harness named: every other harness that runs paws here gets the skill too, in its own folder.
+		// No harness named: every harness that runs paws here gets the skill, each in its own folder.
 		cwd, _ := os.Getwd()
-		for _, m := range skillMirrors(slices.Contains(args, "--global"), projectRoot(cwd)) {
+		stores := skillStores(slices.Contains(args, "--global"), projectRoot(cwd))
+		skillsDir = stores[0]
+		for _, m := range stores[1:] {
 			st, err := pack.ReinstallBundledSkill(src, m, "paws", "paws "+Version)
 			switch {
 			case err != nil:
@@ -658,6 +676,7 @@ func Skill(args []string) int {
 			}
 		}
 	}
+	dest := filepath.Join(skillsDir, "paws")
 	status, err := pack.ReinstallBundledSkill(src, skillsDir, "paws", "paws "+Version)
 	switch {
 	case err != nil:

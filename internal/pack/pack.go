@@ -28,6 +28,8 @@ type Target struct {
 	// Elsewhere are other harnesses' skills folders paws doesn't copy into now (their hook is gone, or in another
 	// repo): a skill removed here is removed there too, so no stale copy outlives its pack.
 	Elsewhere []string
+	// InUse, when set, names skills something besides the packs still needs (the portal's): removing a pack keeps them.
+	InUse func(skill string) bool
 }
 
 // UserTarget installs for one user: bindings under the paws user dir (loaded in every repo),
@@ -54,11 +56,13 @@ func ProjectTarget(root string) Target {
 	}
 }
 
+func (t Target) inUse(skill string) bool { return t.InUse != nil && t.InUse(skill) }
+
 // Installed is one pack's record in the state file.
 type Installed struct {
 	Bindings []string          `yaml:"bindings"`
 	Picks    map[string]string `yaml:"picks,omitempty"`
-	Skills   []string          `yaml:"skills,omitempty"` // skills paws installed for this pack
+	Skills   []string          `yaml:"skills,omitempty"` // skills this pack requires; removing it removes paws's unedited copies
 	At       string            `yaml:"at"`
 }
 
@@ -178,7 +182,9 @@ type Result struct {
 	Pack      string
 	Bindings  []string
 	Installed []string // skills paws installed or updated
-	Kept      []string // skills already present that paws does not own; left as they are
+	// Kept are the skill folders, in SkillsDir or a mirror, that were already there and paws may not replace (the
+	// user's own, or a paws copy edited since); left as they are.
+	Kept []string
 }
 
 // Add installs bindings as pack name into t. Re-adding a pack replaces it (an upgrade).
@@ -204,6 +210,7 @@ func Add(c *catalog.Catalog, name string, bindings []string, picks map[string]st
 
 	// Skills first: a binding must never be live before the skill it requires can load.
 	done := map[string]bool{}
+	var need []string // every skill the bindings require, kept ones too: Remove takes paws's copies of each
 	for _, rel := range bindings {
 		b := c.Bindings[rel]
 		if b.Action.Type != "require-skill" || done[b.Action.Skill] {
@@ -221,17 +228,21 @@ func Add(c *catalog.Catalog, name string, bindings []string, picks map[string]st
 			}
 			for _, m := range t.Mirrors {
 				was := exists(filepath.Join(m, b.Action.Skill))
-				if _, err := MirrorSkill(t.SkillsDir, m, b.Action.Skill); err != nil {
+				copied, err := MirrorSkill(t.SkillsDir, m, b.Action.Skill)
+				if err != nil {
 					return nil, fmt.Errorf("skill %s: copy to %s: %w", b.Action.Skill, m, err)
 				}
 				if !was {
 					mirrored = append(mirrored, [2]string{m, b.Action.Skill})
+				} else if !copied {
+					res.Kept = append(res.Kept, filepath.Join(m, b.Action.Skill))
 				}
 			}
 			res.Installed = append(res.Installed, b.Action.Skill)
 		} else {
-			res.Kept = append(res.Kept, b.Action.Skill)
+			res.Kept = append(res.Kept, KeptCopies(append([]string{t.SkillsDir}, t.Mirrors...), b.Action.Skill)...)
 		}
+		need = append(need, b.Action.Skill)
 	}
 
 	dest := InstallDir(t, name)
@@ -272,13 +283,13 @@ func Add(c *catalog.Catalog, name string, bindings []string, picks map[string]st
 			}
 		}
 	}
-	st.Packs[name] = &Installed{Bindings: bindings, Picks: picks, Skills: res.Installed, At: time.Now().UTC().Format(time.RFC3339)}
+	st.Packs[name] = &Installed{Bindings: bindings, Picks: picks, Skills: need, At: time.Now().UTC().Format(time.RFC3339)}
 	if err := st.save(t.StateFile); err != nil {
 		return nil, err
 	}
 	ok = true
 	for _, sk := range dropped {
-		if !st.needs(sk) {
+		if !st.needs(sk) && !t.inUse(sk) {
 			t.removeSkill(sk)
 		}
 	}
@@ -340,7 +351,7 @@ func Remove(name string, t Target) (removedSkills []string, err error) {
 	}
 	delete(st.Packs, name)
 	for _, s := range inst.Skills {
-		if st.needs(s) {
+		if st.needs(s) || t.inUse(s) {
 			continue
 		}
 		removed, err := t.removeSkill(s)

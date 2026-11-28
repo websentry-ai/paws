@@ -168,7 +168,7 @@ func TestReadingSKILLmdClearsTheGate(t *testing.T) {
 func TestDenyIsShort(t *testing.T) {
 	home := portalEnv(t, http.NotFoundHandler())
 	writeRule(t, filepath.Join(home, "catch-all.md"), "name: catch-all\nevent: pre-tool\naction:\n  type: require-skill\n  skill: deployer\n")
-	want := `paws (rule catch-all): this needs the "deployer" skill. Load and follow it, then run the command again, changed if it says so.`
+	want := `paws (rule catch-all): this needs the "deployer" skill. Load it, then run the command again.`
 	if r := deny(t, "ls"); r != want {
 		t.Errorf("no SKILL.md installed: got %q, want %q", r, want)
 	}

@@ -248,6 +248,25 @@ func TestRemoveKeepsSkillsOtherPacksNeed(t *testing.T) {
 	}
 }
 
+func TestRemoveKeepsSkillsInUseElsewhere(t *testing.T) {
+	repo, hash := goodHash(t)
+	fakeFetch(t, map[string]string{"github.com/example/humanizer": repo})
+	c := testCatalog(t, hash)
+	tg := ProjectTarget(t.TempDir())
+	tg.Mirrors = []string{t.TempDir()}
+	tg.InUse = func(s string) bool { return s == "humanizer" } // the portal turns humanizer on too
+	add(t, c, "writing", nil, tg)
+
+	if removed, err := Remove("writing", tg); err != nil || len(removed) != 0 {
+		t.Fatalf("humanizer is still in use, removed %v (%v)", removed, err)
+	}
+	for _, d := range []string{tg.SkillsDir, tg.Mirrors[0]} {
+		if _, err := os.Stat(filepath.Join(d, "humanizer", "SKILL.md")); err != nil {
+			t.Errorf("humanizer should stay in %s: %v", d, err)
+		}
+	}
+}
+
 func TestReAddReplacesPack(t *testing.T) {
 	repo, hash := goodHash(t)
 	fakeFetch(t, map[string]string{"github.com/example/humanizer": repo})

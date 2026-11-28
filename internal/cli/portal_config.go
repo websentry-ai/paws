@@ -43,6 +43,9 @@ type portalState struct {
 	// Clashed are the skills the last applied config left out for a clash: once the user's copy goes, the next check
 	// re-applies though the config hash hasn't changed.
 	Clashed []string `json:"clashed,omitempty"`
+	// ClashDirs are, for each skill in Clashed, the user's own copies that kept it out, which the next sync reports
+	// to the portal so its Skills page can say why the skill doesn't run on this laptop.
+	ClashDirs map[string][]string `json:"clash_dirs,omitempty"`
 	// Installed are the applied skills whose files paws installs (catalog skills): a copy of the user's appearing by
 	// one's name, beside paws's or in its place, re-applies the config, which leaves the skill out.
 	Installed []string `json:"installed,omitempty"`
@@ -116,8 +119,10 @@ type applyResult struct {
 	Kept    []string // a catalog skill's folders paws installed and the user edited since; left as they are
 	Clashes []string // notes on catalog skills the user already has their own of, also in Skipped
 	Clashed []string // the skills those notes are about
-	Catalog []string // the applied skills whose files paws installs
-	Pending bool     // a skill was left out; keep checking instead of recording the hash
+	// ClashDirs are the user's own copies behind each clash.
+	ClashDirs map[string][]string
+	Catalog   []string // the applied skills whose files paws installs
+	Pending   bool     // a skill was left out; keep checking instead of recording the hash
 }
 
 func portalDir() string {
@@ -254,7 +259,7 @@ func pullConfig(creds *credentials, st *portalState, known, cwd string) (*applyR
 	useSkillFiles(creds.API) // the backend that sent the config holds its skills' files
 	res, err := applyConfig(cfg, cwd, st.Agents)
 	st.Skills = res.Applied
-	st.Clashes, st.Clashed, st.Installed, st.ClashChecked = res.Clashes, res.Clashed, res.Catalog, true
+	st.Clashes, st.Clashed, st.ClashDirs, st.Installed, st.ClashChecked = res.Clashes, res.Clashed, res.ClashDirs, res.Catalog, true
 	if err == nil && !res.Pending {
 		st.AppliedHash = cfg.ConfigHash
 	}
@@ -341,6 +346,10 @@ func applyConfig(cfg portalConfig, cwd string, agents []string) (applyResult, er
 			note := clashNote(s.Name, own, "sync it", "sync again")
 			res.Skipped = append(res.Skipped, s.Name+": "+note)
 			res.Clashes, res.Clashed = append(res.Clashes, note), append(res.Clashed, s.Name)
+			if res.ClashDirs == nil {
+				res.ClashDirs = map[string][]string{}
+			}
+			res.ClashDirs[s.Name] = own
 			// Not pending: the config is applied as the user has it. portalDrifted re-applies once their copy is gone.
 			continue
 		}

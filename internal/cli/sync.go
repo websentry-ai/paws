@@ -68,6 +68,15 @@ type syncBody struct {
 	Records           []any      `json:"records"` // ruleUpload, actionUpload and outcomeUpload
 	AppliedConfigHash *string    `json:"applied_config_hash"`
 	Inventory         *inventory `json:"inventory"`
+	// Clashes are the portal skills this laptop left out because the user has their own skill by that name. Sent
+	// once paws has checked for clashes, as [] when there are none, so the portal clears one the user resolved.
+	Clashes *[]clashReport `json:"clashes,omitempty"`
+}
+
+// clashReport is one portal skill left out for a clash: the skill, and the user's own copies (~ for the home folder).
+type clashReport struct {
+	Skill string   `json:"skill"`
+	Paths []string `json:"paths"`
 }
 
 type syncResponse struct {
@@ -485,11 +494,23 @@ func recordsOf(batch []pendingRecord) []any {
 // newSyncBody is a request with no records yet: the applied hash (null before the first
 // apply) and what is installed on this machine.
 func newSyncBody(applied, cwd string) syncBody {
-	b := syncBody{Records: []any{}, Inventory: inventoryFor(cwd)}
+	b := syncBody{Records: []any{}, Inventory: inventoryFor(cwd), Clashes: clashReports(loadPortalState())}
 	if applied != "" {
 		b.AppliedConfigHash = &applied
 	}
 	return b
+}
+
+// clashReports are st's clashes for the portal, or nil before paws has checked for them.
+func clashReports(st portalState) *[]clashReport {
+	if !st.ClashChecked {
+		return nil
+	}
+	out := []clashReport{}
+	for _, name := range st.Clashed {
+		out = append(out, clashReport{Skill: name, Paths: tildeAll(st.ClashDirs[name])})
+	}
+	return &out
 }
 
 // printDryRun shows the first request's body, cut to the first records, on stdout.

@@ -796,3 +796,42 @@ func TestClaudeAddedWithSettingsGetsTheSkillsBesideIt(t *testing.T) {
 		t.Error("nothing is written to Claude Code's default folder")
 	}
 }
+
+// The portal hears about a clash: the sync after the skill is left out reports the skill and the user's copy, and the
+// sync after the user removes their copy reports none, so the Skills page clears it.
+func TestSyncReportsClashesToThePortal(t *testing.T) {
+	_, srv := syncEnv(t)
+	userHome := os.Getenv("HOME")
+	mustRun(t, Init, "--global")
+	ownSkill(t, filepath.Join(userHome, ".claude", "skills"), "humanizer", "mine\n")
+	srv.configHash = "h1"
+	srv.config = configJSON(t, "h1", humanizerSkill(fakeUpstream(t, "# humanizer\n")))
+	lastClashes := func() string {
+		t.Helper()
+		var b struct {
+			Clashes *json.RawMessage `json:"clashes"`
+		}
+		json.Unmarshal([]byte(srv.bodies[len(srv.bodies)-1]), &b)
+		if b.Clashes == nil {
+			return "<absent>"
+		}
+		return string(*b.Clashes)
+	}
+	mustRun(t, Sync)
+	if got := lastClashes(); got != `[{"skill":"humanizer","paths":["~/.claude/skills/humanizer"]}]` {
+		t.Errorf("clashes after the clash: %s", got)
+	}
+	os.RemoveAll(filepath.Join(userHome, ".claude", "skills", "humanizer"))
+	mustRun(t, Sync)
+	if got := lastClashes(); got != `[]` {
+		t.Errorf("clashes after the user's copy went: %s", got)
+	}
+}
+
+// Before paws has checked a config for clashes (no state yet), the sync sends no clashes field: the portal keeps what
+// it had rather than clearing it.
+func TestSyncSendsNoClashesBeforeAnyCheck(t *testing.T) {
+	if got := clashReports(portalState{}); got != nil {
+		t.Errorf("clashReports(empty state) = %v, want nil", *got)
+	}
+}

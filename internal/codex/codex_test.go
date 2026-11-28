@@ -120,14 +120,14 @@ func TestPickDetectsTheHarness(t *testing.T) {
 	}
 }
 
-// A deny goes in Claude Code's shape; Codex reads it the same way.
+// A deny goes in Claude Code's shape; Codex reads it the same way, and adds the closing period itself.
 func TestRenderDenyForCodex(t *testing.T) {
 	h := &harness.Hook{Event: "PreToolUse"}
 	var out struct {
 		HookSpecificOutput struct{ PermissionDecision, PermissionDecisionReason string }
 	}
 	json.Unmarshal(Adapter{}.Render(h, gate.Decision{Verdict: gate.Deny, Reason: "paws: read it, then retry."}, ""), &out)
-	if out.HookSpecificOutput.PermissionDecision != "deny" || out.HookSpecificOutput.PermissionDecisionReason != "paws: read it, then retry." {
+	if out.HookSpecificOutput.PermissionDecision != "deny" || out.HookSpecificOutput.PermissionDecisionReason != "paws: read it, then retry" {
 		t.Errorf("got %+v", out)
 	}
 	if got := string(Adapter{}.Render(&harness.Hook{Event: "Stop"}, gate.Decision{}, "")); got != "{}" {

@@ -528,6 +528,34 @@ func TestSyncLeavesOutASkillTheUserHas(t *testing.T) {
 	if len(portalFiles(t, home)) != 0 || deny(t, prCreate) != "" {
 		t.Error("the rule is gone again")
 	}
+
+	// The user removes that copy too: the same config's next check puts paws's copy and the rule back.
+	os.RemoveAll(filepath.Join(userHome, ".agents", "skills", "humanizer"))
+	out = mustRun(t, Sync)
+	if !strings.Contains(out, "Config: 1 skill (humanizer) applied.") || len(portalFiles(t, home)) != 1 || deny(t, prCreate) == "" {
+		t.Errorf("the rule is back once the clash is gone; sync output:\n%s", out)
+	}
+}
+
+// A state file from before this change knows nothing of clashes: a clash that appears beside a skill paws installed
+// is still found, by the paws copy's marker.
+func TestSyncFindsAClashWithAnOlderStateFile(t *testing.T) {
+	home, srv := syncEnv(t)
+	t.Setenv("CODEX_HOME", "")
+	userHome := os.Getenv("HOME")
+	mustRun(t, Init, "--global")
+	srv.configHash = "h1"
+	srv.config = configJSON(t, "h1", humanizerSkill(fakeUpstream(t, "# humanizer\n")))
+	mustRun(t, Sync)
+	st := loadPortalState()
+	st.Clashes, st.Clashed = nil, nil
+	savePortalState(st)
+	mustRun(t, Init, "--agent", "codex", "--global")
+	os.RemoveAll(filepath.Join(userHome, ".agents", "skills", "humanizer"))
+	ownSkill(t, filepath.Join(userHome, ".agents", "skills"), "humanizer", "mine\n")
+	if out := mustRun(t, Sync); !strings.Contains(out, "skipped humanizer: you already have a skill named") || len(portalFiles(t, home)) != 0 {
+		t.Errorf("sync output:\n%s", out)
+	}
 }
 
 // Portal sync keeps an edited paws copy// Portal sync keeps an edited paws copy, says so, and updates an unedited older one in both agents' folders.

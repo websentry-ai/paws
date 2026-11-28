@@ -5,7 +5,6 @@ package codex
 import (
 	"cmp"
 	"encoding/json"
-	"fmt"
 	"io"
 	"os"
 	"path/filepath"
@@ -505,15 +504,14 @@ type specificOutput struct {
 }
 
 // Render is Claude Code's reply shape, which Codex reads too. Codex shows a deny as "Command blocked by PreToolUse
-// hook: <reason>. Command: <command>", dropping the reason's trailing period itself; paws's own Codex wording ends
-// without one, and a rule's deny_message goes as written.
+// hook: <reason>. Command: <command>", adding its own period, so the reason goes without its last one ("again..").
 func (Adapter) Render(h *harness.Hook, d gate.Decision, notice string) []byte {
 	out := output{SystemMessage: notice}
 	switch {
 	case h.Event != "PreToolUse" && h.Event != "SessionStart":
 	case d.Verdict == gate.Deny:
 		out.SpecificOutput = &specificOutput{HookEventName: h.Event, PermissionDecision: "deny",
-			PermissionDecisionReason: d.Reason, AdditionalContext: d.Context}
+			PermissionDecisionReason: strings.TrimSuffix(d.Reason, "."), AdditionalContext: d.Context}
 	case d.Context != "":
 		out.SpecificOutput = &specificOutput{HookEventName: h.Event, AdditionalContext: d.Context}
 	}
@@ -674,28 +672,12 @@ func (Adapter) SkillDirs(cwd string) []string {
 		gate.SkillTool.SkillDirs(cwd)...)
 }
 
-// LoadSkills tells Codex to read each SKILL.md, then make the call again. Codex has no Skill tool, so it names the file.
+// LoadSkills and LoadAtStart use the sentence every harness shares; Codex has no Skill tool, so it reads the file named.
 func (Adapter) LoadSkills(skills []gate.Skill, noun string) string {
-	return fmt.Sprintf("Read %s, then %s again.", readList(skills), gate.Retry(noun))
+	return gate.LoadOrRead(skills, noun)
 }
 
-func (Adapter) LoadAtStart(s gate.Skill) string {
-	return fmt.Sprintf("Read %s in full on its own and follow it before you start work.", readList([]gate.Skill{s}))
-}
-
-func readList(skills []gate.Skill) string {
-	files := make([]string, len(skills))
-	for i, s := range skills {
-		files[i] = s.File
-		if s.File == "" {
-			files[i] = fmt.Sprintf("the %s skill's SKILL.md (in .agents/skills)", s.Name)
-		}
-	}
-	if len(files) == 1 {
-		return files[0]
-	}
-	return strings.Join(files[:len(files)-1], ", ") + " and " + files[len(files)-1]
-}
+func (Adapter) LoadAtStart(s gate.Skill) string { return gate.LoadOrReadAtStart(s) }
 
 // Home is Codex's config dir: $CODEX_HOME, else ~/.codex.
 func Home() string {

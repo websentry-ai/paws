@@ -50,7 +50,8 @@ func TestCodexRequireSkillRound(t *testing.T) {
 	}
 	runGate(t, codexCall("UserPromptSubmit", "t1", nil))
 	r := reasonOf(t, runGate(t, codexCall("PreToolUse", "t1", bash("c1", "git push"))))
-	want := `paws (rule push): this needs the "git" skill. Read ` + md + `, then run the command again.`
+	// No closing period: Codex adds its own when it shows the deny.
+	want := `paws (rule push): this needs the "git" skill. Load or read it (` + md + `), then run the command again`
 	if r != want {
 		t.Fatalf("deny:\n got %q\nwant %q", r, want)
 	}
@@ -97,7 +98,7 @@ func TestCodexPatchMatchesFileRules(t *testing.T) {
 		}
 		return map[string]any{"tool_name": "apply_patch", "tool_use_id": "p1", "tool_input": map[string]any{"command": body + "*** End Patch"}}
 	}
-	if r := reasonOf(t, runGate(t, codexCall("PreToolUse", "t1", patch("src/a.go", "migrations/0001.sql")))); !strings.Contains(r, "this needs the \"db\" skill") || !strings.HasSuffix(r, "then make the edit again.") {
+	if r := reasonOf(t, runGate(t, codexCall("PreToolUse", "t1", patch("src/a.go", "migrations/0001.sql")))); !strings.Contains(r, "this needs the \"db\" skill") || !strings.HasSuffix(r, "then make the edit again") {
 		t.Errorf("a patch touching a migration is gated once: %q", r)
 	}
 	if out := runGate(t, codexCall("PreToolUse", "t1", patch("src/a.go"))); out != "{}" {

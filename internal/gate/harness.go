@@ -90,11 +90,34 @@ func (skillTool) SkillDirs(cwd string) []string {
 	return []string{pack.UserTarget(UserDir()).SkillsDir, pack.ProjectTarget(repoRoot(cwd)).SkillsDir}
 }
 
-func (skillTool) LoadSkills(skills []Skill, noun string) string { return SkillToolInstruction(skills, noun) }
+func (skillTool) LoadSkills(skills []Skill, noun string) string { return LoadOrRead(skills, noun) }
 
-// SkillToolInstruction is how Claude Code loads skills and retries a call: "Load it, then run the command again."
-func SkillToolInstruction(skills []Skill, noun string) string {
-	return fmt.Sprintf("Load %s, then %s again.", ItOrThem(skills), Retry(noun))
+// LoadOrRead is every harness's instruction to load skills and retry a call: "Load or read it (<file>), then run the
+// command again." Claude Code loads a skill with its Skill tool or by reading its SKILL.md; Codex, which has no Skill
+// tool, reads it. One sentence serves both, and names the file for a skill the Skill tool can't find.
+func LoadOrRead(skills []Skill, noun string) string {
+	return fmt.Sprintf("Load or read %s (%s), then %s again.", ItOrThem(skills), skillFiles(skills), Retry(noun))
+}
+
+// LoadOrReadAtStart ends the session-start context of a rule that needs s: "Load or read it (<file>) before you start
+// work."
+func LoadOrReadAtStart(s Skill) string {
+	return fmt.Sprintf("Load or read it (%s) before you start work.", skillFiles([]Skill{s}))
+}
+
+// skillFiles lists each skill's SKILL.md: "a, b and c". A skill paws found nowhere is "the <name> skill's SKILL.md".
+func skillFiles(skills []Skill) string {
+	files := make([]string, len(skills))
+	for i, s := range skills {
+		files[i] = s.File
+		if s.File == "" {
+			files[i] = fmt.Sprintf("the %s skill's SKILL.md", s.Name)
+		}
+	}
+	if len(files) == 1 {
+		return files[0]
+	}
+	return strings.Join(files[:len(files)-1], ", ") + " and " + files[len(files)-1]
 }
 
 // ItOrThem is "it" for one skill and "them" for several.
@@ -113,9 +136,7 @@ func Retry(noun string) string {
 	return "make the " + noun
 }
 
-func (skillTool) LoadAtStart(Skill) string {
-	return "Load it with the Skill tool before you start work."
-}
+func (skillTool) LoadAtStart(s Skill) string { return LoadOrReadAtStart(s) }
 
 // session is the Session the event's harness supplied, else Claude Code's transcript (events built without an
 // adapter: tests, a hand-made event).
@@ -134,7 +155,9 @@ func (ev Event) harness() Harness {
 }
 
 // skillFile is skill's SKILL.md in the event's harness's skill folders, or "".
-func (ev Event) skillFile(skill string) string { return SkillFileIn(ev.harness().SkillDirs(ev.Cwd), skill) }
+func (ev Event) skillFile(skill string) string {
+	return SkillFileIn(ev.harness().SkillDirs(ev.Cwd), skill)
+}
 
 // SkillFileIn is skill's SKILL.md in the first of dirs that has one, as the harness resolves the name; "" if none.
 func SkillFileIn(dirs []string, skill string) string {

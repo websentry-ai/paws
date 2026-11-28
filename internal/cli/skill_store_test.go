@@ -111,7 +111,7 @@ func TestCodexOnlyAddWritesNothingForClaude(t *testing.T) {
 	}
 	md := filepath.Join(home, ".agents", "skills", "humanizer", "SKILL.md")
 	runGate(t, codexCall("UserPromptSubmit", "t1", nil))
-	if r := codexDeny(t, "c1", prCreate); !strings.Contains(r, "Read "+md+", then run the command again.") {
+	if r := codexDeny(t, "c1", prCreate); !strings.Contains(r, "Load or read it ("+md+"), then run the command again") {
 		t.Errorf("deny %q, want it to name %s", r, md)
 	}
 	if out := mustRun(t, Remove, "writing"); !strings.Contains(out, "humanizer    removed") || isThere(md) {
@@ -251,7 +251,7 @@ func TestAddKeepsTheUsersOwnSkill(t *testing.T) {
 				}
 			} else {
 				runGate(t, codexCall("UserPromptSubmit", "t1", nil))
-				if r := codexDeny(t, "c1", prCreate); !strings.Contains(r, "Read "+md+",") {
+				if r := codexDeny(t, "c1", prCreate); !strings.Contains(r, "("+md+")") {
 					t.Errorf("deny %q, want the user's %s", r, md)
 				}
 				codexReads(t, "c2", md)
@@ -283,7 +283,7 @@ func TestUsersSkillInTheOtherAgentsFolder(t *testing.T) {
 		t.Errorf("the user's copy was overwritten: %q", data)
 	}
 	runGate(t, codexCall("UserPromptSubmit", "t1", nil))
-	if r := codexDeny(t, "c1", prCreate); !strings.Contains(r, "Read "+mine+",") {
+	if r := codexDeny(t, "c1", prCreate); !strings.Contains(r, "("+mine+")") {
 		t.Errorf("deny %q, want the user's %s (a file that exists)", r, mine)
 	}
 	mustRun(t, Remove, "writing")
@@ -301,7 +301,7 @@ func TestUsersSkillInCodexHome(t *testing.T) {
 	mustRun(t, Add, "writing")
 	installed := filepath.Join(home, ".agents", "skills", "humanizer", "SKILL.md")
 	runGate(t, codexCall("UserPromptSubmit", "t1", nil))
-	if r := codexDeny(t, "c1", prCreate); !strings.Contains(r, "Read "+installed+",") {
+	if r := codexDeny(t, "c1", prCreate); !strings.Contains(r, "("+installed+")") {
 		t.Errorf("deny %q, want %s", r, installed)
 	}
 	if data, _ := os.ReadFile(mine); string(data) != "my own humanizer\n" {
@@ -488,7 +488,7 @@ func TestClaudeElsewhereReadsTheCodexCopy(t *testing.T) {
 		t.Fatal("Claude Code isn't set up here: the global add installs for Codex only")
 	}
 	t.Chdir(other)
-	if r := claudeDeny(t, prCreate, ""); r != `paws (rule humanizer-pr): this needs the "humanizer" skill. Read `+md+`, then run the command again.` {
+	if r := claudeDeny(t, prCreate, ""); r != `paws (rule humanizer-pr): this needs the "humanizer" skill. Load or read it (`+md+`), then run the command again.` {
 		t.Errorf("deny %q, want it to name %s", r, md)
 	}
 	if r := claudeDeny(t, prCreate, claudeRead(t, md)); r != "" {
@@ -504,15 +504,15 @@ func TestClaudeAfterCodexReadsTheUsersCopy(t *testing.T) {
 	mine := ownSkill(t, filepath.Join(home, ".agents", "skills"), "humanizer", "my own humanizer\n")
 	mustRun(t, Add, "writing")
 	mustRun(t, Init, "--global")
-	if r := claudeDeny(t, prCreate, ""); !strings.Contains(r, "Read "+mine+", then run the command again.") {
+	if r := claudeDeny(t, prCreate, ""); !strings.Contains(r, "Load or read it ("+mine+"), then run the command again.") {
 		t.Errorf("deny %q, want it to name %s", r, mine)
 	}
 	if r := claudeDeny(t, prCreate, claudeRead(t, mine)); r != "" {
 		t.Errorf("reading the user's copy lets the call through, got %q", r)
 	}
-	// With a copy in Claude Code's own folder, the deny is the short Skill tool sentence again.
-	ownSkill(t, filepath.Join(home, ".claude", "skills"), "humanizer", "mine for Claude\n")
-	if r := claudeDeny(t, prCreate, ""); !strings.HasSuffix(r, "Load it, then run the command again.") {
+	// With a copy in Claude Code's own folder, the deny names that one: the Skill tool loads it.
+	claudes := ownSkill(t, filepath.Join(home, ".claude", "skills"), "humanizer", "mine for Claude\n")
+	if r := claudeDeny(t, prCreate, ""); !strings.HasSuffix(r, "Load or read it ("+claudes+"), then run the command again.") {
 		t.Errorf("deny %q", r)
 	}
 }

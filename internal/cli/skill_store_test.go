@@ -497,8 +497,9 @@ func TestSyncLeavesOutASkillTheUserHas(t *testing.T) {
 	if len(portalFiles(t, home)) != 0 || deny(t, prCreate) != "" {
 		t.Error("no rule may be written for a skill paws didn't sync")
 	}
-	if st := loadPortalState(); st.AppliedHash != "" {
-		t.Errorf("applied hash %q recorded; the skill must be tried again", st.AppliedHash)
+	// Applied as the user has it, so the portal sees this laptop synced; the clash itself is re-checked each round.
+	if st := loadPortalState(); st.AppliedHash != "h1" || len(st.Clashed) != 1 {
+		t.Errorf("state %+v", st)
 	}
 	if n := sessionNotice(t); n != "paws: "+note {
 		t.Errorf("session start notice %q", n)
@@ -571,9 +572,9 @@ func TestSyncFindsAClashThatReplacedPawsCopy(t *testing.T) {
 	}
 }
 
-// Codex hooked in this repo only doesn't count for the portal's global skills: the user's own ~/.agents copy is no
-// clash, so the answer doesn't change with the folder the sync runs in.
-func TestPortalClashesCountGlobalHooksOnly(t *testing.T) {
+// Codex hooked in one repo only: a sync there counts it, and so does every later sync, wherever it runs, since the
+// portal's rules are global. The user's own ~/.agents copy is a clash in both places.
+func TestPortalClashesRememberAgentsHookedInARepo(t *testing.T) {
 	home, srv := syncEnv(t)
 	t.Setenv("CODEX_HOME", "")
 	userHome := os.Getenv("HOME")
@@ -585,8 +586,14 @@ func TestPortalClashesCountGlobalHooksOnly(t *testing.T) {
 	ownSkill(t, filepath.Join(userHome, ".agents", "skills"), "humanizer", "mine\n")
 	srv.configHash = "h1"
 	srv.config = configJSON(t, "h1", humanizerSkill(fakeUpstream(t, "# humanizer\n")))
-	if out := mustRun(t, Sync); strings.Contains(out, "you already have") || len(portalFiles(t, home)) != 1 {
-		t.Errorf("sync output:\n%s", out)
+	if out := mustRun(t, Sync); !strings.Contains(out, `skipped humanizer: you already have a skill named "humanizer" (~/.agents/skills/humanizer)`) || len(portalFiles(t, home)) != 0 {
+		t.Errorf("sync in the repo:\n%s", out)
+	}
+	t.Chdir(userHome)
+	srv.configHash = "h2"
+	srv.config = configJSON(t, "h2", humanizerSkill(fakeUpstream(t, "# humanizer\n")))
+	if out := mustRun(t, Sync); !strings.Contains(out, "skipped humanizer") || len(portalFiles(t, home)) != 0 {
+		t.Errorf("sync elsewhere:\n%s", out)
 	}
 }
 

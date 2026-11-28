@@ -120,21 +120,19 @@ func target(project bool) pack.Target {
 		// Portal sync installs into the same user folders: a skill the portal turns on outlives a pack's removal.
 		t.InUse = func(skill string) bool { return slices.Contains(loadPortalState().Skills, skill) }
 	}
-	loaded := loadedSkillDirs(!project, root)
+	loaded := loadedSkillDirs(!project, root, nil)
 	t.Taken = func(skill string) []string { return pack.OwnCopies(loaded, skill) }
 	return t
 }
 
-// loadedSkillDirs are the skills folders the agents that run paws load skills from: for a global install, the user
-// folders of the agents hooked globally; for a project (global false), the user and project folders of the agents
-// hooked here, since an agent loads both. With no agent hooked, Claude Code's.
-// A skill of the user's own in one of them clashes with paws's copy: the agent would load one or the other.
-func loadedSkillDirs(global bool, root string) []string {
+// loadedSkillDirs are the skills folders the agents that run paws load skills from: their user folders, plus, for a
+// project (global false), the project's at root, since an agent loads both. An agent counts when its hook is here
+// (global, or root's) or it is named in also; with none, Claude Code. A skill of the user's own in one of these
+// clashes with paws's copy: the agent would load one or the other.
+func loadedSkillDirs(global bool, root string, also []string) []string {
 	var hooked []harness.Adapter
 	for _, a := range installOrder() {
-		// A global install (the portal's, an add without --project) counts the agents that run paws everywhere: one
-		// hooked in this repo only would make the answer depend on where the command ran.
-		if !global && hookedIn(a) || global && hasPawsHook(a.HookFile(true, root)) {
+		if hookedIn(a) || slices.Contains(also, a.Name()) {
 			hooked = append(hooked, a)
 		}
 	}
@@ -144,6 +142,9 @@ func loadedSkillDirs(global bool, root string) []string {
 	// An adapter's SkillDirs also list the other agents' folders, whose skills its agent can read when a deny names
 	// the file but doesn't load; and the project's folders, which a global install doesn't touch.
 	notOwn := func(a harness.Adapter, d string) bool {
+		if filepath.Clean(d) == filepath.Clean(a.SkillsDirFor(a.HookFile(true, root))) {
+			return false // its user folder, even where root is the home folder and the project's is the same path
+		}
 		for _, b := range adapters {
 			for _, g := range []bool{false, true} {
 				if s := b.SkillsDirFor(b.HookFile(g, root)); s != "" && filepath.Clean(s) == filepath.Clean(d) &&
@@ -163,6 +164,17 @@ func loadedSkillDirs(global bool, root string) []string {
 		}
 	}
 	return dirs
+}
+
+// hookedNames are the names of the agents whose paws hook is here: global, or cwd's project.
+func hookedNames() []string {
+	var names []string
+	for _, a := range installOrder() {
+		if hookedIn(a) {
+			names = append(names, a.Name())
+		}
+	}
+	return names
 }
 
 // clashNote tells the user paws left a skill out because they have their own by that name: "you already have a

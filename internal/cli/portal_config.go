@@ -10,6 +10,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"slices"
 	"sort"
 	"strconv"
 	"strings"
@@ -45,6 +46,10 @@ type portalState struct {
 	// Installed are the applied skills whose files paws installs (catalog skills): a copy of the user's appearing by
 	// one's name, beside paws's or in its place, re-applies the config, which leaves the skill out.
 	Installed []string `json:"installed,omitempty"`
+	// Agents are the agents seen running paws (globally, or in the repo a sync ran in) when a config was applied. The
+	// portal's skills are global, so a user's own copy where any of them loads skills is a clash, wherever the next
+	// sync runs; an agent hooked in one repo only counts from then on.
+	Agents []string `json:"agents,omitempty"`
 	// ClashChecked is set once a config was applied by a paws that leaves out clashing skills. A state file without
 	// it re-applies once, so rules an older paws kept on for a user's own copy go.
 	ClashChecked bool `json:"clash_checked,omitempty"`
@@ -240,7 +245,12 @@ func pullConfig(creds *credentials, st *portalState, known, cwd string) (*applyR
 		return nil, err
 	}
 	useSkillFiles(creds.API) // the backend that sent the config holds its skills' files
-	res, err := applyConfig(cfg, cwd)
+	for _, n := range hookedNames() {
+		if !slices.Contains(st.Agents, n) {
+			st.Agents = append(st.Agents, n)
+		}
+	}
+	res, err := applyConfig(cfg, cwd, st.Agents)
 	st.Skills = res.Applied
 	st.Clashes, st.Clashed, st.Installed, st.ClashChecked = res.Clashes, res.Clashed, res.Catalog, true
 	if err == nil && !res.Pending {
@@ -260,7 +270,7 @@ func portalDrifted(st *portalState, cwd string) bool {
 	}
 	skillsDir := pack.UserTarget(gate.UserDir()).SkillsDir
 	projectSkills := pack.ProjectTarget(projectRoot(cwd)).SkillsDir
-	loaded := loadedSkillDirs(true, projectRoot(cwd))
+	loaded := loadedSkillDirs(true, projectRoot(cwd), st.Agents)
 	if !st.ClashChecked && len(st.Skills) > 0 {
 		return true // applied by an older paws, which kept a skill's rules on for a user's own copy of it
 	}
@@ -308,7 +318,7 @@ func portalGet(creds *credentials, path string, v any) error {
 // and action, plus a digest per load=rule skill. Skills install first, and a full skill's rules
 // are written only once its SKILL.md is in place (user skills, or cwd's project), so a rule is
 // never live before the skill it requires can load.
-func applyConfig(cfg portalConfig, cwd string) (applyResult, error) {
+func applyConfig(cfg portalConfig, cwd string, agents []string) (applyResult, error) {
 	res := applyResult{Hash: cfg.ConfigHash}
 	dir := portalDir()
 	if dir == "" {
@@ -317,7 +327,7 @@ func applyConfig(cfg portalConfig, cwd string) (applyResult, error) {
 	stores := skillStores(true, "")
 	skillsDir := stores[0]
 	projectSkills := pack.ProjectTarget(projectRoot(cwd)).SkillsDir
-	loaded := loadedSkillDirs(true, projectRoot(cwd))
+	loaded := loadedSkillDirs(true, projectRoot(cwd), agents)
 	want := map[string][]byte{} // path under dir -> content
 	var errs []error
 	for _, s := range cfg.Skills {
@@ -329,7 +339,7 @@ func applyConfig(cfg portalConfig, cwd string) (applyResult, error) {
 			note := clashNote(s.Name, own, "sync it", "sync again")
 			res.Skipped = append(res.Skipped, s.Name+": "+note)
 			res.Clashes, res.Clashed = append(res.Clashes, note), append(res.Clashed, s.Name)
-			res.Pending = true // checked again each round: once the user's copy is gone, it syncs
+			// Not pending: the config is applied as the user has it. portalDrifted re-applies once their copy is gone.
 			continue
 		}
 		files, skip, err := skillFiles(s, stores, dir, &res.Kept)

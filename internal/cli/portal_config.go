@@ -36,6 +36,11 @@ type portalState struct {
 	Revoked     bool      `json:"revoked,omitempty"` // the portal answered 401; login was forgotten
 	// AccountDeleted: the portal said the account was deleted (403 account_deleted); Revoked is set too.
 	AccountDeleted bool `json:"account_deleted,omitempty"`
+	// Clashes are the last applied config's notes on skills the user already has their own of: paws synced neither the
+	// skill nor its rules. A session start shows them.
+	Clashes []string `json:"clashes,omitempty"`
+	// Installed are the applied skills whose files paws installed (catalog skills), so a later clash re-applies.
+	Installed []string `json:"installed,omitempty"`
 }
 
 // portalConfig is GET /config: the account's skills that are on.
@@ -96,7 +101,9 @@ type applyResult struct {
 	Hash    string
 	Applied []string // skills whose rule files are in place
 	Skipped []string // "<skill>: <reason>"
-	Kept    []string // a catalog skill's folders that were already there and paws may not replace; left as they are
+	Kept    []string // a catalog skill's folders paws installed and the user edited since; left as they are
+	Clashes []string // notes on catalog skills the user already has their own of, also in Skipped
+	Catalog []string // the applied skills whose files paws installed
 	Pending bool     // a skill was left out; keep checking instead of recording the hash
 }
 
@@ -227,6 +234,7 @@ func pullConfig(creds *credentials, st *portalState, known, cwd string) (*applyR
 	useSkillFiles(creds.API) // the backend that sent the config holds its skills' files
 	res, err := applyConfig(cfg, cwd)
 	st.Skills = res.Applied
+	st.Clashes, st.Installed = res.Clashes, res.Catalog
 	if err == nil && !res.Pending {
 		st.AppliedHash = cfg.ConfigHash
 	}
@@ -244,6 +252,12 @@ func portalDrifted(st *portalState, cwd string) bool {
 	}
 	skillsDir := pack.UserTarget(gate.UserDir()).SkillsDir
 	projectSkills := pack.ProjectTarget(projectRoot(cwd)).SkillsDir
+	loaded := loadedSkillDirs(true, projectRoot(cwd))
+	for _, name := range st.Installed {
+		if len(pack.OwnCopies(loaded, name)) > 0 {
+			return true // the user put a skill of their own by that name where an agent loads it (or set up another agent)
+		}
+	}
 	for _, name := range st.Skills {
 		if rules, _ := filepath.Glob(filepath.Join(dir, name+"--*.md")); len(rules) == 0 {
 			return true
@@ -287,10 +301,19 @@ func applyConfig(cfg portalConfig, cwd string) (applyResult, error) {
 	stores := skillStores(true, "")
 	skillsDir := stores[0]
 	projectSkills := pack.ProjectTarget(projectRoot(cwd)).SkillsDir
+	loaded := loadedSkillDirs(true, projectRoot(cwd))
 	want := map[string][]byte{} // path under dir -> content
 	var errs []error
 	for _, s := range cfg.Skills {
 		if s.Status == "off" {
+			continue
+		}
+		if own := pack.OwnCopies(loaded, s.Name); pawsInstalls(s) && len(own) > 0 {
+			// paws would install its copy beside the user's, and its rules would gate on whichever the agent loads.
+			note := clashNote(s.Name, own, "sync it", "sync again")
+			res.Skipped = append(res.Skipped, s.Name+": "+note)
+			res.Clashes = append(res.Clashes, note)
+			res.Pending = true // checked again each round: once the user's copy is gone, it syncs
 			continue
 		}
 		files, skip, err := skillFiles(s, stores, dir, &res.Kept)
@@ -313,6 +336,9 @@ func applyConfig(cfg portalConfig, cwd string) (applyResult, error) {
 			want[p] = data
 		}
 		res.Applied = append(res.Applied, s.Name)
+		if pawsInstalls(s) {
+			res.Catalog = append(res.Catalog, s.Name)
+		}
 	}
 	sort.Strings(res.Applied)
 	if err := writeManaged(dir, want); err != nil {
@@ -433,6 +459,12 @@ func actionFiles(s portalSkill, digest, dir string) (map[string][]byte, []string
 
 // badPin: the config names an upstream skill without a github.com repo, a commit ref and a content hash.
 const badPin = "bad-pin"
+
+// pawsInstalls reports whether paws installs s's files (a catalog skill, pinned by hash): a custom skill is the user's
+// own to provide, and a load=rule skill installs nothing.
+func pawsInstalls(s portalSkill) bool {
+	return s.Load != "rule" && (s.ContentHash != "" || s.Upstream != nil && s.Upstream.Repo != "")
+}
 
 // installPortalSkill installs a catalog skill from the paws backend: the files the config's content hash names,
 // checked against it. An upstream skill must name a github.com repo at a commit, where the backend got the files; a

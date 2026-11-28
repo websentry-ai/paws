@@ -62,6 +62,8 @@ func writeTestCatalog(t *testing.T) string {
 	writeFile(t, filepath.Join(dir, "catalog/source-control/skills/git/SKILL.md"), "---\nname: git\ndescription: Git habits.\n---\nShow output.\n")
 	writeFile(t, filepath.Join(dir, "packs/writing.yaml"), "name: writing\ndescription: Prose that reads like a person wrote it.\n"+
 		"bindings: [writing/humanizer-pr.md, writing/humanizer-commit.md]\n")
+	writeFile(t, filepath.Join(dir, "packs/craft.yaml"), "name: craft\ndescription: Two skills in one pack.\n"+
+		"bindings: [writing/humanizer-pr.md, testing/tdd.md]\n")
 	writeFile(t, filepath.Join(dir, "trigger_cases.json"), `{
   "humanizer-pr": {"fires": [["Bash", "gh pr create --fill"]], "ignores": [["Bash", "gh pr view"]]},
   "humanizer-commit": {"fires": [["Bash", "git commit -m x"]], "ignores": [["Bash", "echo \"git commit\""]]},

@@ -30,6 +30,9 @@ type Target struct {
 	Elsewhere []string
 	// InUse, when set, names skills something besides the packs still needs (the portal's): removing a pack keeps them.
 	InUse func(skill string) bool
+	// Taken, when set, lists the user's own folders (no paws marker) of skill in the skills folders the agents that
+	// run paws load. paws installs no skill that clashes with one, and no rule that needs it.
+	Taken func(skill string) []string
 }
 
 // UserTarget installs for one user: bindings under the paws user dir (loaded in every repo),
@@ -57,6 +60,13 @@ func ProjectTarget(root string) Target {
 }
 
 func (t Target) inUse(skill string) bool { return t.InUse != nil && t.InUse(skill) }
+
+func (t Target) taken(skill string) []string {
+	if t.Taken == nil {
+		return nil
+	}
+	return t.Taken(skill)
+}
 
 // Installed is one pack's record in the state file.
 type Installed struct {
@@ -182,9 +192,19 @@ type Result struct {
 	Pack      string
 	Bindings  []string
 	Installed []string // skills paws installed or updated
-	// Kept are the skill folders, in SkillsDir or a mirror, that were already there and paws may not replace (the
-	// user's own, or a paws copy edited since); left as they are.
+	// Kept are the paws copies, in SkillsDir or a mirror, that the user edited since paws installed them; left as they
+	// are, and their rules still apply.
 	Kept []string
+	// Clashes are the skills the user already has a copy of their own of (Target.Taken): paws installed neither the
+	// skill nor the bindings that need it.
+	Clashes []Clash
+}
+
+// Clash is a skill paws left out because the user has their own by that name in Dirs; Bindings needed it.
+type Clash struct {
+	Skill    string
+	Dirs     []string
+	Bindings []string
 }
 
 // Add installs bindings as pack name into t. Re-adding a pack replaces it (an upgrade).
@@ -210,10 +230,23 @@ func Add(c *catalog.Catalog, name string, bindings []string, picks map[string]st
 
 	// Skills first: a binding must never be live before the skill it requires can load.
 	done := map[string]bool{}
-	var need []string // every skill the bindings require, kept ones too: Remove takes paws's copies of each
+	clash := map[string]int{} // skill -> index in res.Clashes
+	var need []string         // every skill the bindings require, kept ones too: Remove takes paws's copies of each
 	for _, rel := range bindings {
 		b := c.Bindings[rel]
-		if b.Action.Type != "require-skill" || done[b.Action.Skill] {
+		if b.Action.Type != "require-skill" {
+			continue
+		}
+		if i, ok := clash[b.Action.Skill]; ok {
+			res.Clashes[i].Bindings = append(res.Clashes[i].Bindings, rel)
+			continue
+		}
+		if done[b.Action.Skill] {
+			continue
+		}
+		if own := t.taken(b.Action.Skill); len(own) > 0 {
+			clash[b.Action.Skill] = len(res.Clashes)
+			res.Clashes = append(res.Clashes, Clash{Skill: b.Action.Skill, Dirs: own, Bindings: []string{rel}})
 			continue
 		}
 		done[b.Action.Skill] = true
@@ -244,11 +277,24 @@ func Add(c *catalog.Catalog, name string, bindings []string, picks map[string]st
 		}
 		need = append(need, b.Action.Skill)
 	}
+	if len(res.Clashes) > 0 {
+		var live []string // the bindings whose skill paws could put in place
+		for _, rel := range bindings {
+			if b := c.Bindings[rel]; b.Action.Type != "require-skill" || done[b.Action.Skill] {
+				live = append(live, rel)
+			}
+		}
+		bindings = live
+		res.Bindings = live
+	}
 
 	dest := InstallDir(t, name)
 	stage := filepath.Join(filepath.Dir(dest), "."+filepath.Base(dest)+".new")
 	os.RemoveAll(stage)
 	defer os.RemoveAll(stage)
+	if err := os.MkdirAll(stage, 0o755); err != nil { // every binding may have clashed: an empty pack is still a pack
+		return nil, err
+	}
 	for _, rel := range bindings {
 		b := c.Bindings[rel]
 		files := []string{rel}

@@ -894,3 +894,28 @@ func TestSyncRetriesAClashItCouldNotApply(t *testing.T) {
 		t.Errorf("the retry left the rule:\n%s\n%v", out, portalFiles(t, home))
 	}
 }
+
+// The same failed apply on a state file an older paws wrote (no clash check yet): the retry still comes, and takes
+// the rule away.
+func TestSyncRetriesAFailedFirstClashCheck(t *testing.T) {
+	home, srv := syncEnv(t)
+	userHome := os.Getenv("HOME")
+	mustRun(t, Init, "--global")
+	srv.configHash = "h1"
+	srv.config = configJSON(t, "h1", humanizerSkill(fakeUpstream(t, "# humanizer\n")))
+	mustRun(t, Sync)
+	os.RemoveAll(filepath.Join(userHome, ".claude", "skills", "humanizer"))
+	ownSkill(t, filepath.Join(userHome, ".claude", "skills"), "humanizer", "mine\n")
+	st := loadPortalState()
+	st.Clashes, st.Clashed, st.ClashDirs, st.Installed, st.ClashChecked = nil, nil, nil, nil, false
+	savePortalState(st)
+	rule := filepath.Join(home, "portal", portalFiles(t, home)[0])
+	os.Remove(rule)
+	os.MkdirAll(filepath.Join(rule, "x"), 0o755)
+	captureStdout(t, func() int { return Sync(nil) })
+	os.RemoveAll(rule)
+	os.WriteFile(rule, []byte("left over\n"), 0o644)
+	if out := mustRun(t, Sync); !strings.Contains(out, "skipped humanizer") || len(portalFiles(t, home)) != 0 {
+		t.Errorf("the retry left the rule:\n%s\n%v", out, portalFiles(t, home))
+	}
+}

@@ -258,10 +258,10 @@ func pullConfig(creds *credentials, st *portalState, known, cwd string) (*applyR
 	}
 	useSkillFiles(creds.API) // the backend that sent the config holds its skills' files
 	res, err := applyConfig(cfg, cwd, st.Agents)
-	st.Skills = res.Applied
 	if err == nil {
-		// Only a clean apply records its clashes: after a failed one (say a rule file paws couldn't remove), the
-		// state stays as it was, so the next check sees the drift again and retries.
+		// Only a clean apply is recorded: after a failed one (say a rule file paws couldn't remove), the state stays as
+		// it was, an older paws's included, so the next check sees the same drift and retries.
+		st.Skills = res.Applied
 		st.Clashes, st.Clashed, st.ClashDirs, st.Installed, st.ClashChecked = res.Clashes, res.Clashed, res.ClashDirs, res.Catalog, true
 	}
 	if err == nil && !res.Pending {

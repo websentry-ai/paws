@@ -136,7 +136,7 @@ func TestCodexOnlyAddWritesNothingForClaude(t *testing.T) {
 	}
 	md := filepath.Join(home, ".agents", "skills", "humanizer", "SKILL.md")
 	runGate(t, codexCall("UserPromptSubmit", "t1", nil))
-	if r := codexDeny(t, "c1", prCreate); !strings.Contains(r, "Read "+md+", then run the command again.") {
+	if r := codexDeny(t, "c1", prCreate); !strings.Contains(r, "Load or read it ("+md+"), then run the command again") {
 		t.Errorf("deny %q, want it to name %s", r, md)
 	}
 	if out := mustRun(t, Remove, "writing"); !strings.Contains(out, "humanizer    removed") || isThere(md) {
@@ -692,7 +692,7 @@ func TestClaudeElsewhereReadsTheCodexCopy(t *testing.T) {
 		t.Fatal("Claude Code isn't set up here: the global add installs for Codex only")
 	}
 	t.Chdir(other)
-	if r := claudeDeny(t, prCreate, ""); r != `paws (rule humanizer-pr): this needs the "humanizer" skill. Read `+md+`, then run the command again.` {
+	if r := claudeDeny(t, prCreate, ""); r != `paws (rule humanizer-pr): this needs the "humanizer" skill. Load or read it (`+md+`), then run the command again.` {
 		t.Errorf("deny %q, want it to name %s", r, md)
 	}
 	if r := claudeDeny(t, prCreate, claudeRead(t, md)); r != "" {
